@@ -1,0 +1,12 @@
+ipykernel
+streamlit
+streamlit_extras
+langgraph
+langchain_community
+pandas
+stqdm
+neo4j
+networkx
+plotly
+pyvis
+ollama

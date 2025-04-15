@@ -1,0 +1,68 @@
+volumes:
+  shared-workspace:
+    name: "distributed-file-system"
+    driver: local
+    driver_opts:
+      o: bind
+      type: none
+      device: ./
+  kafka_data:
+  postgres_data:
+  airflow_logs:
+
+services:
+  zookeeper:
+    image: docker.io/bitnami/zookeeper:3.8.2
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    volumes:
+      - shared-workspace:/opt/workspace
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+    networks:
+      - my_network
+
+  kafka-producer:  # Your custom Kafka + producer container
+    build:
+      context: ./data_producer
+      dockerfile: Dockerfile.kafka
+    container_name: kafka-producer
+    ports:
+      - "9092:9092"
+    volumes:
+      - shared-workspace:/opt/workspace
+    environment:
+      - ALLOW_PLAINTEXT_LISTENER=yes
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092
+      - KAFKA_CFG_NODE_ID=1
+      - KAFKA_CFG_PROCESS_ROLES=controller,broker
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@kafka-producer:9093
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka-producer:9092
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+    depends_on:
+      - zookeeper
+    networks:
+      - my_network
+
+  # FastAPI Service
+  fastapi:
+    build:
+      context: ./fastapi_app
+      dockerfile: Dockerfile.fastapi
+    container_name: fastapi_app
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./fastapi_app:/app  # Bind mount for live code updates
+    depends_on:
+      - kafka-producer
+    networks:
+      - my_network
+
+networks:
+  my_network:
+    driver: bridge
