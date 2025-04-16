@@ -23,8 +23,10 @@ WORKDIR /app
 EXPOSE 8501
 
 # Run the Streamlit app
-CMD ["/bin/bash", "-c", "uv init && \
+CMD ["/bin/bash", "-c", "rm -rf .venv && \
+    uv init && \
     uv venv --python 3.12 && \
     source .venv/bin/activate && \
     uv add -r requirements.txt && \
+    rm -r pyproject.toml && \
     streamlit run app.py"]

@@ -63,6 +63,21 @@ services:
     networks:
       - my_network
 
+  # Streamlit Service
+  streamlit:
+    build:
+      context: ./streamlit_app
+      dockerfile: Dockerfile.streamlit
+    container_name: streamlit_app
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./streamlit_app:/app  # Bind mount for live code updates
+    depends_on:
+      - fastapi
+    networks:
+      - my_network
+
 networks:
   my_network:
     driver: bridge
