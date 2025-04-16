@@ -24,7 +24,6 @@ pg = st.navigation({
     "Applications": [
         pages["Transaction Fraud Detection"],
     ],
-
 })
 
 with open("style.css") as css:

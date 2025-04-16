@@ -15,18 +15,17 @@ RUN sh /uv-installer.sh && rm /uv-installer.sh
 # Ensure the installed binary is on the `PATH`
 ENV PATH="/root/.local/bin/:$PATH"
 
-COPY . /app
 # Set the working directory
 WORKDIR /app
+
+COPY . /app
+COPY entrypoint.sh /app/entrypoint.sh
+
+# Make entrypoint executable AFTER copying into the container
+RUN chmod +x /app/entrypoint.sh
 
 # Expose port 8000 for FastAPI
 EXPOSE 8000
 
 # Run the app
-CMD ["/bin/bash", "-c", "rm -rf .venv && \
-    uv init && \
-    uv venv --python 3.12 && \
-    source .venv/bin/activate && \
-    uv add -r requirements.txt && \
-    rm -r pyproject.toml && \
-    uvicorn app:app --host 0.0.0.0 --port 8000 --reload"]
+ENTRYPOINT ["/bin/bash", "/app/entrypoint.sh"]
