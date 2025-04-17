@@ -28,25 +28,64 @@ def load_or_create_model():
     else:
         # Create a new model pipeline
         model = compose.Pipeline(
-            #compose.Select("amount"),
+            compose.Select("amount", "account_age_days"),
             preprocessing.StandardScaler(),
             linear_model.LogisticRegression()
         )
         # Alternatively for anomaly detection:
         # model = anomaly.HalfSpaceTrees(seed=42)
         return model
+    
+def load_or_create_data():
+    """Load existing model or create a new one"""
+    if os.path.exists(DATA_PATH):
+        with open(DATA_PATH, 'rb') as f:
+            return pickle.load(f)
+    else:
+        data_df = pd.DataFrame(
+            columns = [
+                'transaction_id',
+                'user_id',
+                'timestamp',
+                'amount',
+                'currency',
+                'merchant_id',
+                'product_category',
+                'transaction_type',
+                'payment_method',
+                'location',
+                'ip_address',
+                'device_info', # Nested structure for device details
+                'user_agent',
+                'account_age_days',
+                'cvv_provided', # Boolean flag
+                'billing_address_match', # Boolean flag
+                'is_fraud'
+            ]
+        )
+        return data_df
+    
 
 def process_transaction(model, transaction, metric=None):
     """Process a single transaction and update the model"""
     # Prepare features and label
     x = {
-        #'transaction_id': transaction['transaction_id'],
-        #'user_id': transaction['user_id'],
-        #'timestamp': transaction['timestamp'],
-        'amount': transaction['amount'],
-        #'merchant_id': transaction['merchant_id'],
-        #'location': transaction['location'],
-        #'ip_address': transaction['ip_address'],
+        'transaction_id':        transaction['transaction_id'],
+        'user_id':               transaction['user_id'],
+        'timestamp':             transaction['timestamp'],
+        'amount':                transaction['amount'],
+        'currency':              transaction['currency'],
+        'merchant_id':           transaction['merchant_id'],
+        'product_category':      transaction['product_category'],
+        'transaction_type':      transaction['transaction_type'],
+        'payment_method':        transaction['payment_method'],
+        'location':              transaction['location'],
+        'ip_address':            transaction['ip_address'],
+        'device_info':           transaction['device_info'], # Nested structure for device details
+        'user_agent':            transaction['user_agent'],
+        'account_age_days':      transaction['account_age_days'],
+        'cvv_provided':          transaction['cvv_provided'], # Boolean flag
+        'billing_address_match': transaction['billing_address_match'], # Boolean flag
     }
     y = transaction['is_fraud']
     # Update the model
@@ -70,22 +109,11 @@ def create_consumer():
 def main():
     # Initialize model and metrics
     model = load_or_create_model()
+    data_df = load_or_create_data()
     metric = metrics.Accuracy()  # Or other relevant metric
     # Create consumer
     consumer = create_consumer()
     print("Consumer started. Waiting for transactions...")
-    data_df = pd.DataFrame(
-        columns = [
-            'transaction_id',
-            'user_id',
-            'timestamp',
-            'amount',
-            'merchant_id',
-            'location',
-            'ip_address',
-            'is_fraud'
-        ]
-    )
     try:
         for message in consumer:
             transaction = message.value
@@ -96,7 +124,7 @@ def main():
             # Process the transaction
             prediction = process_transaction(model, transaction, metric)
             # Periodically log progress
-            if message.offset % 1000 == 0:
+            if message.offset % 100 == 0:
                 print(f"Processed {message.offset} messages")
                 print(f"Current accuracy: {metric.get():.2%}")
                 print(f"Last prediction: {'Fraud' if prediction == 1 else 'Legit'}")
@@ -109,6 +137,8 @@ def main():
         print("Stopping consumer...")
     finally:
         # Save final model state
+        with open(MODEL_PATH, 'wb') as f:
+            pickle.dump(model, f)
         with open(MODEL_PATH, 'wb') as f:
             pickle.dump(model, f)
         consumer.close()
