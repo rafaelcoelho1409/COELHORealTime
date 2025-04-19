@@ -8,3 +8,4 @@ pandas
 mlflow
 kafka-python
 river
+mlflow

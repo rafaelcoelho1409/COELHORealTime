@@ -5,16 +5,17 @@ from river import (
     linear_model, 
     preprocessing, 
     metrics, 
+    anomaly
 )
+import datetime
 import pickle
 import os
 import pandas as pd
-import mlflow
 
 
 # Configuration
 KAFKA_TOPIC = 'transactions'
-KAFKA_BROKERS = 'kafka-producer:29092'  # Adjust as needed
+KAFKA_BROKERS = 'localhost:9092'  # Adjust as needed
 MODEL_PATH = 'river_model.pkl'
 DATA_PATH = 'river_data.pkl'
 
@@ -137,38 +138,40 @@ def create_consumer():
 
 def main():
     # Initialize model and metrics
-    mlflow.set_tracking_uri("http://mlflow:5000")
-    mlflow.set_experiment("Transaction Fraud Detection - River")
     model = load_or_create_model()
     data_df = load_or_create_data()
     metric = metrics.Accuracy()  # Or other relevant metric
     # Create consumer
     consumer = create_consumer()
     print("Consumer started. Waiting for transactions...")
-    with mlflow.start_run(run_name = "River_LogisticRegression"):
-        try:
-            for message in consumer:
-                transaction = message.value
-                # Create a new DataFrame from the received data
-                new_row = pd.DataFrame([transaction])
-                # Append the new row to the existing DataFrame
-                data_df = pd.concat([data_df, new_row], ignore_index = True)
-                # Process the transaction
-                prediction = process_transaction(model, transaction, metric)
-                # Periodically log progress
-                if message.offset % 100 == 0:
-                    print(f"Processed {message.offset} messages")
-                    print(f"Current accuracy: {metric.get():.2%}")
-                    mlflow.log_metric("Accuracy", metric.get())
-                    print(f"Last prediction: {'Fraud' if prediction == 1 else 'Legit'}")
-                    print(f"Metric: {metric}")
-                    data_df.to_pickle(DATA_PATH)
-        except:
-            print("Stopping consumer...")
-        finally:
-            data_df.to_pickle(DATA_PATH)
-            consumer.close()
-            print("Consumer closed.")
+    try:
+        for message in consumer:
+            transaction = message.value
+            # Create a new DataFrame from the received data
+            new_row = pd.DataFrame([transaction])
+            # Append the new row to the existing DataFrame
+            data_df = pd.concat([data_df, new_row], ignore_index = True)
+            # Process the transaction
+            prediction = process_transaction(model, transaction, metric)
+            # Periodically log progress
+            if message.offset % 100 == 0:
+                print(f"Processed {message.offset} messages")
+                print(f"Current accuracy: {metric.get():.2%}")
+                print(f"Last prediction: {'Fraud' if prediction == 1 else 'Legit'}")
+                print(f"Metric: {metric}")
+                ## Save model periodically
+                #with open(MODEL_PATH, 'wb') as f:
+                #    pickle.dump(model, f)
+                data_df.to_pickle(DATA_PATH)
+    except:
+        print("Stopping consumer...")
+    finally:
+        # Save final model state
+        #with open(MODEL_PATH, 'wb') as f:
+        #    pickle.dump(model, f)
+        data_df.to_pickle(DATA_PATH)
+        consumer.close()
+        print("Consumer closed.")
 
 if __name__ == "__main__":
     main()
