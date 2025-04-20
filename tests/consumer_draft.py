@@ -14,7 +14,7 @@ import mlflow
 
 # Configuration
 KAFKA_TOPIC = 'transactions'
-KAFKA_BROKERS = 'kafka-producer:29092'  # Adjust as needed
+KAFKA_BROKERS = 'localhost:9092'  # Adjust as needed
 MODEL_PATH = 'river_model.pkl'
 DATA_PATH = 'river_data.pkl'
 
@@ -137,24 +137,25 @@ def create_consumer():
 
 def main():
     # Initialize model and metrics
-    mlflow.set_tracking_uri("http://mlflow:5000")
-    mlflow.set_experiment("Transaction Fraud Detection - River")
+    #mlflow.set_tracking_uri("http://mlflow:5000")
+    #mlflow.set_experiment("Transaction Fraud Detection - River (Test)")
     model = load_or_create_model()
-    data_df = load_or_create_data()
-    metric = metrics.Accuracy()  # Or other relevant metric
+    #data_df = load_or_create_data()
+    #metric = metrics.Accuracy()  # Or other relevant metric
     # Create consumer
     consumer = create_consumer()
     print("Consumer started. Waiting for transactions...")
     binary_classification_metrics = [
         'Accuracy',
         #'BalancedAccuracy',
-        'Precision',          # Typically for the positive class (Fraud)
-        'Recall',             # Typically for the positive class (Fraud)
-        'F1',                 # Typically for the positive class (Fraud)
+        #'ConfusionMatrix',
+        #'Precision',          # Typically for the positive class (Fraud)
+        #'Recall',             # Typically for the positive class (Fraud)
+        #'F1',                 # Typically for the positive class (Fraud)
         #'FBeta',              # Typically for the positive class (Fraud), specify beta
         #'MCC',                # Matthews Correlation Coefficient
         #'GeometricMean',
-        'ROCAUC',             # Requires probabilities
+        #'ROCAUC',             # Requires probabilities
         #'RollingROCAUC',      # Requires probabilities
         #'LogLoss',            # Requires probabilities
         #'CrossEntropy',       # Same as LogLoss, requires probabilities
@@ -162,62 +163,59 @@ def main():
     binary_classification_metrics_dict = {
         x: getattr(metrics, x)() for x in binary_classification_metrics
     }
-    BATCH_SIZE_OFFSET = 100
-    print(f"Offset: {BATCH_SIZE_OFFSET}")
-    with mlflow.start_run(run_name = "River_LogisticRegression"):
-        #try:
-        for message in consumer:
-            transaction = message.value
-            # Create a new DataFrame from the received data
-            new_row = pd.DataFrame([transaction])
-            # Append the new row to the existing DataFrame
-            data_df = pd.concat([data_df, new_row], ignore_index = True)
-            # Process the transaction
-            #prediction = process_transaction(model, transaction, metric)
-            x = {
-                'transaction_id':        transaction['transaction_id'],
-                'user_id':               transaction['user_id'],
-                'timestamp':             transaction['timestamp'],
-                'amount':                transaction['amount'],
-                'currency':              transaction['currency'],
-                'merchant_id':           transaction['merchant_id'],
-                'product_category':      transaction['product_category'],
-                'transaction_type':      transaction['transaction_type'],
-                'payment_method':        transaction['payment_method'],
-                'location':              transaction['location'],
-                'ip_address':            transaction['ip_address'],
-                'device_info':           transaction['device_info'], # Nested structure for device details
-                'user_agent':            transaction['user_agent'],
-                'account_age_days':      transaction['account_age_days'],
-                'cvv_provided':          transaction['cvv_provided'], # Boolean flag
-                'billing_address_match': transaction['billing_address_match'], # Boolean flag
-            }
-            y = transaction['is_fraud']
-            # Update the model
-            prediction = model.predict_one(x)
-            model.learn_one(x, y)
-            # Update metrics if provided
-            #metric.update(y, prediction)
+    #with mlflow.start_run(run_name = "River_LogisticRegression"):
+    #try:
+    for message in consumer:
+        transaction = message.value
+        print(message.offset)
+        # Create a new DataFrame from the received data
+        #new_row = pd.DataFrame([transaction])
+        # Append the new row to the existing DataFrame
+        #data_df = pd.concat([data_df, new_row], ignore_index = True)
+        # Process the transaction
+        #prediction = process_transaction(model, transaction, metric)
+        x = {
+            'transaction_id':        transaction['transaction_id'],
+            'user_id':               transaction['user_id'],
+            'timestamp':             transaction['timestamp'],
+            'amount':                transaction['amount'],
+            'currency':              transaction['currency'],
+            'merchant_id':           transaction['merchant_id'],
+            'product_category':      transaction['product_category'],
+            'transaction_type':      transaction['transaction_type'],
+            'payment_method':        transaction['payment_method'],
+            'location':              transaction['location'],
+            'ip_address':            transaction['ip_address'],
+            'device_info':           transaction['device_info'], # Nested structure for device details
+            'user_agent':            transaction['user_agent'],
+            'account_age_days':      transaction['account_age_days'],
+            'cvv_provided':          transaction['cvv_provided'], # Boolean flag
+            'billing_address_match': transaction['billing_address_match'], # Boolean flag
+        }
+        y = transaction['is_fraud']
+        # Update the model
+        prediction = model.predict_one(x)
+        model.learn_one(x, y)
+        # Update metrics if provided
+        #metric.update(y, prediction)
+        for metric in binary_classification_metrics:
+            binary_classification_metrics_dict[metric].update(y, prediction)
+        # Periodically log progress
+        if message.offset % 100 == 0:
+            #print(f"Processed {message.offset} messages")
+            #print(f"Current accuracy: {metric.get():.2%}")
+            #mlflow.log_metric("Accuracy", metric.get())
             for metric in binary_classification_metrics:
-                binary_classification_metrics_dict[metric].update(y, prediction)
-            # Periodically log progress
-            if message.offset % BATCH_SIZE_OFFSET == 0:
-                print(f"Processed {message.offset} messages")
-                #print(f"Current accuracy: {metric.get():.2%}")
-                #mlflow.log_metric("Accuracy", metric.get())
-                for metric in binary_classification_metrics:
-                    binary_classification_metrics_dict[metric].update(y, prediction)
-                    #print(f"{metric}: {binary_classification_metrics_dict[metric].get():.2%}")
-                    mlflow.log_metric(metric, binary_classification_metrics_dict[metric].get())
-                #print(f"Last prediction: {'Fraud' if prediction == 1 else 'Legit'}")
-                #print(f"Metric: {metric}")
-                data_df.to_pickle(DATA_PATH)
-        #except:
-        #    print("Stopping consumer...")
-        #finally:
-        #    data_df.to_pickle(DATA_PATH)
-        #    consumer.close()
-        #    print("Consumer closed.")
+                print(f"{metric}: {binary_classification_metrics_dict[metric].get():.2%}")
+            print(f"Last prediction: {'Fraud' if prediction == 1 else 'Legit'}")
+            #print(f"Metric: {metric}")
+            #data_df.to_pickle(DATA_PATH)
+    #except:
+    #    print("Stopping consumer...")
+    #finally:
+    #    data_df.to_pickle(DATA_PATH)
+    #    consumer.close()
+    #    print("Consumer closed.")
 
 if __name__ == "__main__":
     main()

@@ -3,4 +3,4 @@ pandas
 river
 scikit-learn
 kafka-python
-skops
+mlflow
