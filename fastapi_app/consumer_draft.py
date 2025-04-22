@@ -312,7 +312,7 @@ def run_kafka_training():
                                     metric_value = metric_obj.get()
                                     if isinstance(metric_value, (int, float)):
                                         print(f"{metric_name}: {metric_value:.4f}")
-                                        mlflow.log_metric(metric_name, metric_value, step=message_count)
+                                        mlflow.log_metric(metric_name, metric_value, step = message_count)
                                     elif isinstance(metric_value, dict):
                                         print(f"{metric_name}: {metric_value}")
                                         mlflow.log_text(json.dumps(metric_value), f"{metric_name}_offset_{message_count}.json", step=message_count)
