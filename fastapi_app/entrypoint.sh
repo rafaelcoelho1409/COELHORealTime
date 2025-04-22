@@ -15,6 +15,7 @@ uv pip install -r requirements.txt
 #python3 producer.py
 #Only after everything ready, uncomment the following command
 #(python3 consumer.py) &
-(uvicorn app:app --host 0.0.0.0 --port 8000 --reload) &
+#(uvicorn app:app --host 0.0.0.0 --port 8000 --reload) &
+(uvicorn consumer_draft:app --host 0.0.0.0 --port 8000 --reload) &
 
 wait
