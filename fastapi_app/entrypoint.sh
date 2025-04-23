@@ -12,10 +12,9 @@ uv pip install -r requirements.txt
 #While in test stage, please run "docker compose exec fastapi /bin/bash"
 #After this, run in the shell:
 #source .venv/bin/activate
-#python3 producer.py
+#python3 consumer.py
 #Only after everything ready, uncomment the following command
-#(python3 consumer.py) &
-#(uvicorn app:app --host 0.0.0.0 --port 8000 --reload) &
-(uvicorn consumer_draft:app --host 0.0.0.0 --port 8000 --reload) &
+(python3 consumer.py) &
+(uvicorn app:app --host 0.0.0.0 --port 8000 --reload) &
 
 wait

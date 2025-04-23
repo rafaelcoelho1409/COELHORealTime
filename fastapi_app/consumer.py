@@ -22,7 +22,7 @@ import datetime as dt
 # Configuration
 KAFKA_TOPIC = 'transactions'
 KAFKA_BROKERS = 'kafka-producer:29092'  # Adjust as needed
-MODEL_PATH = 'river_model.pkl'
+MODEL_PATH = 'predictor.pkl'
 DATA_PATH = 'river_data.pkl'
 
 #Data processing functions
@@ -60,54 +60,57 @@ def load_or_create_model(model_type):
     )
     pipe3 |= preprocessing.OrdinalEncoder()
     pipe = pipe1 + pipe2 + pipe3
-    if model_type == "LogisticRegression":
-        predictor = linear_model.LogisticRegression(
-            loss = optim.losses.CrossEntropyLoss(
-                class_weight = {0: 1, 1: 10}),
-            optimizer = optim.SGD(0.01)
-        )
-    elif model_type == "ADWINBoostingClassifier":
-        base_estimator = tree.HoeffdingAdaptiveTreeClassifier(
-            splitter = tree.splitter.HistogramSplitter(),
-            drift_detector = drift.ADWIN(),
-            max_depth = 20,
-            nominal_attributes = [
-                "currency",
-                "merchant_id",
-                "payment_method",
-                "product_category",
-                "transaction_type",
-                "user_agent",
-                "device_info_os",
-                "device_info_browser"
-            ],
-            leaf_prediction = 'mc',#'nba',
-            grace_period = 200,
-            delta = 1e-7
-        )
-        boosting_classifier = ensemble.ADWINBoostingClassifier(
-            model = base_estimator,
-            n_models = 15,
-        )
-        predictor = imblearn.RandomOverSampler(
-            classifier = boosting_classifier,
-            desired_dist = {1: 0.5, 0: 0.5},
-            seed = 42
-        )
-    elif model_type == "AdaptiveRandomForestClassifier":
-        predictor = forest.ARFClassifier(
-            n_models = 10,                  # More models = better accuracy but higher latency
-            drift_detector = drift.ADWIN(),  # Auto-detects concept drift
-            warning_detector = drift.ADWIN(),
-            metric = metrics.ROCAUC(),       # Optimizes for imbalanced data
-            max_features = "sqrt",           # Better for high-dimensional data
-            lambda_value = 6,               # Controls tree depth (higher = more complex)
-            seed = 42
-        )
+    if os.path.exists(MODEL_PATH):
+        with open(MODEL_PATH, 'rb') as f:
+            predictor = pickle.load(f)
+            print("Model loaded from disk")
+    else:
+        print("Creating new model")
+        if model_type == "LogisticRegression":
+            predictor = linear_model.LogisticRegression(
+                loss = optim.losses.CrossEntropyLoss(
+                    class_weight = {0: 1, 1: 10}),
+                optimizer = optim.SGD(0.01)
+            )
+        elif model_type == "ADWINBoostingClassifier":
+            base_estimator = tree.HoeffdingAdaptiveTreeClassifier(
+                splitter = tree.splitter.HistogramSplitter(),
+                drift_detector = drift.ADWIN(),
+                max_depth = 20,
+                nominal_attributes = [
+                    "currency",
+                    "merchant_id",
+                    "payment_method",
+                    "product_category",
+                    "transaction_type",
+                    "user_agent",
+                    "device_info_os",
+                    "device_info_browser"
+                ],
+                leaf_prediction = 'mc',#'nba',
+                grace_period = 200,
+                delta = 1e-7
+            )
+            boosting_classifier = ensemble.ADWINBoostingClassifier(
+                model = base_estimator,
+                n_models = 15,
+            )
+            predictor = imblearn.RandomOverSampler(
+                classifier = boosting_classifier,
+                desired_dist = {1: 0.5, 0: 0.5},
+                seed = 42
+            )
+        elif model_type == "AdaptiveRandomForestClassifier":
+            predictor = forest.ARFClassifier(
+                n_models = 10,                  # More models = better accuracy but higher latency
+                drift_detector = drift.ADWIN(),  # Auto-detects concept drift
+                warning_detector = drift.ADWIN(),
+                metric = metrics.ROCAUC(),       # Optimizes for imbalanced data
+                max_features = "sqrt",           # Better for high-dimensional data
+                lambda_value = 6,               # Controls tree depth (higher = more complex)
+                seed = 42
+            )
     model = pipe | predictor
-    #Save the model to future use
-    with open(MODEL_PATH, 'wb') as f:
-        pickle.dump(model, f)
     return model
     
 def load_or_create_data():
@@ -247,12 +250,18 @@ def main():
             if message.offset % BATCH_SIZE_OFFSET == 0:
                 print(f"Processed {message.offset} messages")
                 for metric in binary_classification_metrics:
-                    binary_classification_metrics_dict[metric].update(y, prediction)
+                    try:
+                        binary_classification_metrics_dict[metric].update(y, prediction)
+                    except Exception as e:
+                        print(f"Error updating metric {metric}: {e}")
                     print(f"{metric}: {binary_classification_metrics_dict[metric].get():.2%}")
                     mlflow.log_metric(metric, binary_classification_metrics_dict[metric].get())
+                with open(MODEL_PATH, 'wb') as f:
+                    pickle.dump(model[-1], f)
                 #print(f"Last prediction: {'Fraud' if prediction == 1 else 'Legit'}")
                 data_df.to_pickle(DATA_PATH)
-        #except:
+        #except Exception as e:
+        #    print(f"Error processing message: {e}")
         #    print("Stopping consumer...")
         #finally:
         #    data_df.to_pickle(DATA_PATH)
