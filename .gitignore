@@ -6,3 +6,6 @@ __pycache__/
 *.pyc
 .python-version
 mlruns/
+model_versions/
+*.parquet
+*.log

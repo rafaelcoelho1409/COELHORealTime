@@ -12,18 +12,24 @@ from river import (
     drift,
     forest
 )
-import datetime
+import pandas as pd
 import pickle
 import os
-from fastapi import FastAPI
+from fastapi import (
+    FastAPI,
+    HTTPException
+)
 from pydantic import BaseModel
+from typing import Optional
 import requests
 
 # Configuration
 KAFKA_TOPIC = 'transactions'
 KAFKA_BROKERS = 'kafka-producer:29092'  # Adjust as needed
 MODEL_PATH = 'predictor.pkl'
-DATA_PATH = 'river_data.pkl'
+DATA_PATH = 'river_data.parquet'
+
+data = pd.read_parquet(DATA_PATH)
 
 ####---Functions----####
 #Data processing functions
@@ -59,6 +65,7 @@ def load_or_create_model(model_type):
         extract_device_info,
     )
     pipe3 |= preprocessing.OrdinalEncoder()
+    global pipe
     pipe = pipe1 + pipe2 + pipe3
     global LOAD_MODEL_MESSAGE
     if os.path.exists(MODEL_PATH):
@@ -116,6 +123,18 @@ def load_or_create_model(model_type):
     model = pipe | predictor
     return model
 
+def create_consumer():
+    """Create and return Kafka consumer"""
+    return KafkaConsumer(
+        KAFKA_TOPIC,
+        bootstrap_servers = KAFKA_BROKERS,
+        auto_offset_reset = 'earliest',
+        value_deserializer = lambda v: json.loads(v.decode('utf-8')),
+        group_id = 'river_trainer'
+    )
+
+consumer = create_consumer()
+
 ###---FastAPI App---###
 app = FastAPI()
 
@@ -155,3 +174,38 @@ async def predict_fraud(transaction: TransactionData):
     except Exception as e:
         print(f"Error during prediction for transaction {transaction.transaction_id}: {e}")
         return {"error": f"Prediction failed: {e}"}, 500
+    
+
+@app.get("/sample")
+async def get_sample():
+    sample = data.sample(1).to_dict(orient = 'records')[0]
+    return sample
+
+
+class UniqueValuesResponse(BaseModel):
+    column_name: str
+
+
+@app.post("/unique_values")
+async def get_unique_values(request: UniqueValuesResponse):
+    column = request.column_name
+    if column not in data.columns:
+        raise HTTPException(
+            status_code = 400, 
+            detail = f"Column '{column}' not found in dataset.")
+    unique_values = data[column].apply(str).unique().tolist()
+    return {"unique_values": unique_values}
+
+initial_transaction_data = TransactionData(
+    **data.sample(1).to_dict(orient = 'records')[0]
+)
+
+@app.get("/initial_transaction_data")
+async def get_initial_transaction_data():
+    return initial_transaction_data
+
+@app.put("/initial_transaction_data")
+async def update_initial_transaction_data(transaction: TransactionData):
+    global initial_transaction_data
+    initial_transaction_data = transaction
+    return initial_transaction_data

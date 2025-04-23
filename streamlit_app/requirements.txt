@@ -4,3 +4,4 @@ streamlit_extras
 pandas
 stqdm
 plotly
+Faker
