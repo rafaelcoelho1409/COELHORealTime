@@ -1,138 +1,18 @@
-import json
-from kafka import KafkaConsumer
-from river import (
-    compose, 
-    linear_model, 
-    preprocessing, 
-    metrics, 
-    optim,
-    tree,
-    ensemble,
-    imblearn,
-    drift,
-    forest
-)
-import pandas as pd
-import pickle
-import os
 from fastapi import (
     FastAPI,
     HTTPException
 )
 from pydantic import BaseModel
-from typing import Optional
-import requests
-
-# Configuration
-KAFKA_TOPIC = 'transactions'
-KAFKA_BROKERS = 'kafka-producer:29092'  # Adjust as needed
-MODEL_PATH = 'predictor.pkl'
-DATA_PATH = 'river_data.parquet'
+import pandas as pd
+from functions import (
+    process_sample,
+    load_or_create_model,
+    create_consumer,
+    create_ordinal_encoders,
+    DATA_PATH
+)
 
 data = pd.read_parquet(DATA_PATH)
-
-####---Functions----####
-#Data processing functions
-def extract_device_info(x):
-    x_ = x['device_info']
-    return {
-        'os': x_['os'],
-        'browser': x_['browser'],
-    }
-
-def load_or_create_model(model_type):
-    """Load existing model or create a new one"""
-    # Create a new model pipeline
-    pipe1 = compose.Select(
-        "amount",
-        "account_age_days",
-        "cvv_provided",
-        "billing_address_match"
-    )
-    pipe2 = compose.Select(
-        "currency",
-        "merchant_id",
-        "payment_method",
-        "product_category",
-        "transaction_type",
-        "user_agent"
-    )
-    pipe2 |= preprocessing.OrdinalEncoder()
-    pipe3 = compose.Select(
-        "device_info"
-    )
-    pipe3 |= compose.FuncTransformer(
-        extract_device_info,
-    )
-    pipe3 |= preprocessing.OrdinalEncoder()
-    global pipe
-    pipe = pipe1 + pipe2 + pipe3
-    global LOAD_MODEL_MESSAGE
-    if os.path.exists(MODEL_PATH):
-        with open(MODEL_PATH, 'rb') as f:
-            predictor = pickle.load(f)
-            LOAD_MODEL_MESSAGE = "Model loaded from disk"
-            print(LOAD_MODEL_MESSAGE)
-    else:
-        LOAD_MODEL_MESSAGE = "Creating new model"
-        print(LOAD_MODEL_MESSAGE)
-        if model_type == "LogisticRegression":
-            predictor = linear_model.LogisticRegression(
-                loss = optim.losses.CrossEntropyLoss(
-                    class_weight = {0: 1, 1: 10}),
-                optimizer = optim.SGD(0.01)
-            )
-        elif model_type == "ADWINBoostingClassifier":
-            base_estimator = tree.HoeffdingAdaptiveTreeClassifier(
-                splitter = tree.splitter.HistogramSplitter(),
-                drift_detector = drift.ADWIN(),
-                max_depth = 20,
-                nominal_attributes = [
-                    "currency",
-                    "merchant_id",
-                    "payment_method",
-                    "product_category",
-                    "transaction_type",
-                    "user_agent",
-                    "device_info_os",
-                    "device_info_browser"
-                ],
-                leaf_prediction = 'mc',#'nba',
-                grace_period = 200,
-                delta = 1e-7
-            )
-            boosting_classifier = ensemble.ADWINBoostingClassifier(
-                model = base_estimator,
-                n_models = 15,
-            )
-            predictor = imblearn.RandomOverSampler(
-                classifier = boosting_classifier,
-                desired_dist = {1: 0.5, 0: 0.5},
-                seed = 42
-            )
-        elif model_type == "AdaptiveRandomForestClassifier":
-            predictor = forest.ARFClassifier(
-                n_models = 10,                  # More models = better accuracy but higher latency
-                drift_detector = drift.ADWIN(),  # Auto-detects concept drift
-                warning_detector = drift.ADWIN(),
-                metric = metrics.ROCAUC(),       # Optimizes for imbalanced data
-                max_features = "sqrt",           # Better for high-dimensional data
-                lambda_value = 6,               # Controls tree depth (higher = more complex)
-                seed = 42
-            )
-    model = pipe | predictor
-    return model
-
-def create_consumer():
-    """Create and return Kafka consumer"""
-    return KafkaConsumer(
-        KAFKA_TOPIC,
-        bootstrap_servers = KAFKA_BROKERS,
-        auto_offset_reset = 'earliest',
-        value_deserializer = lambda v: json.loads(v.decode('utf-8')),
-        group_id = 'river_trainer'
-    )
-
 consumer = create_consumer()
 
 ###---FastAPI App---###
@@ -160,7 +40,9 @@ class TransactionData(BaseModel):
 @app.post("/predict")
 async def predict_fraud(transaction: TransactionData):
     x = transaction.model_dump()
-    model = load_or_create_model("AdaptiveRandomForestClassifier")
+    ordinal_encoder_1, ordinal_encoder_2 = create_ordinal_encoders()
+    x, ordinal_encoder_1, ordinal_encoder_2 = process_sample(x, ordinal_encoder_1, ordinal_encoder_2)
+    model, LOAD_MODEL_MESSAGE = load_or_create_model("AdaptiveRandomForestClassifier")
     try:
         y_pred_proba = model.predict_proba_one(x)
         fraud_probability = y_pred_proba.get(1, 0)

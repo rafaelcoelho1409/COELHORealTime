@@ -17,151 +17,22 @@ import os
 import pandas as pd
 import mlflow
 import datetime as dt
-import requests
+from functions import (
+    CustomOrdinalEncoder,
+    extract_device_info,
+    process_sample,
+    load_or_create_model,
+    create_consumer,
+    load_or_create_data,
+    create_ordinal_encoders,
+    DATA_PATH
+)
 
-
-# Configuration
-KAFKA_TOPIC = 'transactions'
-KAFKA_BROKERS = 'kafka-producer:29092'  # Adjust as needed
-DATA_PATH = 'river_data.parquet'
-BATCH_SIZE_OFFSET = 100
 
 #create a folder for model versioning
-if not os.path.exists("model_versions"):
-    os.makedirs("model_versions", exist_ok = True)
+os.makedirs("model_versions", exist_ok = True)
+os.makedirs("ordinal_encoders", exist_ok = True)
 
-#Data processing functions
-def extract_device_info(x):
-    x_ = x['device_info']
-    return {
-        'os': x_['os'],
-        'browser': x_['browser'],
-    }
-
-
-def load_or_create_model(model_type):
-    """Load existing model or create a new one"""
-    # Create a new model pipeline
-    pipe1 = compose.Select(
-        "amount",
-        "account_age_days",
-        "cvv_provided",
-        "billing_address_match"
-    )
-    pipe2 = compose.Select(
-        "currency",
-        "merchant_id",
-        "payment_method",
-        "product_category",
-        "transaction_type",
-        "user_agent"
-    )
-    pipe2 |= preprocessing.OrdinalEncoder()
-    pipe3 = compose.Select(
-        "device_info"
-    )
-    pipe3 |= compose.FuncTransformer(
-        extract_device_info,
-    )
-    pipe3 |= preprocessing.OrdinalEncoder()
-    pipe = pipe1 + pipe2 + pipe3
-    try:
-        if os.path.exists("model_versions"):
-            # Get the latest model version
-            model_version = sorted(
-                os.listdir("model_versions"),
-                key = lambda x: os.path.getmtime(f"model_versions/{x}")
-            )[-1]
-            with open(f"model_versions/{model_version}", 'rb') as f:
-                predictor = pickle.load(f)
-                print("Model loaded from disk")
-    except:
-        print("Creating new model")
-        if model_type == "LogisticRegression":
-            predictor = linear_model.LogisticRegression(
-                loss = optim.losses.CrossEntropyLoss(
-                    class_weight = {0: 1, 1: 10}),
-                optimizer = optim.SGD(0.01)
-            )
-        elif model_type == "ADWINBoostingClassifier":
-            base_estimator = tree.HoeffdingAdaptiveTreeClassifier(
-                splitter = tree.splitter.HistogramSplitter(),
-                drift_detector = drift.ADWIN(),
-                max_depth = 20,
-                nominal_attributes = [
-                    "currency",
-                    "merchant_id",
-                    "payment_method",
-                    "product_category",
-                    "transaction_type",
-                    "user_agent",
-                    "device_info_os",
-                    "device_info_browser"
-                ],
-                leaf_prediction = 'mc',#'nba',
-                grace_period = 200,
-                delta = 1e-7
-            )
-            boosting_classifier = ensemble.ADWINBoostingClassifier(
-                model = base_estimator,
-                n_models = 15,
-            )
-            predictor = imblearn.RandomOverSampler(
-                classifier = boosting_classifier,
-                desired_dist = {1: 0.5, 0: 0.5},
-                seed = 42
-            )
-        elif model_type == "AdaptiveRandomForestClassifier":
-            predictor = forest.ARFClassifier(
-                n_models = 10,                  # More models = better accuracy but higher latency
-                drift_detector = drift.ADWIN(),  # Auto-detects concept drift
-                warning_detector = drift.ADWIN(),
-                metric = metrics.ROCAUC(),       # Optimizes for imbalanced data
-                max_features = "sqrt",           # Better for high-dimensional data
-                lambda_value = 6,               # Controls tree depth (higher = more complex)
-                seed = 42
-            )
-    model = pipe | predictor
-    return model
-    
-def load_or_create_data():
-    """Load existing model or create a new one"""
-    if os.path.exists(DATA_PATH):
-        data_df = pd.read_parquet(DATA_PATH)
-    else:
-        data_df = pd.DataFrame(
-            columns = [
-                'transaction_id',
-                'user_id',
-                'timestamp',
-                'amount',
-                'currency',
-                'merchant_id',
-                'product_category',
-                'transaction_type',
-                'payment_method',
-                'location',
-                'ip_address',
-                'device_info', # Nested structure for device details
-                'user_agent',
-                'account_age_days',
-                'cvv_provided', # Boolean flag
-                'billing_address_match', # Boolean flag
-                'is_fraud'
-            ]
-        )
-    return data_df
-
-
-def create_consumer():
-    """Create and return Kafka consumer"""
-    return KafkaConsumer(
-        KAFKA_TOPIC,
-        bootstrap_servers = KAFKA_BROKERS,
-        auto_offset_reset = 'earliest',
-        value_deserializer = lambda v: json.loads(v.decode('utf-8')),
-        group_id = 'river_trainer'
-    )
 
 def main():
     # Initialize model and metrics
@@ -170,9 +41,10 @@ def main():
     MODEL_TYPE = "AdaptiveRandomForestClassifier"
     mlflow.set_tracking_uri("http://mlflow:5000")
     mlflow.set_experiment("Transaction Fraud Detection - River")
-    model = load_or_create_model(MODEL_TYPE)
+    ordinal_encoder_1, ordinal_encoder_2 = create_ordinal_encoders()
+    model, LOAD_MODEL_MESSAGE = load_or_create_model(MODEL_TYPE)
+    print(LOAD_MODEL_MESSAGE)
     data_df = load_or_create_data()
-    metric = metrics.Accuracy()  # Or other relevant metric
     # Create consumer
     consumer = create_consumer()
     print("Consumer started. Waiting for transactions...")
@@ -194,9 +66,10 @@ def main():
         x: getattr(metrics, x)() for x in binary_classification_metrics
     }
     drift_detector = drift.ADWIN()
+    BATCH_SIZE_OFFSET = 100
     WINDOW_SIZE = 1000
     with mlflow.start_run(run_name = MODEL_TYPE):
-        try:
+        #try:
             fraud_count, normal_count = 0, 0
             for message in consumer:
                 transaction = message.value
@@ -223,6 +96,7 @@ def main():
                     'cvv_provided':          transaction['cvv_provided'], # Boolean flag
                     'billing_address_match': transaction['billing_address_match'], # Boolean flag
                 }
+                x, ordinal_encoder_1, ordinal_encoder_2 = process_sample(x, ordinal_encoder_1, ordinal_encoder_2)
                 y = transaction['is_fraud']
                 if y == 1:
                     fraud_count += 1
@@ -255,28 +129,35 @@ def main():
                 except Exception as e:
                     print(f"Error updating metric {metric}: {str(e)}")
                 # Periodically log progress
-                #if message.offset % BATCH_SIZE_OFFSET == 0:
-                #print(f"Processed {message.offset} messages")
-                for metric in binary_classification_metrics:
-                    try:
-                        binary_classification_metrics_dict[metric].update(y, prediction)
-                    except Exception as e:
-                        print(f"Error updating metric {metric}: {str(e)}")
-                    print(f"{metric}: {binary_classification_metrics_dict[metric].get():.2%}")
-                    mlflow.log_metric(metric, binary_classification_metrics_dict[metric].get())
+                if message.offset % BATCH_SIZE_OFFSET == 0:
+                    print(f"Processed {message.offset} messages")
+                    for metric in binary_classification_metrics:
+                        try:
+                            binary_classification_metrics_dict[metric].update(y, prediction)
+                        except Exception as e:
+                            print(f"Error updating metric {metric}: {str(e)}")
+                        print(f"{metric}: {binary_classification_metrics_dict[metric].get():.2%}")
+                        mlflow.log_metric(metric, binary_classification_metrics_dict[metric].get())
                 MODEL_VERSION = f"model_versions/predictor_{dt.datetime.now()}.pkl".replace(" ", "_").replace(":", "_")
                 if message.offset % (BATCH_SIZE_OFFSET * 100) == 0:
                     with open(MODEL_VERSION, 'wb') as f:
-                        pickle.dump(model[-1], f)
+                        pickle.dump(model, f)
+                    with open("ordinal_encoders/ordinal_encoder_1.pkl", 'wb') as f:
+                        pickle.dump(ordinal_encoder_1, f)
+                    with open("ordinal_encoders/ordinal_encoder_2.pkl", 'wb') as f:
+                        pickle.dump(ordinal_encoder_2, f)
+                    mlflow.log_artifact(MODEL_VERSION)
+                    mlflow.log_artifact("ordinal_encoders/ordinal_encoder_1.pkl")
+                    mlflow.log_artifact("ordinal_encoders/ordinal_encoder_2.pkl")
                     #print(f"Last prediction: {'Fraud' if prediction == 1 else 'Legit'}")
                     data_df.to_parquet(DATA_PATH)
-        except Exception as e:
-            print(f"Error processing message: {str(e)}")
-            print("Stopping consumer...")
-        finally:
-            data_df.to_parquet(DATA_PATH)
-            consumer.close()
-            print("Consumer closed.")
+        #except Exception as e:
+        #    print(f"Error processing message: {str(e)}")
+        #    print("Stopping consumer...")
+        #finally:
+        #    data_df.to_parquet(DATA_PATH)
+        #    consumer.close()
+        #    print("Consumer closed.")
 
 if __name__ == "__main__":
     main()
