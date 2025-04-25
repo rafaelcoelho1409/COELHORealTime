@@ -39,16 +39,19 @@ with tabs[0]: # Incremental ML
             min_value = 0,
             step = 1)
         form_cols2 = st.columns(2)
+        sample["timestamp"] = dt.datetime.strptime(
+                sample["timestamp"],
+                "%Y-%m-%dT%H:%M:%S.%f%z").strftime("%Y-%m-%dT%H:%M:%S")
         timestamp_date = form_cols2[0].date_input(
             "Date",    
             value = dt.datetime.strptime(
                 sample["timestamp"],
-                "%Y-%m-%dT%H:%M:%S.%f%z").date())
+                "%Y-%m-%dT%H:%M:%S").date())
         timestamp_time = form_cols2[1].time_input(
             "Time",    
             value = dt.datetime.strptime(
                 sample["timestamp"],
-                "%Y-%m-%dT%H:%M:%S.%f%z").time(),
+                "%Y-%m-%dT%H:%M:%S").time(),
                 step = dt.timedelta(minutes = 1))
         timestamp = timestamp_to_api_response(
             timestamp_date, 
@@ -187,7 +190,7 @@ with tabs[0]: # Incremental ML
             fraud_prob_df,
             values = fraud_prob_df.iloc[0],
             names = fraud_prob_df.columns,
-            title = f"Fraud Probability: {y_pred['fraud_probability']:.2%} - {True if y_pred['prediction'] == 1 else False}",
+            title = f"Fraud Probability: {y_pred['fraud_probability']:.2%} - {"Fraud" if y_pred['prediction'] == 1 else "Not Fraud"}",
             color_discrete_sequence = ['#FF0000', '#0000FF'],
             hole = 0.2
         )

@@ -26,7 +26,6 @@ def image_border_radius(image_path, border_radius, width, height, page_object = 
 
 def timestamp_to_api_response(timestamp_date, timestamp_time):
     timestamp_string = "T".join([str(timestamp_date), str(timestamp_time)])
-    st.write(timestamp_string)
     input_format = "%Y-%m-%dT%H:%M:%S"
     target_format = "%Y-%m-%dT%H:%M:%S"
     timestamp_input = dt.datetime.strptime(timestamp_string, input_format)
