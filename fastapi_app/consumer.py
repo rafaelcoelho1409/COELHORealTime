@@ -69,7 +69,7 @@ def main():
     BATCH_SIZE_OFFSET = 100
     WINDOW_SIZE = 1000
     with mlflow.start_run(run_name = MODEL_TYPE):
-        #try:
+        try:
             fraud_count, normal_count = 0, 0
             for message in consumer:
                 transaction = message.value
@@ -136,7 +136,7 @@ def main():
                             binary_classification_metrics_dict[metric].update(y, prediction)
                         except Exception as e:
                             print(f"Error updating metric {metric}: {str(e)}")
-                        print(f"{metric}: {binary_classification_metrics_dict[metric].get():.2%}")
+                        #print(f"{metric}: {binary_classification_metrics_dict[metric].get():.2%}")
                         mlflow.log_metric(metric, binary_classification_metrics_dict[metric].get())
                 MODEL_VERSION = f"model_versions/predictor_{dt.datetime.now()}.pkl".replace(" ", "_").replace(":", "_")
                 if message.offset % (BATCH_SIZE_OFFSET * 100) == 0:
@@ -151,13 +151,13 @@ def main():
                     mlflow.log_artifact("ordinal_encoders/ordinal_encoder_2.pkl")
                     #print(f"Last prediction: {'Fraud' if prediction == 1 else 'Legit'}")
                     data_df.to_parquet(DATA_PATH)
-        #except Exception as e:
-        #    print(f"Error processing message: {str(e)}")
-        #    print("Stopping consumer...")
-        #finally:
-        #    data_df.to_parquet(DATA_PATH)
-        #    consumer.close()
-        #    print("Consumer closed.")
+        except Exception as e:
+            print(f"Error processing message: {str(e)}")
+            print("Stopping consumer...")
+        finally:
+            data_df.to_parquet(DATA_PATH)
+            consumer.close()
+            print("Consumer closed.")
 
 if __name__ == "__main__":
     main()

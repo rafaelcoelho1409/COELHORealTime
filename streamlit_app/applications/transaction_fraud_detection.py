@@ -188,9 +188,12 @@ with tabs[0]: # Incremental ML
             values = fraud_prob_df.iloc[0],
             names = fraud_prob_df.columns,
             title = f"Fraud Probability: {y_pred['fraud_probability']:.2%} - {True if y_pred['prediction'] == 1 else False}",
-            color_discrete_sequence = ['#FF9999', '#66B3FF'],
+            color_discrete_sequence = ['#FF0000', '#0000FF'],
             hole = 0.2
         )
+        fraud_prob_fig.update_traces(
+            textposition = 'inside', 
+            textinfo = 'percent+label')
         layout_grid_2.plotly_chart(
             fraud_prob_fig,
             use_container_width = True)
