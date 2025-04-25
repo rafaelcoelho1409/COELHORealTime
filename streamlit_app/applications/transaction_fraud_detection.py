@@ -146,8 +146,8 @@ with tabs[0]: # Incremental ML
     run_df = runs_df.iloc[0]
     metrics_cols = layout_grid_2.columns(3)
     metrics_cols_dict = {
-        0: ["F1", "Precision"],
-        1: ["Recall", "Accuracy"],
+        0: ["F1", "Accuracy"],
+        1: ["Recall", "Precision"],
         2: ["ROCAUC", "GeometricMean"]
     }
     for i, metric_list in zip(metrics_cols_dict.keys(), metrics_cols_dict.values()):
