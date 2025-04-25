@@ -42,7 +42,10 @@ def main():
     mlflow.set_tracking_uri("http://mlflow:5000")
     mlflow.set_experiment("Transaction Fraud Detection - River")
     ordinal_encoder_1, ordinal_encoder_2 = create_ordinal_encoders()
-    model, LOAD_MODEL_MESSAGE = load_or_create_model(MODEL_TYPE)
+    model, LOAD_MODEL_MESSAGE = load_or_create_model(
+        MODEL_TYPE,
+        #from_scratch = True
+    )
     print(LOAD_MODEL_MESSAGE)
     data_df = load_or_create_data()
     # Create consumer

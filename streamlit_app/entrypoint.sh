@@ -1,7 +1,5 @@
 #!/bin/sh
 
-export GIT_PYTHON_REFRESH=quiet
-
 # Create and activate the virtual environment
 rm -rf .venv
 uv venv --python 3.12
@@ -16,7 +14,7 @@ uv pip install -r requirements.txt
 #source .venv/bin/activate
 #python3 consumer.py
 #Only after everything ready, uncomment the following command
-(python3 consumer.py >> consumer.log 2>&1) &
-(uvicorn app:app --host 0.0.0.0 --port 8000 --reload) &
-
-wait
+uv venv --python 3.12
+source .venv/bin/activate
+uv pip install -r requirements.txt
+streamlit run app.py

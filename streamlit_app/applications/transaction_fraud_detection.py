@@ -164,7 +164,7 @@ with tabs[0]: # Incremental ML
         x = {
             'transaction_id':        transaction_id,
             'user_id':               user_id,
-            'timestamp':             timestamp,
+            'timestamp':             timestamp + ".000000+00:00",
             'amount':                amount,
             'currency':              currency,
             'merchant_id':           merchant_id,

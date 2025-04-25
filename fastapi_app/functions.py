@@ -1,10 +1,9 @@
 import pickle
 import os
-from typing import Optional, Any, Dict, Hashable
+from typing import Any, Dict, Hashable
 from river import (
     compose, 
     linear_model, 
-    preprocessing, 
     metrics, 
     optim,
     tree,
@@ -16,6 +15,8 @@ from river import (
 from kafka import KafkaConsumer
 import json
 import pandas as pd
+import datetime as dt
+import requests
 
 
 # Configuration
@@ -126,20 +127,53 @@ def extract_device_info(x):
         'browser': x_['browser'],
     }
 
+def extract_timestamp_info(x):
+    x_ = dt.datetime.strptime(
+        x['timestamp'],
+        "%Y-%m-%dT%H:%M:%S.%f%z")
+    return {
+        'year': x_.year,
+        'month': x_.month,
+        'day': x_.day,
+        'hour': x_.hour,
+        'minute': x_.minute,
+        'second': x_.second
+    }
+
 def create_ordinal_encoders():
     try:
         with open("ordinal_encoders/ordinal_encoder_1.pkl", 'rb') as f:
             ordinal_encoder_1 = pickle.load(f)
+        requests.put(
+            "http://fastapi:8000/healthcheck",
+            json = {
+                "ordinal_encoder_1_load": "Encoder 1 loaded from disk"}
+        )
         print("Encoder 1 loaded from disk")
     except:
         ordinal_encoder_1 = CustomOrdinalEncoder()
+        requests.put(
+            "http://fastapi:8000/healthcheck",
+            json = {
+                "ordinal_encoder_1_load": "New Encoder 1 created"}
+        )
         print("New Encoder 1 created")
     try:
         with open("ordinal_encoders/ordinal_encoder_2.pkl", 'rb') as f:
             ordinal_encoder_2 = pickle.load(f)
+        requests.put(
+            "http://fastapi:8000/healthcheck",
+            json = {
+                "ordinal_encoder_2_load": "Encoder 2 loaded from disk"}
+        )
         print("Encoder 2 loaded from disk")
     except:
         ordinal_encoder_2 = CustomOrdinalEncoder()
+        requests.put(
+            "http://fastapi:8000/healthcheck",
+            json = {
+                "ordinal_encoder_2_load": "New Encoder 2 created"}
+        )
         print("New Encoder 2 created")
     return ordinal_encoder_1, ordinal_encoder_2
 
@@ -182,36 +216,118 @@ def process_sample(x, ordinal_encoder_1, ordinal_encoder_2):
     pipe3c = ordinal_encoder_2
     pipe3c.learn_one(x_pipe_3)
     x_pipe_3 = pipe3c.transform_one(x_pipe_3)
-    x = x_pipe_1 | x_pipe_2 | x_pipe_3
+    pipe4a = compose.Select(
+        "timestamp",
+    )
+    pipe4a.learn_one(x)
+    x_pipe_4 = pipe4a.transform_one(x)
+    pipe4b = compose.FuncTransformer(
+        extract_timestamp_info,
+    )
+    pipe4b.learn_one(x_pipe_4)
+    x_pipe_4 = pipe4b.transform_one(x_pipe_4)
+    x = x_pipe_1 | x_pipe_2 | x_pipe_3 | x_pipe_4
     return x, pipe2b, pipe3c
 
 
-def load_or_create_model(model_type):
+def load_or_create_model(model_type, from_scratch = False):
     """Load existing model or create a new one"""
-    #Take the most recent file
-    try:
-        FOLDER_PATH = "model_versions"
-        model_files = os.listdir(FOLDER_PATH)
-        model_files = [
-            os.path.join(FOLDER_PATH, entry) 
-            for entry 
-            in model_files 
-            if os.path.isfile(os.path.join(FOLDER_PATH, entry))]
-        MODEL_PATH = max(model_files, key = os.path.getmtime)
-        with open(MODEL_PATH, 'rb') as f:
-            model = pickle.load(f)
+    if from_scratch == False:
+        #Take the most recent file
+        try:
+            FOLDER_PATH = "model_versions"
+            model_files = os.listdir(FOLDER_PATH)
+            model_files = [
+                os.path.join(FOLDER_PATH, entry) 
+                for entry 
+                in model_files 
+                if os.path.isfile(os.path.join(FOLDER_PATH, entry))]
+            MODEL_PATH = max(model_files, key = os.path.getmtime)
+            with open(MODEL_PATH, 'rb') as f:
+                model = pickle.load(f)
+            requests.put(
+                "http://fastapi:8000/healthcheck",
+                json = {"model_file": MODEL_PATH}
+            )
             LOAD_MODEL_MESSAGE = "Model loaded from disk"
             print(LOAD_MODEL_MESSAGE)
-    except:
+        except:
+            LOAD_MODEL_MESSAGE = "New model created"
+            print(LOAD_MODEL_MESSAGE)
+            if model_type == "LogisticRegression":
+                requests.put(
+                    "http://fastapi:8000/healthcheck",
+                    json = {"model_type": "LogisticRegression"}
+                )
+                model = linear_model.LogisticRegression(
+                    loss = optim.losses.CrossEntropyLoss(
+                        class_weight = {0: 1, 1: 10}),
+                    optimizer = optim.SGD(0.01)
+                )
+            elif model_type == "ADWINBoostingClassifier":
+                requests.put(
+                    "http://fastapi:8000/healthcheck",
+                    json = {"model_type": "ADWINBoostingClassifier"}
+                )
+                base_estimator = tree.HoeffdingAdaptiveTreeClassifier(
+                    splitter = tree.splitter.HistogramSplitter(),
+                    drift_detector = drift.ADWIN(),
+                    max_depth = 20,
+                    nominal_attributes = [
+                        "currency",
+                        "merchant_id",
+                        "payment_method",
+                        "product_category",
+                        "transaction_type",
+                        "user_agent",
+                        "device_info_os",
+                        "device_info_browser"
+                    ],
+                    leaf_prediction = 'mc',#'nba',
+                    grace_period = 200,
+                    delta = 1e-7
+                )
+                boosting_classifier = ensemble.ADWINBoostingClassifier(
+                    model = base_estimator,
+                    n_models = 15,
+                )
+                model = imblearn.RandomOverSampler(
+                    classifier = boosting_classifier,
+                    desired_dist = {1: 0.5, 0: 0.5},
+                    seed = 42
+                )
+            elif model_type == "AdaptiveRandomForestClassifier":
+                requests.put(
+                    "http://fastapi:8000/healthcheck",
+                    json = {"model_type": "AdaptiveRandomForestClassifier"}
+                )
+                model = forest.ARFClassifier(
+                    n_models = 10,                  # More models = better accuracy but higher latency
+                    drift_detector = drift.ADWIN(),  # Auto-detects concept drift
+                    warning_detector = drift.ADWIN(),
+                    metric = metrics.ROCAUC(),       # Optimizes for imbalanced data
+                    max_features = "sqrt",           # Better for high-dimensional data
+                    lambda_value = 6,               # Controls tree depth (higher = more complex)
+                    seed = 42
+                )
+    else:
         LOAD_MODEL_MESSAGE = "New model created"
         print(LOAD_MODEL_MESSAGE)
         if model_type == "LogisticRegression":
+            requests.put(
+                "http://fastapi:8000/healthcheck",
+                json = {"model_type": "LogisticRegression"}
+            )
             model = linear_model.LogisticRegression(
                 loss = optim.losses.CrossEntropyLoss(
                     class_weight = {0: 1, 1: 10}),
                 optimizer = optim.SGD(0.01)
             )
         elif model_type == "ADWINBoostingClassifier":
+            requests.put(
+                "http://fastapi:8000/healthcheck",
+                json = {"model_type": "ADWINBoostingClassifier"}
+            )
             base_estimator = tree.HoeffdingAdaptiveTreeClassifier(
                 splitter = tree.splitter.HistogramSplitter(),
                 drift_detector = drift.ADWIN(),
@@ -240,6 +356,10 @@ def load_or_create_model(model_type):
                 seed = 42
             )
         elif model_type == "AdaptiveRandomForestClassifier":
+            requests.put(
+                "http://fastapi:8000/healthcheck",
+                json = {"model_type": "AdaptiveRandomForestClassifier"}
+            )
             model = forest.ARFClassifier(
                 n_models = 10,                  # More models = better accuracy but higher latency
                 drift_detector = drift.ADWIN(),  # Auto-detects concept drift
@@ -249,6 +369,10 @@ def load_or_create_model(model_type):
                 lambda_value = 6,               # Controls tree depth (higher = more complex)
                 seed = 42
             )
+    requests.put(
+        "http://fastapi:8000/healthcheck",
+        json = {"model_message": LOAD_MODEL_MESSAGE}
+    )
     return model, LOAD_MODEL_MESSAGE
 
 

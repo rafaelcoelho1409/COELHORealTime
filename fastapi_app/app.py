@@ -18,6 +18,37 @@ consumer = create_consumer()
 ###---FastAPI App---###
 app = FastAPI()
 
+class Healthcheck(BaseModel):
+    model_load: str | None = None
+    model_message: str | None = None
+    model_file: str | None = None
+    model_type: str | None = None
+    ordinal_encoder_1_load: str | None = None
+    ordinal_encoder_2_load: str | None = None
+
+healthcheck = Healthcheck(
+    model_load = None,
+    model_message = None,
+    model_file = None,
+    model_type = None,
+    ordinal_encoder_1_load = None,
+    ordinal_encoder_2_load = None
+)
+
+#IMPORTANT OBSERVATION: you can put the PUT only after the GET
+@app.get("/healthcheck")
+def get_healthcheck():
+    return healthcheck
+
+@app.put("/healthcheck", response_model = Healthcheck)
+def update_healthcheck(update_data: Healthcheck):
+    global healthcheck # Declare that you intend to modify the global variable
+    update_dict = update_data.model_dump(exclude_unset = True)
+    for field, value in update_dict.items():
+        setattr(healthcheck, field, value)
+    return healthcheck
+
+
 class TransactionData(BaseModel):
     transaction_id: str
     user_id: str
@@ -42,7 +73,8 @@ async def predict_fraud(transaction: TransactionData):
     x = transaction.model_dump()
     ordinal_encoder_1, ordinal_encoder_2 = create_ordinal_encoders()
     x, ordinal_encoder_1, ordinal_encoder_2 = process_sample(x, ordinal_encoder_1, ordinal_encoder_2)
-    model, LOAD_MODEL_MESSAGE = load_or_create_model("AdaptiveRandomForestClassifier")
+    model, LOAD_MODEL_MESSAGE = load_or_create_model(
+        "AdaptiveRandomForestClassifier")
     try:
         y_pred_proba = model.predict_proba_one(x)
         fraud_probability = y_pred_proba.get(1, 0)

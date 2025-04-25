@@ -8,5 +8,7 @@ __pycache__/
 mlruns/
 mlartifacts/
 model_versions/
+ordinal_encoders/
 *.parquet
 *.log
+.env

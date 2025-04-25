@@ -2,14 +2,14 @@ FROM docker.io/bitnami/kafka:3.5.1
 
 USER root
 
-# Install Python dependencies
-RUN install_packages netcat python3 python3-pip && \
-    pip3 install --no-cache-dir kafka-python faker
-
 # Copy producer files to separate directory
 RUN mkdir -p /producer
 WORKDIR /producer
 COPY . .
+
+# Install Python dependencies
+RUN install_packages netcat python3 python3-pip && \
+    pip3 install --no-cache-dir -r requirements.txt
 
 # Make entrypoint executable
 RUN chmod +x entrypoint.sh

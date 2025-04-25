@@ -22,9 +22,5 @@ WORKDIR /app
 # Expose port 8501 for Streamlit
 EXPOSE 8501
 
-# Run the Streamlit app
-CMD ["/bin/bash", "-c", "rm -rf .venv && \
-    uv venv --python 3.12 && \
-    source .venv/bin/activate && \
-    uv pip install -r requirements.txt && \
-    streamlit run app.py"]
+# Run the app
+ENTRYPOINT ["/bin/bash", "/app/entrypoint.sh"]

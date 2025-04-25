@@ -23,7 +23,4 @@ WORKDIR /app
 EXPOSE 5000
 
 # Run the app
-CMD ["/bin/bash", "-c", "uv venv --python 3.12 && \
-    source .venv/bin/activate && \
-    uv pip install -r requirements.txt && \
-    mlflow server --host 0.0.0.0 --port 5000"]
+ENTRYPOINT ["/bin/bash", "/app/entrypoint.sh"]
