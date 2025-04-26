@@ -140,7 +140,7 @@ def extract_timestamp_info(x):
         'second': x_.second
     }
 
-def create_ordinal_encoders():
+def load_or_create_ordinal_encoders():
     try:
         with open("ordinal_encoders/ordinal_encoder_1.pkl", 'rb') as f:
             ordinal_encoder_1 = pickle.load(f)
@@ -273,7 +273,7 @@ def load_or_create_model(model_type, from_scratch = False):
                         "payment_method",
                         "product_category",
                         "transaction_type",
-                        "user_agent",
+                        #"user_agent",
                         "device_info_os",
                         "device_info_browser"
                     ],
@@ -319,9 +319,9 @@ def load_or_create_model(model_type, from_scratch = False):
                     "payment_method",
                     "product_category",
                     "transaction_type",
-                    "user_agent",
-                    "device_info_os",
-                    "device_info_browser"
+                    #"user_agent",
+                    "os",
+                    "browser"
                 ],
                 leaf_prediction = 'mc',#'nba',
                 grace_period = 200,
@@ -369,25 +369,4 @@ def load_or_create_data(consumer):
             transaction = message.value
             break
         data_df = pd.DataFrame([transaction])
-        #data_df = pd.DataFrame(
-        #    columns = [
-        #        'transaction_id',
-        #        'user_id',
-        #        'timestamp',
-        #        'amount',
-        #        'currency',
-        #        'merchant_id',
-        #        'product_category',
-        #        'transaction_type',
-        #        'payment_method',
-        #        'location',
-        #        'ip_address',
-        #        'device_info', # Nested structure for device details
-        #        'user_agent',
-        #        'account_age_days',
-        #        'cvv_provided', # Boolean flag
-        #        'billing_address_match', # Boolean flag
-        #        'is_fraud'
-        #    ]
-        #)
     return data_df

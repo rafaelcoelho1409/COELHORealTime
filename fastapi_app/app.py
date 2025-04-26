@@ -14,7 +14,7 @@ from functions import (
     load_or_create_model,
     load_or_create_data,
     create_consumer,
-    create_ordinal_encoders,
+    load_or_create_ordinal_encoders,
     CustomOrdinalEncoder # Assuming this is needed
 )
 
@@ -93,7 +93,7 @@ async def lifespan(app: FastAPI):
     # 4. Create or load the ordinal encoders
     try:
         print("Loading encoders...")
-        ordinal_encoder_1, ordinal_encoder_2 = create_ordinal_encoders()
+        ordinal_encoder_1, ordinal_encoder_2 = load_or_create_ordinal_encoders()
         healthcheck.ordinal_encoder_1_load = "success"
         healthcheck.ordinal_encoder_2_load = "success"
         print("Encoders loaded successfully.")
@@ -219,7 +219,7 @@ async def predict_fraud(transaction: TransactionData):
             detail = "Model or encoders are not loaded.")
     x = transaction.model_dump()
     try:
-        ordinal_encoder_1, ordinal_encoder_2 = create_ordinal_encoders()
+        ordinal_encoder_1, ordinal_encoder_2 = load_or_create_ordinal_encoders()
         processed_x, _, _ = process_sample(x, ordinal_encoder_1, ordinal_encoder_2) # Discard returned encoders if they are meant to be global state
         y_pred_proba = model.predict_proba_one(processed_x) # Use processed data
         fraud_probability = y_pred_proba.get(1, 0.0) # Use 0.0 as default
