@@ -18,7 +18,8 @@ experiment = mlflow.get_experiment_by_name("Transaction Fraud Detection - River"
 experiment_id = experiment.experiment_id
 
 tabs = st.tabs([
-    "Incremental ML"
+    "Incremental ML",
+    "Healthcheck"
 ])
 
 
@@ -200,3 +201,7 @@ with tabs[0]: # Incremental ML
         layout_grid_2.plotly_chart(
             fraud_prob_fig,
             use_container_width = True)
+with tabs[1]: # Incremental ML
+    healthcheck = requests.get(
+        "http://fastapi:8000/healthcheck").json()
+    st.write(healthcheck)

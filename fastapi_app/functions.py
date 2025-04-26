@@ -144,37 +144,47 @@ def create_ordinal_encoders():
     try:
         with open("ordinal_encoders/ordinal_encoder_1.pkl", 'rb') as f:
             ordinal_encoder_1 = pickle.load(f)
-        requests.put(
-            "http://fastapi:8000/healthcheck",
-            json = {
-                "ordinal_encoder_1_load": "Encoder 1 loaded from disk"}
-        )
-        print("Encoder 1 loaded from disk")
+        #requests.put(
+        #    "http://fastapi:8000/healthcheck",
+        #    json = {
+        #        "ordinal_encoder_1_load": "Encoder 1 loaded from disk"}
+        #)
+    except FileNotFoundError:
+        ordinal_encoder_1 = CustomOrdinalEncoder()
+        #requests.put(
+        #    "http://fastapi:8000/healthcheck",
+        #    json = {
+        #        "ordinal_encoder_1_load": "New Encoder 1 created"}
+        #)
     except:
         ordinal_encoder_1 = CustomOrdinalEncoder()
-        requests.put(
-            "http://fastapi:8000/healthcheck",
-            json = {
-                "ordinal_encoder_1_load": "New Encoder 1 created"}
-        )
-        print("New Encoder 1 created")
+        #requests.put(
+        #    "http://fastapi:8000/healthcheck",
+        #    json = {
+        #        "ordinal_encoder_1_load": "New Encoder 1 created"}
+        #)
     try:
         with open("ordinal_encoders/ordinal_encoder_2.pkl", 'rb') as f:
             ordinal_encoder_2 = pickle.load(f)
-        requests.put(
-            "http://fastapi:8000/healthcheck",
-            json = {
-                "ordinal_encoder_2_load": "Encoder 2 loaded from disk"}
-        )
-        print("Encoder 2 loaded from disk")
+        #requests.put(
+        #    "http://fastapi:8000/healthcheck",
+        #    json = {
+        #        "ordinal_encoder_2_load": "Encoder 2 loaded from disk"}
+        #)
+    except FileNotFoundError:
+        ordinal_encoder_2 = CustomOrdinalEncoder()
+        #requests.put(
+        #    "http://fastapi:8000/healthcheck",
+        #    json = {
+        #        "ordinal_encoder_2_load": "New Encoder 2 created"}
+        #)
     except:
         ordinal_encoder_2 = CustomOrdinalEncoder()
-        requests.put(
-            "http://fastapi:8000/healthcheck",
-            json = {
-                "ordinal_encoder_2_load": "New Encoder 2 created"}
-        )
-        print("New Encoder 2 created")
+        #requests.put(
+        #    "http://fastapi:8000/healthcheck",
+        #    json = {
+        #        "ordinal_encoder_2_load": "New Encoder 2 created"}
+        #)
     return ordinal_encoder_1, ordinal_encoder_2
 
 
@@ -195,7 +205,7 @@ def process_sample(x, ordinal_encoder_1, ordinal_encoder_2):
         "payment_method",
         "product_category",
         "transaction_type",
-        "user_agent"
+        #"user_agent"
     )
     pipe2a.learn_one(x)
     x_pipe_2 = pipe2a.transform_one(x)
@@ -245,30 +255,14 @@ def load_or_create_model(model_type, from_scratch = False):
             MODEL_PATH = max(model_files, key = os.path.getmtime)
             with open(MODEL_PATH, 'rb') as f:
                 model = pickle.load(f)
-            requests.put(
-                "http://fastapi:8000/healthcheck",
-                json = {"model_file": MODEL_PATH}
-            )
-            LOAD_MODEL_MESSAGE = "Model loaded from disk"
-            print(LOAD_MODEL_MESSAGE)
         except:
-            LOAD_MODEL_MESSAGE = "New model created"
-            print(LOAD_MODEL_MESSAGE)
             if model_type == "LogisticRegression":
-                requests.put(
-                    "http://fastapi:8000/healthcheck",
-                    json = {"model_type": "LogisticRegression"}
-                )
                 model = linear_model.LogisticRegression(
                     loss = optim.losses.CrossEntropyLoss(
                         class_weight = {0: 1, 1: 10}),
                     optimizer = optim.SGD(0.01)
                 )
             elif model_type == "ADWINBoostingClassifier":
-                requests.put(
-                    "http://fastapi:8000/healthcheck",
-                    json = {"model_type": "ADWINBoostingClassifier"}
-                )
                 base_estimator = tree.HoeffdingAdaptiveTreeClassifier(
                     splitter = tree.splitter.HistogramSplitter(),
                     drift_detector = drift.ADWIN(),
@@ -297,10 +291,6 @@ def load_or_create_model(model_type, from_scratch = False):
                     seed = 42
                 )
             elif model_type == "AdaptiveRandomForestClassifier":
-                requests.put(
-                    "http://fastapi:8000/healthcheck",
-                    json = {"model_type": "AdaptiveRandomForestClassifier"}
-                )
                 model = forest.ARFClassifier(
                     n_models = 10,                  # More models = better accuracy but higher latency
                     drift_detector = drift.ADWIN(),  # Auto-detects concept drift
@@ -312,22 +302,13 @@ def load_or_create_model(model_type, from_scratch = False):
                 )
     else:
         LOAD_MODEL_MESSAGE = "New model created"
-        print(LOAD_MODEL_MESSAGE)
         if model_type == "LogisticRegression":
-            requests.put(
-                "http://fastapi:8000/healthcheck",
-                json = {"model_type": "LogisticRegression"}
-            )
             model = linear_model.LogisticRegression(
                 loss = optim.losses.CrossEntropyLoss(
                     class_weight = {0: 1, 1: 10}),
                 optimizer = optim.SGD(0.01)
             )
         elif model_type == "ADWINBoostingClassifier":
-            requests.put(
-                "http://fastapi:8000/healthcheck",
-                json = {"model_type": "ADWINBoostingClassifier"}
-            )
             base_estimator = tree.HoeffdingAdaptiveTreeClassifier(
                 splitter = tree.splitter.HistogramSplitter(),
                 drift_detector = drift.ADWIN(),
@@ -356,10 +337,6 @@ def load_or_create_model(model_type, from_scratch = False):
                 seed = 42
             )
         elif model_type == "AdaptiveRandomForestClassifier":
-            requests.put(
-                "http://fastapi:8000/healthcheck",
-                json = {"model_type": "AdaptiveRandomForestClassifier"}
-            )
             model = forest.ARFClassifier(
                 n_models = 10,                  # More models = better accuracy but higher latency
                 drift_detector = drift.ADWIN(),  # Auto-detects concept drift
@@ -369,11 +346,7 @@ def load_or_create_model(model_type, from_scratch = False):
                 lambda_value = 6,               # Controls tree depth (higher = more complex)
                 seed = 42
             )
-    requests.put(
-        "http://fastapi:8000/healthcheck",
-        json = {"model_message": LOAD_MODEL_MESSAGE}
-    )
-    return model, LOAD_MODEL_MESSAGE
+    return model
 
 
 def create_consumer():
@@ -387,30 +360,34 @@ def create_consumer():
     )
 
 
-def load_or_create_data():
+def load_or_create_data(consumer):
     """Load existing model or create a new one"""
-    if os.path.exists(DATA_PATH):
+    try:
         data_df = pd.read_parquet(DATA_PATH)
-    else:
-        data_df = pd.DataFrame(
-            columns = [
-                'transaction_id',
-                'user_id',
-                'timestamp',
-                'amount',
-                'currency',
-                'merchant_id',
-                'product_category',
-                'transaction_type',
-                'payment_method',
-                'location',
-                'ip_address',
-                'device_info', # Nested structure for device details
-                'user_agent',
-                'account_age_days',
-                'cvv_provided', # Boolean flag
-                'billing_address_match', # Boolean flag
-                'is_fraud'
-            ]
-        )
+    except:
+        for message in consumer:
+            transaction = message.value
+            break
+        data_df = pd.DataFrame([transaction])
+        #data_df = pd.DataFrame(
+        #    columns = [
+        #        'transaction_id',
+        #        'user_id',
+        #        'timestamp',
+        #        'amount',
+        #        'currency',
+        #        'merchant_id',
+        #        'product_category',
+        #        'transaction_type',
+        #        'payment_method',
+        #        'location',
+        #        'ip_address',
+        #        'device_info', # Nested structure for device details
+        #        'user_agent',
+        #        'account_age_days',
+        #        'cvv_provided', # Boolean flag
+        #        'billing_address_match', # Boolean flag
+        #        'is_fraud'
+        #    ]
+        #)
     return data_df
