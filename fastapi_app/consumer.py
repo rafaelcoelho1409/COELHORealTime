@@ -24,7 +24,7 @@ from functions import (
     load_or_create_model,
     create_consumer,
     load_or_create_data,
-    create_ordinal_encoders,
+    load_or_create_ordinal_encoders,
     DATA_PATH
 )
 
@@ -41,7 +41,7 @@ def main():
     MODEL_TYPE = "AdaptiveRandomForestClassifier"
     mlflow.set_tracking_uri("http://mlflow:5000")
     mlflow.set_experiment("Transaction Fraud Detection - River")
-    ordinal_encoder_1, ordinal_encoder_2 = create_ordinal_encoders()
+    ordinal_encoder_1, ordinal_encoder_2 = load_or_create_ordinal_encoders()
     model = load_or_create_model(
         MODEL_TYPE,
         #from_scratch = True

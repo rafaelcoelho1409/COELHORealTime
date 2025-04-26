@@ -4,11 +4,8 @@ from fastapi import (
 )
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
-import pandas as pd
-import pickle
-import subprocess
 import sys
-import json
+import mlflow
 from functions import (
     process_sample,
     load_or_create_model,
@@ -102,6 +99,11 @@ async def lifespan(app: FastAPI):
         healthcheck.ordinal_encoder_2_load = "failed"
         healthcheck.ordinal_encoders_load_message = f"Error loading encoders: {e}"
         print(f"Error loading encoders: {e}", file = sys.stderr)
+    try:
+        print("Loading MLflow...")
+        mlflow.set_tracking_uri("http://mlflow:5000")
+    except Exception as e:
+        print(f"Error loading MLflow: {e}", file = sys.stderr)
     print("Application setup finished. Yielding control...")
     yield # <-- Application is now ready to serve requests
     # --- Shutdown Logic (Equivalent to @app.on_event("shutdown")) ---
@@ -168,12 +170,12 @@ async def get_sample():
             detail = f"Error sampling data: {e}")
 
 
-class UniqueValuesResponse(BaseModel):
+class UniqueValuesRequest(BaseModel):
     column_name: str
 
 
 @app.post("/unique_values")
-async def get_unique_values(request: UniqueValuesResponse):
+async def get_unique_values(request: UniqueValuesRequest):
     global data # Need to access the global data
     if data is None:
         raise HTTPException(
@@ -230,7 +232,7 @@ async def predict_fraud(transaction: TransactionData):
             "prediction": binary_prediction,
         }
     except Exception as e:
-        print(f"Error during prediction for transaction {transaction.transaction_id}: {e}", file=sys.stderr)
+        print(f"Error during prediction for transaction {transaction.transaction_id}: {e}", file = sys.stderr)
         raise HTTPException(
             status_code = 500, 
             detail = f"Prediction failed for transaction {transaction.transaction_id}: {e}")
@@ -239,6 +241,7 @@ async def predict_fraud(transaction: TransactionData):
 @app.get("/get_ordinal_encoder_1")
 async def get_ordinal_encoder_1():
     global ordinal_encoder_1
+    ordinal_encoder_1, _ = load_or_create_ordinal_encoders()
     if ordinal_encoder_1 is None:
         raise HTTPException(
             status_code = 503, 
@@ -249,8 +252,25 @@ async def get_ordinal_encoder_1():
 @app.get("/get_ordinal_encoder_2")
 async def get_ordinal_encoder_2():
     global ordinal_encoder_2
+    _, ordinal_encoder_2 = load_or_create_ordinal_encoders()
     if ordinal_encoder_2 is None:
         raise HTTPException(
             status_code = 503, 
             detail = "Ordinal encoder 2 is not loaded.")
     return ordinal_encoder_2.get_feature_mappings()
+
+
+class MLflowMetricsRequest(BaseModel):
+    project_name: str
+
+
+@app.post("/mlflow_metrics")
+async def get_mlflow_metrics(request: MLflowMetricsRequest):
+    if request.project_name == "Transaction Fraud Detection":
+        experiment = mlflow.get_experiment_by_name("Transaction Fraud Detection - River")
+        experiment_id = experiment.experiment_id
+        runs_df = mlflow.search_runs(
+            experiment_ids = [experiment_id]
+        )
+        run_df = runs_df.iloc[0]
+        return run_df.to_dict()

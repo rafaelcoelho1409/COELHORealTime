@@ -13,9 +13,6 @@ from functions import (
 )
 
 fake = Faker()
-mlflow.set_tracking_uri("http://mlflow:5000")
-experiment = mlflow.get_experiment_by_name("Transaction Fraud Detection - River")
-experiment_id = experiment.experiment_id
 
 tabs = st.tabs([
     "Incremental ML",
@@ -141,10 +138,9 @@ with tabs[0]: # Incremental ML
             "Predict",
             use_container_width = True)
     layout_grid_2.header("Classification Metrics")
-    runs_df = mlflow.search_runs(
-        experiment_ids = [experiment_id]
-    )
-    run_df = runs_df.iloc[0]
+    mlflow_metrics = requests.post(
+        "http://fastapi:8000/mlflow_metrics",
+        json = {"project_name": "Transaction Fraud Detection"}).json()
     metrics_cols = layout_grid_2.columns(3)
     metrics_cols_dict = {
         0: ["F1", "Accuracy"],
@@ -155,7 +151,7 @@ with tabs[0]: # Incremental ML
         for metric in metric_list:
             metrics_cols[i].metric(
                 metric,
-                f"{run_df[f'metrics.{metric}']*100:.2f}%")
+                f"{mlflow_metrics[f'metrics.{metric}']*100:.2f}%")
     style_metric_cards(
         background_color = "#000000"
     )
@@ -205,3 +201,7 @@ with tabs[1]: # Incremental ML
     healthcheck = requests.get(
         "http://fastapi:8000/healthcheck").json()
     st.write(healthcheck)
+    #mlflow_test = requests.post(
+    #    "http://fastapi:8000/mlflow_metrics",
+    #    json = {"project_name": "Transaction Fraud Detection"}).json()
+    #st.write(mlflow_test)
