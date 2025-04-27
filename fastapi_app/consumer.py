@@ -1,16 +1,6 @@
-import json
-from kafka import KafkaConsumer
 from river import (
-    compose, 
-    linear_model, 
-    preprocessing, 
     metrics, 
-    optim,
     drift,
-    ensemble,
-    tree,
-    imblearn,
-    forest
 )
 import pickle
 import os
@@ -18,8 +8,6 @@ import pandas as pd
 import mlflow
 import datetime as dt
 from functions import (
-    CustomOrdinalEncoder,
-    extract_device_info,
     process_sample,
     load_or_create_model,
     create_consumer,
@@ -138,25 +126,31 @@ def main():
                             binary_classification_metrics_dict[metric].update(y, prediction)
                         except Exception as e:
                             print(f"Error updating metric {metric}: {str(e)}")
-                        #print(f"{metric}: {binary_classification_metrics_dict[metric].get():.2%}")
                         mlflow.log_metric(metric, binary_classification_metrics_dict[metric].get())
-                MODEL_VERSION = f"model_versions/predictor_{dt.datetime.now()}.pkl".replace(" ", "_").replace(":", "_")
+                        #print(f"{metric}: {binary_classification_metrics_dict[metric].get():.2%}")
+                        with open("ordinal_encoders/ordinal_encoder_1.pkl", 'wb') as f:
+                            pickle.dump(ordinal_encoder_1, f)
+                        with open("ordinal_encoders/ordinal_encoder_2.pkl", 'wb') as f:
+                            pickle.dump(ordinal_encoder_2, f)
+                        mlflow.log_artifact("ordinal_encoders/ordinal_encoder_1.pkl")
+                        mlflow.log_artifact("ordinal_encoders/ordinal_encoder_2.pkl")
+                MODEL_VERSION = f"model_versions/{model.__class__.__name__}.pkl"
                 if message.offset % (BATCH_SIZE_OFFSET * 100) == 0:
                     with open(MODEL_VERSION, 'wb') as f:
                         pickle.dump(model, f)
-                    with open("ordinal_encoders/ordinal_encoder_1.pkl", 'wb') as f:
-                        pickle.dump(ordinal_encoder_1, f)
-                    with open("ordinal_encoders/ordinal_encoder_2.pkl", 'wb') as f:
-                        pickle.dump(ordinal_encoder_2, f)
                     mlflow.log_artifact(MODEL_VERSION)
-                    mlflow.log_artifact("ordinal_encoders/ordinal_encoder_1.pkl")
-                    mlflow.log_artifact("ordinal_encoders/ordinal_encoder_2.pkl")
                     #print(f"Last prediction: {'Fraud' if prediction == 1 else 'Legit'}")
                     data_df.to_parquet(DATA_PATH)
         except Exception as e:
             print(f"Error processing message: {str(e)}")
             print("Stopping consumer...")
         finally:
+            with open(MODEL_VERSION, 'wb') as f:
+                pickle.dump(model, f)
+            with open("ordinal_encoders/ordinal_encoder_1.pkl", 'wb') as f:
+                pickle.dump(ordinal_encoder_1, f)
+            with open("ordinal_encoders/ordinal_encoder_2.pkl", 'wb') as f:
+                pickle.dump(ordinal_encoder_2, f)
             data_df.to_parquet(DATA_PATH)
             consumer.close()
             print("Consumer closed.")

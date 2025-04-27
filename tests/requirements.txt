@@ -5,3 +5,4 @@ river
 scikit-learn
 kafka-python
 mlflow
+faker

@@ -144,47 +144,17 @@ def load_or_create_ordinal_encoders():
     try:
         with open("ordinal_encoders/ordinal_encoder_1.pkl", 'rb') as f:
             ordinal_encoder_1 = pickle.load(f)
-        #requests.put(
-        #    "http://fastapi:8000/healthcheck",
-        #    json = {
-        #        "ordinal_encoder_1_load": "Encoder 1 loaded from disk"}
-        #)
     except FileNotFoundError:
         ordinal_encoder_1 = CustomOrdinalEncoder()
-        #requests.put(
-        #    "http://fastapi:8000/healthcheck",
-        #    json = {
-        #        "ordinal_encoder_1_load": "New Encoder 1 created"}
-        #)
     except:
         ordinal_encoder_1 = CustomOrdinalEncoder()
-        #requests.put(
-        #    "http://fastapi:8000/healthcheck",
-        #    json = {
-        #        "ordinal_encoder_1_load": "New Encoder 1 created"}
-        #)
     try:
         with open("ordinal_encoders/ordinal_encoder_2.pkl", 'rb') as f:
             ordinal_encoder_2 = pickle.load(f)
-        #requests.put(
-        #    "http://fastapi:8000/healthcheck",
-        #    json = {
-        #        "ordinal_encoder_2_load": "Encoder 2 loaded from disk"}
-        #)
     except FileNotFoundError:
         ordinal_encoder_2 = CustomOrdinalEncoder()
-        #requests.put(
-        #    "http://fastapi:8000/healthcheck",
-        #    json = {
-        #        "ordinal_encoder_2_load": "New Encoder 2 created"}
-        #)
     except:
         ordinal_encoder_2 = CustomOrdinalEncoder()
-        #requests.put(
-        #    "http://fastapi:8000/healthcheck",
-        #    json = {
-        #        "ordinal_encoder_2_load": "New Encoder 2 created"}
-        #)
     return ordinal_encoder_1, ordinal_encoder_2
 
 
@@ -252,6 +222,7 @@ def load_or_create_model(model_type, from_scratch = False):
                 for entry 
                 in model_files 
                 if os.path.isfile(os.path.join(FOLDER_PATH, entry))]
+            #Get the most recent model
             MODEL_PATH = max(model_files, key = os.path.getmtime)
             with open(MODEL_PATH, 'rb') as f:
                 model = pickle.load(f)
@@ -301,7 +272,6 @@ def load_or_create_model(model_type, from_scratch = False):
                     seed = 42
                 )
     else:
-        LOAD_MODEL_MESSAGE = "New model created"
         if model_type == "LogisticRegression":
             model = linear_model.LogisticRegression(
                 loss = optim.losses.CrossEntropyLoss(

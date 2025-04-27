@@ -26,11 +26,9 @@ initial_transaction_data = None # Also move this initialization
 class Healthcheck(BaseModel):
     model_load: str | None = None # "success", "failed", "not_attempted"
     model_message: str | None = None
-    model_file: str | None = None
     model_type: str | None = None
     ordinal_encoder_1_load: str | None = None # "success", "failed", "not_attempted"
     ordinal_encoder_2_load: str | None = None # "success", "failed", "not_attempted"
-    ordinal_encoders_load_message: str | None = None
     data_load: str | None = None # Added data load status
     data_message: str | None = None # Added data load message
     initial_data_sample_loaded: bool | None = None # Added sample status
@@ -97,7 +95,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         healthcheck.ordinal_encoder_1_load = "failed"
         healthcheck.ordinal_encoder_2_load = "failed"
-        healthcheck.ordinal_encoders_load_message = f"Error loading encoders: {e}"
         print(f"Error loading encoders: {e}", file = sys.stderr)
     try:
         print("Loading MLflow...")
@@ -236,7 +233,7 @@ async def predict_fraud(transaction: TransactionData):
         raise HTTPException(
             status_code = 500, 
             detail = f"Prediction failed for transaction {transaction.transaction_id}: {e}")
-    
+        
 
 @app.get("/get_ordinal_encoder_1")
 async def get_ordinal_encoder_1():

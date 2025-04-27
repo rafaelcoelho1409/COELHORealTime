@@ -16,7 +16,6 @@ fake = Faker()
 
 tabs = st.tabs([
     "Incremental ML",
-    "Healthcheck"
 ])
 
 
@@ -197,11 +196,3 @@ with tabs[0]: # Incremental ML
         layout_grid_2.plotly_chart(
             fraud_prob_fig,
             use_container_width = True)
-with tabs[1]: # Incremental ML
-    healthcheck = requests.get(
-        "http://fastapi:8000/healthcheck").json()
-    st.write(healthcheck)
-    #mlflow_test = requests.post(
-    #    "http://fastapi:8000/mlflow_metrics",
-    #    json = {"project_name": "Transaction Fraud Detection"}).json()
-    #st.write(mlflow_test)
