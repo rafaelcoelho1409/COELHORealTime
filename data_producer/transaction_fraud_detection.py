@@ -8,7 +8,7 @@ import datetime
 
 fake = Faker()
 
-KAFKA_TOPIC = 'transactions'
+KAFKA_TOPIC = 'transaction_fraud_detection'
 KAFKA_BROKERS = 'kafka-producer:9092' # Use the internal Docker DNS name
 
 # --- Constants ---

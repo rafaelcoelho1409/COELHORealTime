@@ -20,9 +20,9 @@ import requests
 
 
 # Configuration
-KAFKA_TOPIC = 'transactions'
+#KAFKA_TOPIC = 'transaction_fraud_detection'
 KAFKA_BROKERS = 'kafka-producer:29092'  # Adjust as needed
-DATA_PATH = 'river_data.parquet'
+#DATA_PATH = 'river_data.parquet'
 
 ###---Functions----####
 #Data processing functions
@@ -319,8 +319,10 @@ def load_or_create_model(model_type, from_scratch = False):
     return model
 
 
-def create_consumer():
+def create_consumer(project_name):
     """Create and return Kafka consumer"""
+    if project_name == "Transaction Fraud Detection":
+        KAFKA_TOPIC = "transaction_fraud_detection"
     return KafkaConsumer(
         KAFKA_TOPIC,
         bootstrap_servers = KAFKA_BROKERS,
@@ -330,8 +332,10 @@ def create_consumer():
     )
 
 
-def load_or_create_data(consumer):
+def load_or_create_data(consumer, project_name):
     """Load existing model or create a new one"""
+    if project_name == "Transaction Fraud Detection":
+        DATA_PATH = "transaction_fraud_detection_data.parquet"
     try:
         data_df = pd.read_parquet(DATA_PATH)
     except:

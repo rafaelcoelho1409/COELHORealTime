@@ -15,5 +15,7 @@ while ! nc -z localhost 9092; do
   sleep 0.1
 done
 
-# Start Python producer
-python3 producer.py
+# Start Python producers
+python3 transaction_fraud_detection.py &
+
+wait

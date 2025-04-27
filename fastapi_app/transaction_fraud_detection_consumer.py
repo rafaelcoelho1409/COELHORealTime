@@ -13,9 +13,11 @@ from functions import (
     create_consumer,
     load_or_create_data,
     load_or_create_ordinal_encoders,
-    DATA_PATH
 )
 
+DATA_PATH = "transaction_fraud_detection_data.parquet"
+ORDINAL_ENCODER_1_PATH = "ordinal_encoders/ordinal_encoder_1.pkl"
+ORDINAL_ENCODER_2_PATH = "ordinal_encoders/ordinal_encoder_2.pkl"
 
 #create a folder for model versioning
 os.makedirs("model_versions", exist_ok = True)
@@ -35,9 +37,11 @@ def main():
         #from_scratch = True
     )
     # Create consumer
-    consumer = create_consumer()
+    consumer = create_consumer("Transaction Fraud Detection")
     print("Consumer started. Waiting for transactions...")
-    data_df = load_or_create_data(consumer)
+    data_df = load_or_create_data(
+        consumer,
+        "Transaction Fraud Detection")
     binary_classification_metrics = [
         'Accuracy',
         #'BalancedAccuracy',
@@ -128,12 +132,12 @@ def main():
                             print(f"Error updating metric {metric}: {str(e)}")
                         mlflow.log_metric(metric, binary_classification_metrics_dict[metric].get())
                         #print(f"{metric}: {binary_classification_metrics_dict[metric].get():.2%}")
-                        with open("ordinal_encoders/ordinal_encoder_1.pkl", 'wb') as f:
+                        with open(ORDINAL_ENCODER_1_PATH, 'wb') as f:
                             pickle.dump(ordinal_encoder_1, f)
-                        with open("ordinal_encoders/ordinal_encoder_2.pkl", 'wb') as f:
+                        with open(ORDINAL_ENCODER_2_PATH, 'wb') as f:
                             pickle.dump(ordinal_encoder_2, f)
-                        mlflow.log_artifact("ordinal_encoders/ordinal_encoder_1.pkl")
-                        mlflow.log_artifact("ordinal_encoders/ordinal_encoder_2.pkl")
+                        mlflow.log_artifact(ORDINAL_ENCODER_1_PATH)
+                        mlflow.log_artifact(ORDINAL_ENCODER_2_PATH)
                 MODEL_VERSION = f"model_versions/{model.__class__.__name__}.pkl"
                 if message.offset % (BATCH_SIZE_OFFSET * 100) == 0:
                     with open(MODEL_VERSION, 'wb') as f:
@@ -147,9 +151,9 @@ def main():
         finally:
             with open(MODEL_VERSION, 'wb') as f:
                 pickle.dump(model, f)
-            with open("ordinal_encoders/ordinal_encoder_1.pkl", 'wb') as f:
+            with open(ORDINAL_ENCODER_1_PATH, 'wb') as f:
                 pickle.dump(ordinal_encoder_1, f)
-            with open("ordinal_encoders/ordinal_encoder_2.pkl", 'wb') as f:
+            with open(ORDINAL_ENCODER_2_PATH, 'wb') as f:
                 pickle.dump(ordinal_encoder_2, f)
             data_df.to_parquet(DATA_PATH)
             consumer.close()

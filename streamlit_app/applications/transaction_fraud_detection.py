@@ -23,7 +23,7 @@ with tabs[0]: # Incremental ML
     layout_grid = grid([0.3, 0.7])
     layout_grid_1 = layout_grid.container()
     layout_grid_2 = layout_grid.container()
-    sample = requests.get("http://fastapi:8000/initial_transaction_data").json()
+    sample = requests.get("http://fastapi:8000/initial_sample").json()
     with layout_grid_1.form("Predict"):
         form_cols1 = st.columns(2)
         amount = form_cols1[0].number_input(

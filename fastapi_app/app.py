@@ -21,7 +21,7 @@ data = None
 model = None
 ordinal_encoder_1 = None
 ordinal_encoder_2 = None
-initial_transaction_data = None # Also move this initialization
+initial_sample = None # Also move this initialization
 
 class Healthcheck(BaseModel):
     model_load: str | None = None # "success", "failed", "not_attempted"
@@ -47,18 +47,20 @@ healthcheck = Healthcheck(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global consumer, data, model, ordinal_encoder_1, ordinal_encoder_2, initial_transaction_data, healthcheck
+    global consumer, data, model, ordinal_encoder_1, ordinal_encoder_2, initial_sample, healthcheck
     # 1. Load data
     try:
         print("Loading data...")
-        consumer = create_consumer()
-        data = load_or_create_data(consumer)
+        consumer = create_consumer("Transaction Fraud Detection")
+        data = load_or_create_data(
+            consumer,
+            "Transaction Fraud Detection")
         healthcheck.data_load = "success"
         healthcheck.data_message = "Data loaded successfully"
         # 2. Create initial transaction data sample (requires data)
         try:
             if data is not None and not data.empty:
-                initial_transaction_data = TransactionData(
+                initial_sample = TransactionData(
                     **data.sample(1).to_dict(orient = 'records')[0]
                 )
                 healthcheck.initial_data_sample_loaded = True
@@ -193,20 +195,20 @@ async def get_unique_values(request: UniqueValuesRequest):
             detail = f"Error getting unique values for column '{column}': {e}")
 
 
-@app.get("/initial_transaction_data")
-async def get_initial_transaction_data():
-    global initial_transaction_data # Need to access the global variable
-    if initial_transaction_data is None:
+@app.get("/initial_sample")
+async def get_initial_sample():
+    global initial_sample # Need to access the global variable
+    if initial_sample is None:
         raise HTTPException(
             status_code = 503, 
             detail = "Initial transaction data sample is not loaded.")
-    return initial_transaction_data
+    return initial_sample
 
-@app.put("/initial_transaction_data")
-async def update_initial_transaction_data(transaction: TransactionData):
-    global initial_transaction_data
-    initial_transaction_data = transaction
-    return initial_transaction_data
+@app.put("/initial_sample")
+async def update_initial_sample(transaction: TransactionData):
+    global initial_sample
+    initial_sample = transaction
+    return initial_sample
 
 
 @app.post("/predict")
