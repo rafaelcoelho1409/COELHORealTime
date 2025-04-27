@@ -15,13 +15,14 @@ from functions import (
     load_or_create_ordinal_encoders,
 )
 
-DATA_PATH = "transaction_fraud_detection_data.parquet"
-ORDINAL_ENCODER_1_PATH = "ordinal_encoders/ordinal_encoder_1.pkl"
-ORDINAL_ENCODER_2_PATH = "ordinal_encoders/ordinal_encoder_2.pkl"
+DATA_PATH = "data/transaction_fraud_detection_data.parquet"
+MODEL_FOLDER = "models/transaction_fraud_detection"
+ORDINAL_ENCODER_1_PATH = "ordinal_encoders/transaction_fraud_detection/ordinal_encoder_1.pkl"
+ORDINAL_ENCODER_2_PATH = "ordinal_encoders/transaction_fraud_detection/ordinal_encoder_2.pkl"
 
-#create a folder for model versioning
-os.makedirs("model_versions", exist_ok = True)
-os.makedirs("ordinal_encoders", exist_ok = True)
+os.makedirs("models/transaction_fraud_detection", exist_ok = True)
+os.makedirs("ordinal_encoders/transaction_fraud_detection", exist_ok = True)
+os.makedirs("data", exist_ok = True)
 
 
 def main():
@@ -31,7 +32,9 @@ def main():
     MODEL_TYPE = "AdaptiveRandomForestClassifier"
     mlflow.set_tracking_uri("http://mlflow:5000")
     mlflow.set_experiment("Transaction Fraud Detection - River")
-    ordinal_encoder_1, ordinal_encoder_2 = load_or_create_ordinal_encoders()
+    ordinal_encoder_1, ordinal_encoder_2 = load_or_create_ordinal_encoders(
+        "ordinal_encoders/transaction_fraud_detection"
+    )
     model = load_or_create_model(
         MODEL_TYPE,
         #from_scratch = True
@@ -138,7 +141,7 @@ def main():
                             pickle.dump(ordinal_encoder_2, f)
                         mlflow.log_artifact(ORDINAL_ENCODER_1_PATH)
                         mlflow.log_artifact(ORDINAL_ENCODER_2_PATH)
-                MODEL_VERSION = f"model_versions/{model.__class__.__name__}.pkl"
+                MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
                 if message.offset % (BATCH_SIZE_OFFSET * 100) == 0:
                     with open(MODEL_VERSION, 'wb') as f:
                         pickle.dump(model, f)
@@ -157,6 +160,7 @@ def main():
                 pickle.dump(ordinal_encoder_2, f)
             data_df.to_parquet(DATA_PATH)
             consumer.close()
+            mlflow.end_run()
             print("Consumer closed.")
 
 if __name__ == "__main__":

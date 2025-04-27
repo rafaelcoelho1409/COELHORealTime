@@ -140,16 +140,16 @@ def extract_timestamp_info(x):
         'second': x_.second
     }
 
-def load_or_create_ordinal_encoders():
+def load_or_create_ordinal_encoders(ordinal_encoders_folder):
     try:
-        with open("ordinal_encoders/ordinal_encoder_1.pkl", 'rb') as f:
+        with open(f"{ordinal_encoders_folder}/ordinal_encoder_1.pkl", 'rb') as f:
             ordinal_encoder_1 = pickle.load(f)
     except FileNotFoundError:
         ordinal_encoder_1 = CustomOrdinalEncoder()
     except:
         ordinal_encoder_1 = CustomOrdinalEncoder()
     try:
-        with open("ordinal_encoders/ordinal_encoder_2.pkl", 'rb') as f:
+        with open(f"{ordinal_encoders_folder}/ordinal_encoder_2.pkl", 'rb') as f:
             ordinal_encoder_2 = pickle.load(f)
     except FileNotFoundError:
         ordinal_encoder_2 = CustomOrdinalEncoder()

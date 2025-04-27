@@ -90,7 +90,9 @@ async def lifespan(app: FastAPI):
     # 4. Create or load the ordinal encoders
     try:
         print("Loading encoders...")
-        ordinal_encoder_1, ordinal_encoder_2 = load_or_create_ordinal_encoders()
+        ordinal_encoder_1, ordinal_encoder_2 = load_or_create_ordinal_encoders(
+            "ordinal_encoders/transaction_fraud_detection"
+        )
         healthcheck.ordinal_encoder_1_load = "success"
         healthcheck.ordinal_encoder_2_load = "success"
         print("Encoders loaded successfully.")
@@ -220,7 +222,9 @@ async def predict_fraud(transaction: TransactionData):
             detail = "Model or encoders are not loaded.")
     x = transaction.model_dump()
     try:
-        ordinal_encoder_1, ordinal_encoder_2 = load_or_create_ordinal_encoders()
+        ordinal_encoder_1, ordinal_encoder_2 = load_or_create_ordinal_encoders(
+            "ordinal_encoders/transaction_fraud_detection"
+        )
         processed_x, _, _ = process_sample(x, ordinal_encoder_1, ordinal_encoder_2) # Discard returned encoders if they are meant to be global state
         y_pred_proba = model.predict_proba_one(processed_x) # Use processed data
         fraud_probability = y_pred_proba.get(1, 0.0) # Use 0.0 as default
@@ -237,10 +241,12 @@ async def predict_fraud(transaction: TransactionData):
             detail = f"Prediction failed for transaction {transaction.transaction_id}: {e}")
         
 
-@app.get("/get_ordinal_encoder_1")
+@app.get("/get_ordinal_encoder_1_tfd")
 async def get_ordinal_encoder_1():
     global ordinal_encoder_1
-    ordinal_encoder_1, _ = load_or_create_ordinal_encoders()
+    ordinal_encoder_1, _ = load_or_create_ordinal_encoders(
+        "ordinal_encoders/transaction_fraud_detection"
+    )
     if ordinal_encoder_1 is None:
         raise HTTPException(
             status_code = 503, 
@@ -248,10 +254,12 @@ async def get_ordinal_encoder_1():
     return ordinal_encoder_1.get_feature_mappings()
 
 
-@app.get("/get_ordinal_encoder_2")
+@app.get("/get_ordinal_encoder_2_tfd")
 async def get_ordinal_encoder_2():
     global ordinal_encoder_2
-    _, ordinal_encoder_2 = load_or_create_ordinal_encoders()
+    _, ordinal_encoder_2 = load_or_create_ordinal_encoders(
+        "ordinal_encoders/transaction_fraud_detection"
+    )
     if ordinal_encoder_2 is None:
         raise HTTPException(
             status_code = 503, 
