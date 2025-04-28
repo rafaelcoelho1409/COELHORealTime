@@ -35,6 +35,14 @@ def main():
     ordinal_encoder_1, ordinal_encoder_2 = load_or_create_ordinal_encoders(
         "ordinal_encoders/transaction_fraud_detection"
     )
+    models_list = [
+        "LogisticRegression",
+        "ADWINBoostingClassifier",
+        "AdaptiveRandomForestClassifier"
+    ]
+    models_dict = {
+        x: load_or_create_model(x) for x in models_list
+    }
     model = load_or_create_model(
         MODEL_TYPE,
         #from_scratch = True
@@ -67,7 +75,7 @@ def main():
     WINDOW_SIZE = 1000
     with mlflow.start_run(run_name = MODEL_TYPE):
         try:
-            fraud_count, normal_count = 0, 0
+            #fraud_count, normal_count = 0, 0
             for message in consumer:
                 transaction = message.value
                 # Create a new DataFrame from the received data
@@ -95,27 +103,27 @@ def main():
                 }
                 x, ordinal_encoder_1, ordinal_encoder_2 = process_sample(x, ordinal_encoder_1, ordinal_encoder_2)
                 y = transaction['is_fraud']
-                if y == 1:
-                    fraud_count += 1
-                else:
-                    normal_count += 1
+                #if y == 1:
+                #    fraud_count += 1
+                #else:
+                #    normal_count += 1
                 #--------------DELETE HERE IF MODEL PERFORMS POORLY--------------
-                if MODEL_TYPE == "LogisticRegression":
-                    y_pred_proba = model.predict_proba_one(x).get(1, 0)
-                    # Update drift detector with prediction error
-                    error = 1 - (1 if (y_pred_proba > 0.5) == y else 0)
-                    drift_detector.update(error)
-                    # Handle concept drift
-                    if drift_detector.drift_detected:
-                        print(f"{dt.datetime.now()} - Drift detected! Resetting model...")
-                        model = load_or_create_model(MODEL_TYPE)
-                        fraud_count, normal_count = 0, 0
-                        drift_detector = drift.ADWIN()
-                    #----------------------------------------------------------------
-                    # Update weights every window_size samples
-                    if (fraud_count + normal_count) % WINDOW_SIZE == 0:
-                        ratio = max(1, normal_count / (fraud_count + 1))  # Prevent division by zero
-                        model[-1].class_weight = {0: 1, 1: ratio}
+                #if MODEL_TYPE == "LogisticRegression":
+                #    y_pred_proba = model.predict_proba_one(x).get(1, 0)
+                #    # Update drift detector with prediction error
+                #    error = 1 - (1 if (y_pred_proba > 0.5) == y else 0)
+                #    drift_detector.update(error)
+                #    # Handle concept drift
+                #    if drift_detector.drift_detected:
+                #        print(f"{dt.datetime.now()} - Drift detected! Resetting model...")
+                #        model = load_or_create_model(MODEL_TYPE)
+                #        fraud_count, normal_count = 0, 0
+                #        drift_detector = drift.ADWIN()
+                #    #----------------------------------------------------------------
+                #    # Update weights every window_size samples
+                #    if (fraud_count + normal_count) % WINDOW_SIZE == 0:
+                #        ratio = max(1, normal_count / (fraud_count + 1))  # Prevent division by zero
+                #        model[-1].class_weight = {0: 1, 1: ratio}
                 # Update the model
                 prediction = model.predict_one(x)
                 model.learn_one(x, y)
