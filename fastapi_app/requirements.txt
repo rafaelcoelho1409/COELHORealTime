@@ -2,8 +2,6 @@ fastapi
 uvicorn
 pydantic
 ipykernel
-streamlit
-streamlit_extras
 pandas
 mlflow
 kafka-python

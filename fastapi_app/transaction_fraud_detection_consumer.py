@@ -1,12 +1,12 @@
 from river import (
     metrics, 
-    drift,
+    preprocessing,
+    imblearn
 )
 import pickle
 import os
 import pandas as pd
 import mlflow
-import datetime as dt
 from functions import (
     process_sample,
     load_or_create_model,
@@ -19,6 +19,7 @@ DATA_PATH = "data/transaction_fraud_detection_data.parquet"
 MODEL_FOLDER = "models/transaction_fraud_detection"
 ORDINAL_ENCODER_1_PATH = "ordinal_encoders/transaction_fraud_detection/ordinal_encoder_1.pkl"
 ORDINAL_ENCODER_2_PATH = "ordinal_encoders/transaction_fraud_detection/ordinal_encoder_2.pkl"
+FRAUD_PROBABILITY = 0.01
 
 os.makedirs("models/transaction_fraud_detection", exist_ok = True)
 os.makedirs("ordinal_encoders/transaction_fraud_detection", exist_ok = True)
@@ -31,18 +32,11 @@ def main():
     #MODEL_TYPE = "ADWINBoostingClassifier"
     MODEL_TYPE = "AdaptiveRandomForestClassifier"
     mlflow.set_tracking_uri("http://mlflow:5000")
-    mlflow.set_experiment("Transaction Fraud Detection - River")
+    mlflow.set_experiment("Transaction Fraud Detection")
     ordinal_encoder_1, ordinal_encoder_2 = load_or_create_ordinal_encoders(
         "ordinal_encoders/transaction_fraud_detection"
     )
-    models_list = [
-        "LogisticRegression",
-        "ADWINBoostingClassifier",
-        "AdaptiveRandomForestClassifier"
-    ]
-    models_dict = {
-        x: load_or_create_model(x) for x in models_list
-    }
+    scaler = preprocessing.StandardScaler()
     model = load_or_create_model(
         MODEL_TYPE,
         #from_scratch = True
@@ -55,24 +49,16 @@ def main():
         "Transaction Fraud Detection")
     binary_classification_metrics = [
         'Accuracy',
-        #'BalancedAccuracy',
         'Precision',          # Typically for the positive class (Fraud)
         'Recall',             # Typically for the positive class (Fraud)
         'F1',                 # Typically for the positive class (Fraud)
-        #'FBeta',              # Typically for the positive class (Fraud), specify beta
-        #'MCC',                # Matthews Correlation Coefficient
         'GeometricMean',
         'ROCAUC',             # Requires probabilities
-        #'RollingROCAUC',      # Requires probabilities
-        #'LogLoss',            # Requires probabilities
-        #'CrossEntropy',       # Same as LogLoss, requires probabilities
     ]
     binary_classification_metrics_dict = {
         x: getattr(metrics, x)() for x in binary_classification_metrics
     }
-    drift_detector = drift.ADWIN()
     BATCH_SIZE_OFFSET = 100
-    WINDOW_SIZE = 1000
     with mlflow.start_run(run_name = MODEL_TYPE):
         try:
             #fraud_count, normal_count = 0, 0
@@ -103,27 +89,6 @@ def main():
                 }
                 x, ordinal_encoder_1, ordinal_encoder_2 = process_sample(x, ordinal_encoder_1, ordinal_encoder_2)
                 y = transaction['is_fraud']
-                #if y == 1:
-                #    fraud_count += 1
-                #else:
-                #    normal_count += 1
-                #--------------DELETE HERE IF MODEL PERFORMS POORLY--------------
-                #if MODEL_TYPE == "LogisticRegression":
-                #    y_pred_proba = model.predict_proba_one(x).get(1, 0)
-                #    # Update drift detector with prediction error
-                #    error = 1 - (1 if (y_pred_proba > 0.5) == y else 0)
-                #    drift_detector.update(error)
-                #    # Handle concept drift
-                #    if drift_detector.drift_detected:
-                #        print(f"{dt.datetime.now()} - Drift detected! Resetting model...")
-                #        model = load_or_create_model(MODEL_TYPE)
-                #        fraud_count, normal_count = 0, 0
-                #        drift_detector = drift.ADWIN()
-                #    #----------------------------------------------------------------
-                #    # Update weights every window_size samples
-                #    if (fraud_count + normal_count) % WINDOW_SIZE == 0:
-                #        ratio = max(1, normal_count / (fraud_count + 1))  # Prevent division by zero
-                #        model[-1].class_weight = {0: 1, 1: ratio}
                 # Update the model
                 prediction = model.predict_one(x)
                 model.learn_one(x, y)

@@ -16,7 +16,7 @@ from kafka import KafkaConsumer
 import json
 import pandas as pd
 import datetime as dt
-import requests
+
 
 
 # Configuration

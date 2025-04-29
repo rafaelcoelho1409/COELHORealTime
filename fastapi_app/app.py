@@ -64,14 +64,14 @@ async def lifespan(app: FastAPI):
                     **data.sample(1).to_dict(orient = 'records')[0]
                 )
                 healthcheck.initial_data_sample_loaded = True
-                healthcheck.initial_data_sample_message = "Initial transaction sample created."
+                healthcheck.initial_data_sample_message = "Initial sample created."
             else:
                 healthcheck.initial_data_sample_loaded = False
                 healthcheck.initial_data_sample_message = "Data was not loaded or is empty, cannot create initial sample."
         except Exception as e:
             healthcheck.initial_data_sample_loaded = False
             healthcheck.initial_data_sample_message = f"Error loading data: {e}"
-            print(f"Error creating initial transaction sample: {e}", file = sys.stderr)
+            print(f"Error creating initial sample: {e}", file = sys.stderr)
     except Exception as e:
         healthcheck.data_load = "failed"
         healthcheck.data_message = f"Error loading data: {e}"
@@ -274,7 +274,7 @@ class MLflowMetricsRequest(BaseModel):
 @app.post("/mlflow_metrics")
 async def get_mlflow_metrics(request: MLflowMetricsRequest):
     if request.project_name == "Transaction Fraud Detection":
-        experiment = mlflow.get_experiment_by_name("Transaction Fraud Detection - River")
+        experiment = mlflow.get_experiment_by_name("Transaction Fraud Detection")
         experiment_id = experiment.experiment_id
         runs_df = mlflow.search_runs(
             experiment_ids = [experiment_id]
