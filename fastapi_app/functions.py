@@ -140,26 +140,18 @@ def extract_timestamp_info(x):
         'second': x_.second
     }
 
-def load_or_create_ordinal_encoders(ordinal_encoders_folder):
+def load_or_create_ordinal_encoder(ordinal_encoders_folder):
     try:
-        with open(f"{ordinal_encoders_folder}/ordinal_encoder_1.pkl", 'rb') as f:
-            ordinal_encoder_1 = pickle.load(f)
+        with open(f"{ordinal_encoders_folder}/ordinal_encoder.pkl", 'rb') as f:
+            ordinal_encoder = pickle.load(f)
     except FileNotFoundError:
-        ordinal_encoder_1 = CustomOrdinalEncoder()
+        ordinal_encoder = CustomOrdinalEncoder()
     except:
-        ordinal_encoder_1 = CustomOrdinalEncoder()
-    try:
-        with open(f"{ordinal_encoders_folder}/ordinal_encoder_2.pkl", 'rb') as f:
-            ordinal_encoder_2 = pickle.load(f)
-    except FileNotFoundError:
-        ordinal_encoder_2 = CustomOrdinalEncoder()
-    except:
-        ordinal_encoder_2 = CustomOrdinalEncoder()
-    return ordinal_encoder_1, ordinal_encoder_2
+        ordinal_encoder = CustomOrdinalEncoder()
+    return ordinal_encoder
 
 
-def process_sample(x, ordinal_encoder_1, ordinal_encoder_2):
-    # Pipeline 1
+def process_sample(x, ordinal_encoder):
     pipe1 = compose.Select(
         "amount",
         "account_age_days",
@@ -167,8 +159,7 @@ def process_sample(x, ordinal_encoder_1, ordinal_encoder_2):
         "billing_address_match"
     )
     pipe1.learn_one(x)
-    x_pipe_1 = pipe1.transform_one(x)
-    # Pipeline 2
+    x1 = pipe1.transform_one(x)
     pipe2a = compose.Select(
         "currency",
         "merchant_id",
@@ -179,10 +170,6 @@ def process_sample(x, ordinal_encoder_1, ordinal_encoder_2):
     )
     pipe2a.learn_one(x)
     x_pipe_2 = pipe2a.transform_one(x)
-    pipe2b = ordinal_encoder_1
-    pipe2b.learn_one(x_pipe_2)
-    x_pipe_2 = pipe2b.transform_one(x_pipe_2)
-    # Pipeline 3
     pipe3a = compose.Select(
         "device_info"
     )
@@ -193,9 +180,6 @@ def process_sample(x, ordinal_encoder_1, ordinal_encoder_2):
     )
     pipe3b.learn_one(x_pipe_3)
     x_pipe_3 = pipe3b.transform_one(x_pipe_3)
-    pipe3c = ordinal_encoder_2
-    pipe3c.learn_one(x_pipe_3)
-    x_pipe_3 = pipe3c.transform_one(x_pipe_3)
     pipe4a = compose.Select(
         "timestamp",
     )
@@ -206,22 +190,23 @@ def process_sample(x, ordinal_encoder_1, ordinal_encoder_2):
     )
     pipe4b.learn_one(x_pipe_4)
     x_pipe_4 = pipe4b.transform_one(x_pipe_4)
-    x = x_pipe_1 | x_pipe_2 | x_pipe_3 | x_pipe_4
-    return x, pipe2b, pipe3c
+    x_to_encode = x_pipe_2 | x_pipe_3 | x_pipe_4
+    ordinal_encoder.learn_one(x_to_encode)
+    x2 = ordinal_encoder.transform_one(x_to_encode)
+    return x1 | x2, ordinal_encoder
 
 
-def load_or_create_model(model_type, from_scratch = False):
+def load_or_create_model(model_type, folder_path = None, from_scratch = False):
     """Load existing model or create a new one"""
     if from_scratch == False:
         #Take the most recent file
         try:
-            FOLDER_PATH = "model_versions"
-            model_files = os.listdir(FOLDER_PATH)
+            model_files = os.listdir(folder_path)
             model_files = [
-                os.path.join(FOLDER_PATH, entry) 
+                os.path.join(folder_path, entry) 
                 for entry 
                 in model_files 
-                if os.path.isfile(os.path.join(FOLDER_PATH, entry))]
+                if os.path.isfile(os.path.join(folder_path, entry))]
             #Get the most recent model
             MODEL_PATH = max(model_files, key = os.path.getmtime)
             with open(MODEL_PATH, 'rb') as f:

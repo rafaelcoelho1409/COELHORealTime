@@ -12,17 +12,16 @@ from functions import (
     load_or_create_model,
     create_consumer,
     load_or_create_data,
-    load_or_create_ordinal_encoders,
+    load_or_create_ordinal_encoder,
 )
 
 DATA_PATH = "data/transaction_fraud_detection_data.parquet"
 MODEL_FOLDER = "models/transaction_fraud_detection"
-ORDINAL_ENCODER_1_PATH = "ordinal_encoders/transaction_fraud_detection/ordinal_encoder_1.pkl"
-ORDINAL_ENCODER_2_PATH = "ordinal_encoders/transaction_fraud_detection/ordinal_encoder_2.pkl"
+ORDINAL_ENCODER_PATH = "ordinal_encoders/transaction_fraud_detection"
 FRAUD_PROBABILITY = 0.01
 
-os.makedirs("models/transaction_fraud_detection", exist_ok = True)
-os.makedirs("ordinal_encoders/transaction_fraud_detection", exist_ok = True)
+os.makedirs(MODEL_FOLDER, exist_ok = True)
+os.makedirs(ORDINAL_ENCODER_PATH, exist_ok = True)
 os.makedirs("data", exist_ok = True)
 
 
@@ -33,12 +32,13 @@ def main():
     MODEL_TYPE = "AdaptiveRandomForestClassifier"
     mlflow.set_tracking_uri("http://mlflow:5000")
     mlflow.set_experiment("Transaction Fraud Detection")
-    ordinal_encoder_1, ordinal_encoder_2 = load_or_create_ordinal_encoders(
-        "ordinal_encoders/transaction_fraud_detection"
+    ordinal_encoder = load_or_create_ordinal_encoder(
+        ORDINAL_ENCODER_PATH
     )
     scaler = preprocessing.StandardScaler()
     model = load_or_create_model(
         MODEL_TYPE,
+        MODEL_FOLDER
         #from_scratch = True
     )
     # Create consumer
@@ -87,7 +87,7 @@ def main():
                     'cvv_provided':          transaction['cvv_provided'], # Boolean flag
                     'billing_address_match': transaction['billing_address_match'], # Boolean flag
                 }
-                x, ordinal_encoder_1, ordinal_encoder_2 = process_sample(x, ordinal_encoder_1, ordinal_encoder_2)
+                x, ordinal_encoder = process_sample(x, ordinal_encoder)
                 y = transaction['is_fraud']
                 # Update the model
                 prediction = model.predict_one(x)
@@ -108,14 +108,10 @@ def main():
                             print(f"Error updating metric {metric}: {str(e)}")
                         mlflow.log_metric(metric, binary_classification_metrics_dict[metric].get())
                         #print(f"{metric}: {binary_classification_metrics_dict[metric].get():.2%}")
-                        with open(ORDINAL_ENCODER_1_PATH, 'wb') as f:
-                            pickle.dump(ordinal_encoder_1, f)
-                        with open(ORDINAL_ENCODER_2_PATH, 'wb') as f:
-                            pickle.dump(ordinal_encoder_2, f)
-                        mlflow.log_artifact(ORDINAL_ENCODER_1_PATH)
-                        mlflow.log_artifact(ORDINAL_ENCODER_2_PATH)
-                MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
-                if message.offset % (BATCH_SIZE_OFFSET * 100) == 0:
+                    with open(ORDINAL_ENCODER_PATH, 'wb') as f:
+                        pickle.dump(ordinal_encoder, f)
+                    mlflow.log_artifact(ORDINAL_ENCODER_PATH)
+                    MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
                     with open(MODEL_VERSION, 'wb') as f:
                         pickle.dump(model, f)
                     mlflow.log_artifact(MODEL_VERSION)
@@ -125,12 +121,11 @@ def main():
             print(f"Error processing message: {str(e)}")
             print("Stopping consumer...")
         finally:
+            MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
             with open(MODEL_VERSION, 'wb') as f:
                 pickle.dump(model, f)
-            with open(ORDINAL_ENCODER_1_PATH, 'wb') as f:
-                pickle.dump(ordinal_encoder_1, f)
-            with open(ORDINAL_ENCODER_2_PATH, 'wb') as f:
-                pickle.dump(ordinal_encoder_2, f)
+            with open(ORDINAL_ENCODER_PATH, 'wb') as f:
+                pickle.dump(ordinal_encoder, f)
             data_df.to_parquet(DATA_PATH)
             consumer.close()
             mlflow.end_run()

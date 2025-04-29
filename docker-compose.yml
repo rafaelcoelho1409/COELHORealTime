@@ -49,6 +49,28 @@ services:
     networks:
       - my_network
 
+  mlflow:
+    build:
+      context: ./mlflow_app
+      dockerfile: Dockerfile.mlflow
+    container_name: mlflow_app
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./mlflow_app:/app  # Bind mount for live code updates
+    depends_on:
+      - kafka-producer
+    healthcheck:
+      # Use curl to check if the MLflow UI endpoint is responding with HTTP 200 OK
+      # The -f flag makes curl fail silently on server errors (like 5xx) but exit non-zero.
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 15s        # Check every 15 seconds
+      timeout: 30s         # Wait for the check to complete
+      retries: 5           # Try 5 times before marking as unhealthy
+      start_period: 30s    # Optional: Grace period for startup (don't fail checks immediately)
+    networks:
+      - my_network
+
   # FastAPI Service
   fastapi:
     build:
@@ -60,7 +82,8 @@ services:
     volumes:
       - ./fastapi_app:/app  # Bind mount for live code updates
     depends_on:
-      - kafka-producer
+      mlflow:
+        condition: service_healthy
     networks:
       - my_network
 
@@ -76,18 +99,6 @@ services:
       - ./streamlit_app:/app  # Bind mount for live code updates
     depends_on:
       - fastapi
-    networks:
-      - my_network
-
-  mlflow:
-    build:
-      context: ./mlflow_app
-      dockerfile: Dockerfile.mlflow
-    container_name: mlflow_app
-    ports:
-      - "5000:5000"
-    volumes:
-      - ./mlflow_app:/app  # Bind mount for live code updates
     networks:
       - my_network
 

@@ -4,10 +4,8 @@ from streamlit_extras.metric_cards import style_metric_cards
 import requests
 import pandas as pd
 from faker import Faker
-import uuid
 import datetime as dt
 import plotly.express as px
-import mlflow
 from functions import (
     timestamp_to_api_response
 )

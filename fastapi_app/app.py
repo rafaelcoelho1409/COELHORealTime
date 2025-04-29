@@ -11,24 +11,23 @@ from functions import (
     load_or_create_model,
     load_or_create_data,
     create_consumer,
-    load_or_create_ordinal_encoders,
-    CustomOrdinalEncoder # Assuming this is needed
+    load_or_create_ordinal_encoder,
 )
 
 # Initialize global variables as None or placeholder BEFORE startup
 consumer = None
 data = None
 model = None
-ordinal_encoder_1 = None
-ordinal_encoder_2 = None
+ordinal_encoder = None
 initial_sample = None # Also move this initialization
+
+MODEL_FOLDER = "models/transaction_fraud_detection"
 
 class Healthcheck(BaseModel):
     model_load: str | None = None # "success", "failed", "not_attempted"
     model_message: str | None = None
     model_type: str | None = None
-    ordinal_encoder_1_load: str | None = None # "success", "failed", "not_attempted"
-    ordinal_encoder_2_load: str | None = None # "success", "failed", "not_attempted"
+    ordinal_encoder_load: str | None = None # "success", "failed", "not_attempted"
     data_load: str | None = None # Added data load status
     data_message: str | None = None # Added data load message
     initial_data_sample_loaded: bool | None = None # Added sample status
@@ -38,8 +37,7 @@ class Healthcheck(BaseModel):
 # Initialize healthcheck with default state
 healthcheck = Healthcheck(
     model_load = "not_attempted",
-    ordinal_encoder_1_load = "not_attempted",
-    ordinal_encoder_2_load = "not_attempted",
+    ordinal_encoder_load = "not_attempted",
     data_load = "not_attempted",
     initial_data_sample_loaded = False
 )
@@ -47,7 +45,7 @@ healthcheck = Healthcheck(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global consumer, data, model, ordinal_encoder_1, ordinal_encoder_2, initial_sample, healthcheck
+    global consumer, data, model, ordinal_encoder, initial_sample, healthcheck
     # 1. Load data
     try:
         print("Loading data...")
@@ -79,7 +77,9 @@ async def lifespan(app: FastAPI):
     # 3. Load or create the model
     try:
         print("Loading model...")
-        model = load_or_create_model("AdaptiveRandomForestClassifier") # Or use a config variable
+        model = load_or_create_model(
+            "AdaptiveRandomForestClassifier",
+            MODEL_FOLDER) # Or use a config variable
         healthcheck.model_load = "success"
         healthcheck.model_message = "Model loaded successfully"
         print("Model loaded successfully.")
@@ -90,16 +90,14 @@ async def lifespan(app: FastAPI):
     # 4. Create or load the ordinal encoders
     try:
         print("Loading encoders...")
-        ordinal_encoder_1, ordinal_encoder_2 = load_or_create_ordinal_encoders(
+        ordinal_encoder = load_or_create_ordinal_encoder(
             "ordinal_encoders/transaction_fraud_detection"
         )
-        healthcheck.ordinal_encoder_1_load = "success"
-        healthcheck.ordinal_encoder_2_load = "success"
+        healthcheck.ordinal_encoder_load = "success"
         print("Encoders loaded successfully.")
     except Exception as e:
-        healthcheck.ordinal_encoder_1_load = "failed"
-        healthcheck.ordinal_encoder_2_load = "failed"
-        print(f"Error loading encoders: {e}", file = sys.stderr)
+        healthcheck.ordinal_encoder_load = "failed"
+        print(f"Error loading encoder: {e}", file = sys.stderr)
     try:
         print("Loading MLflow...")
         mlflow.set_tracking_uri("http://mlflow:5000")
@@ -215,17 +213,20 @@ async def update_initial_sample(transaction: TransactionData):
 
 @app.post("/predict")
 async def predict_fraud(transaction: TransactionData):
-    global model, ordinal_encoder_1, ordinal_encoder_2
-    if model is None or ordinal_encoder_1 is None or ordinal_encoder_2 is None:
+    global ordinal_encoder, model
+    if model is None or ordinal_encoder is None:
         raise HTTPException(
             status_code = 503, 
             detail = "Model or encoders are not loaded.")
     x = transaction.model_dump()
     try:
-        ordinal_encoder_1, ordinal_encoder_2 = load_or_create_ordinal_encoders(
+        model = load_or_create_model(
+            "AdaptiveRandomForestClassifier",
+            MODEL_FOLDER)
+        ordinal_encoder = load_or_create_ordinal_encoder(
             "ordinal_encoders/transaction_fraud_detection"
         )
-        processed_x, _, _ = process_sample(x, ordinal_encoder_1, ordinal_encoder_2) # Discard returned encoders if they are meant to be global state
+        processed_x, _ = process_sample(x, ordinal_encoder) # Discard returned encoders if they are meant to be global state
         y_pred_proba = model.predict_proba_one(processed_x) # Use processed data
         fraud_probability = y_pred_proba.get(1, 0.0) # Use 0.0 as default
         binary_prediction = 1 if fraud_probability >= 0.5 else 0
@@ -241,30 +242,18 @@ async def predict_fraud(transaction: TransactionData):
             detail = f"Prediction failed for transaction {transaction.transaction_id}: {e}")
         
 
-@app.get("/get_ordinal_encoder_1_tfd")
-async def get_ordinal_encoder_1():
-    global ordinal_encoder_1
-    ordinal_encoder_1, _ = load_or_create_ordinal_encoders(
+@app.get("/get_ordinal_encoder_tfd")
+async def get_ordinal_encoder():
+    global ordinal_encoder
+    ordinal_encoder = load_or_create_ordinal_encoder(
         "ordinal_encoders/transaction_fraud_detection"
     )
-    if ordinal_encoder_1 is None:
+    if ordinal_encoder is None:
         raise HTTPException(
             status_code = 503, 
             detail = "Ordinal encoder 1 is not loaded.")
-    return ordinal_encoder_1.get_feature_mappings()
+    return ordinal_encoder.get_feature_mappings()
 
-
-@app.get("/get_ordinal_encoder_2_tfd")
-async def get_ordinal_encoder_2():
-    global ordinal_encoder_2
-    _, ordinal_encoder_2 = load_or_create_ordinal_encoders(
-        "ordinal_encoders/transaction_fraud_detection"
-    )
-    if ordinal_encoder_2 is None:
-        raise HTTPException(
-            status_code = 503, 
-            detail = "Ordinal encoder 2 is not loaded.")
-    return ordinal_encoder_2.get_feature_mappings()
 
 
 class MLflowMetricsRequest(BaseModel):
