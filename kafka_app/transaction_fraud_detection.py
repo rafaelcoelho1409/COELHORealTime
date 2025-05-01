@@ -10,7 +10,7 @@ import click
 fake = Faker()
 
 KAFKA_TOPIC = 'transaction_fraud_detection'
-KAFKA_BROKERS = 'kafka-producer:9092' # Use the internal Docker DNS name
+KAFKA_BROKERS = 'kafka:9092' # Use the internal Docker DNS name
 
 # --- Constants ---
 # Realistic choices for categorical features
@@ -31,7 +31,7 @@ def create_producer():
             producer = KafkaProducer(
                 bootstrap_servers = KAFKA_BROKERS,
                 value_serializer = lambda v: json.dumps(v).encode('utf-8'),
-                client_id = 'fraud-producer'
+                client_id = f"{KAFKA_TOPIC}_client"#'fraud-producer'
             )
             print("Kafka Producer connected!")
             return producer

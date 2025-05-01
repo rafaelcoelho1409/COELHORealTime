@@ -22,3 +22,5 @@ USER 1001
 
 # Custom entrypoint that starts both Kafka and producer
 ENTRYPOINT ["/producer-entrypoint.sh"]
+
+#IMPORTANT OBSERVATION: don't remove producer folder, it must be separated

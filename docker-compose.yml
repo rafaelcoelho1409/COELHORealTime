@@ -11,23 +11,11 @@ volumes:
   airflow_logs:
 
 services:
-  zookeeper:
-    image: docker.io/bitnami/zookeeper:3.8.2
-    container_name: zookeeper
-    ports:
-      - "2181:2181"
-    volumes:
-      - shared-workspace:/opt/workspace
-    environment:
-      - ALLOW_ANONYMOUS_LOGIN=yes
-    networks:
-      - my_network
-
-  kafka-producer:  # Your custom Kafka + producer container
+  kafka:  # Your custom Kafka + producer container
     build:
-      context: ./data_producer
+      context: ./kafka_app
       dockerfile: Dockerfile.kafka
-    container_name: kafka-producer
+    container_name: kafka_app
     ports:
       - "9092:9092"
     volumes:
@@ -37,15 +25,14 @@ services:
       - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092
       - KAFKA_CFG_NODE_ID=1
       - KAFKA_CFG_PROCESS_ROLES=controller,broker
-      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@kafka-producer:9093
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@kafka:9093
       - KAFKA_CFG_LISTENERS=CLIENT_INTERNAL://:29092,CLIENT_EXTERNAL://:9092,CONTROLLER://:9093
-      - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT_INTERNAL://kafka-producer:29092,CLIENT_EXTERNAL://localhost:9092
+      - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT_INTERNAL://kafka:29092,CLIENT_EXTERNAL://localhost:9092
       - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CLIENT_INTERNAL:PLAINTEXT,CLIENT_EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT 
       - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
       - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=CLIENT_INTERNAL
       # Don't forget to remove the CLIENT_EXTERNAL listener in production
-    depends_on:
-      - zookeeper
+      # Correct PLAINTEXT settings when in production (security vulnerability)
     networks:
       - my_network
 
@@ -59,7 +46,7 @@ services:
     volumes:
       - ./mlflow_app:/app  # Bind mount for live code updates
     depends_on:
-      - kafka-producer
+      - kafka
     healthcheck:
       # Use curl to check if the MLflow UI endpoint is responding with HTTP 200 OK
       # The -f flag makes curl fail silently on server errors (like 5xx) but exit non-zero.

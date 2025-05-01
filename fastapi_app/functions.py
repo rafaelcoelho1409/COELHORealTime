@@ -1,5 +1,6 @@
 import pickle
 import os
+import sys
 from typing import Any, Dict, Hashable
 from river import (
     compose, 
@@ -20,7 +21,7 @@ import datetime as dt
 
 
 # Configuration
-KAFKA_BROKERS = 'kafka-producer:29092'  # Adjust as needed
+KAFKA_BROKERS = 'kafka:29092'  # Adjust as needed
 
 ###---Functions----####
 #Data processing functions
@@ -142,10 +143,12 @@ def load_or_create_ordinal_encoder(ordinal_encoders_folder):
     try:
         with open(f"{ordinal_encoders_folder}/ordinal_encoder.pkl", 'rb') as f:
             ordinal_encoder = pickle.load(f)
-    except FileNotFoundError:
+    except FileNotFoundError as e:
         ordinal_encoder = CustomOrdinalEncoder()
-    except:
+        print(f"Creating ordinal encoder: {e}", file = sys.stderr)
+    except Exception as e:
         ordinal_encoder = CustomOrdinalEncoder()
+        print(f"Error loading ordinal encoder: {e}", file = sys.stderr)
     return ordinal_encoder
 
 
@@ -311,7 +314,7 @@ def create_consumer(project_name):
         bootstrap_servers = KAFKA_BROKERS,
         auto_offset_reset = 'earliest',
         value_deserializer = lambda v: json.loads(v.decode('utf-8')),
-        group_id = 'river_trainer'
+        group_id = f'{KAFKA_TOPIC}_group'
     )
 
 
