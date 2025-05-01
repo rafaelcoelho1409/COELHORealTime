@@ -16,6 +16,12 @@ while ! nc -z localhost 9092; do
 done
 
 # Start Python producers
-python3 transaction_fraud_detection.py &
+python3 transaction_fraud_detection.py \
+  --fraud-probability 0.01 && \
+  --acount-age-days-limit 5 && \
+  --merchant-id-limit 200  && \
+  --cvv-provided-missing-probability 0.05 && \
+  --billing-address-match-missing-probability 0.1 && \
+  --high-value-fraud-probability 0.8 &
 
 wait

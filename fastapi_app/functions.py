@@ -20,9 +20,7 @@ import datetime as dt
 
 
 # Configuration
-#KAFKA_TOPIC = 'transaction_fraud_detection'
 KAFKA_BROKERS = 'kafka-producer:29092'  # Adjust as needed
-#DATA_PATH = 'river_data.parquet'
 
 ###---Functions----####
 #Data processing functions

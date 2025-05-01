@@ -5,6 +5,7 @@ import uuid
 from kafka import KafkaProducer
 from faker import Faker
 import datetime
+import click
 
 fake = Faker()
 
@@ -12,7 +13,6 @@ KAFKA_TOPIC = 'transaction_fraud_detection'
 KAFKA_BROKERS = 'kafka-producer:9092' # Use the internal Docker DNS name
 
 # --- Constants ---
-FRAUD_PROBABILITY = 0.01 # 1% base probability of a transaction being fraudulent
 # Realistic choices for categorical features
 TRANSACTION_TYPES = ['purchase', 'withdrawal', 'transfer', 'payment', 'deposit']
 PAYMENT_METHODS = ['credit_card', 'debit_card', 'paypal', 'bank_transfer', 'crypto']
@@ -40,7 +40,14 @@ def create_producer():
             print("Retrying in 5 seconds...")
             time.sleep(5)
 
-def generate_transaction():
+
+def generate_transaction(
+        fraud_probability,
+        account_age_days_limit,
+        merchant_id_limit,
+        cvv_provided_missing_probability,
+        billing_address_match_missing_probability,
+        high_value_fraud_probability):
     """
     Generates a simulated financial transaction with realistic features
     for fraud detection using incremental learning.
@@ -50,11 +57,11 @@ def generate_transaction():
     base_random = random.random()
     # --- Simulate User Profile ---
     # Simulate account age - newer accounts might be slightly riskier
-    account_age_days = random.randint(0, 365 * 5) # Account age from 0 days to 5 years
+    account_age_days = random.randint(0, 365 * account_age_days_limit) # Account age from 0 days to limit years
     # --- Simulate Basic Transaction Info ---
     transaction_type = random.choice(TRANSACTION_TYPES)
     payment_method = random.choice(PAYMENT_METHODS)
-    merchant_id = f'merchant_{random.randint(1, 200)}' # Increased merchant variety
+    merchant_id = f'merchant_{random.randint(1, merchant_id_limit)}' # Increased merchant variety
     currency = random.choice(CURRENCIES)
     product_category = random.choice(PRODUCT_CATEGORIES)
     # --- Simulate Device and Context ---
@@ -70,17 +77,23 @@ def generate_transaction():
     }
     # --- Simulate Flags often used in Fraud Detection ---
     # Simulate CVV presence (might be missing in fraudulent attempts)
-    cvv_provided = random.choices([True, False], weights=[0.95, 0.05], k=1)[0]
+    cvv_provided = random.choices(
+        [True, False], 
+        weights = [1 - cvv_provided_missing_probability, cvv_provided_missing_probability], 
+        k = 1)[0]
     # Simulate billing address match (mismatch can be a red flag)
-    billing_address_match = random.choices([True, False], weights=[0.9, 0.1], k=1)[0]
+    billing_address_match = random.choices(
+        [True, False], 
+        weights = [1 - billing_address_match_missing_probability, billing_address_match_missing_probability], 
+        k = 1)[0]
     # --- Determine Fraud Status & Adjust Features ---
     # Initial determination based on probability
-    if base_random < FRAUD_PROBABILITY:
+    if base_random < fraud_probability:
         is_fraud = True
     # --- Generate Amount (influenced by fraud status) ---
     if is_fraud:
         # Fraudulent transactions might be very high, or sometimes suspiciously small (testing cards)
-        if random.random() < 0.8: # 80% chance of high-value fraud
+        if random.random() < high_value_fraud_probability: # 80% chance of high-value fraud
              amount = round(random.uniform(300.0, 6000.0), 2)
         else: # 20% chance of low-value fraud (e.g., card testing)
              amount = round(random.uniform(1.0, 50.0), 2)
@@ -91,7 +104,11 @@ def generate_transaction():
             billing_address_match = False
         # Fraud might target specific categories more often
         if random.random() < 0.2:
-             product_category = random.choice(['electronics', 'luxury_items', 'digital_goods', 'gambling'])
+             product_category = random.choice([
+                'electronics', 
+                'luxury_items', 
+                'digital_goods', 
+                'gambling'])
         # Fraud might originate from newer accounts more often
         if random.random() < 0.15:
             account_age_days = random.randint(0, 30) # Fraud from accounts < 1 month old
@@ -129,12 +146,58 @@ def generate_transaction():
     }
     return transaction
 
-if __name__ == "__main__":
+
+@click.command()
+@click.option(
+    '--fraud-probability', 
+    default = 0.01, 
+    type = float, 
+    help = 'The probability of a transaction being fraudulent.')
+@click.option(
+    '--account-age-days-limit', 
+    default = 5, 
+    type = int, 
+    help = 'The maximum age of an account in years.')
+@click.option(
+    '--merchant-id-limit', 
+    default = 200, 
+    type = int, 
+    help = 'The maximum number of unique merchant IDs to use.')
+@click.option(
+    '--cvv-provided-missing-probability',
+    default = 0.05,
+    type = float,
+    help = 'The probability of a CVV being missing.')
+@click.option(
+    '--billing-address-match-missing-probability',
+    default = 0.1,
+    type = float,
+    help = 'The probability of a billing address mismatch.')
+@click.option(
+    '--high-value-fraud-probability',
+    default = 0.8,
+    type = float,
+    help = 'The probability of a high-value transaction being fraudulent.'
+)
+def run_producer(
+    fraud_probability,
+    account_age_days_limit,
+    merchant_id_limit,
+    cvv_provided_missing_probability,
+    billing_address_match_missing_probability,
+    high_value_fraud_probability):
     producer = create_producer()
     print("Starting to send transaction events...")
     try:
         while True:
-            transaction = generate_transaction()
+            transaction = generate_transaction(
+                fraud_probability,
+                account_age_days_limit,
+                merchant_id_limit,
+                cvv_provided_missing_probability,
+                billing_address_match_missing_probability,
+                high_value_fraud_probability
+            )
             producer.send(KAFKA_TOPIC, value = transaction)
             # Limit console output frequency for readability
             if random.random() < 0.1:
@@ -148,3 +211,6 @@ if __name__ == "__main__":
             producer.flush() # Ensure all messages are sent
             producer.close()
             print("Producer closed.")
+
+if __name__ == "__main__":
+    run_producer()

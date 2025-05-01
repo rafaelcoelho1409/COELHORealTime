@@ -6,3 +6,4 @@ scikit-learn
 kafka-python
 mlflow
 faker
+click

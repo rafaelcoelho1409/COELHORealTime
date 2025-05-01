@@ -108,9 +108,9 @@ def main():
                             print(f"Error updating metric {metric}: {str(e)}")
                         mlflow.log_metric(metric, binary_classification_metrics_dict[metric].get())
                         #print(f"{metric}: {binary_classification_metrics_dict[metric].get():.2%}")
-                    with open(ORDINAL_ENCODER_PATH, 'wb') as f:
+                    with open(f"{ORDINAL_ENCODER_PATH}/ordinal_encoder.pkl", 'wb') as f:
                         pickle.dump(ordinal_encoder, f)
-                    mlflow.log_artifact(ORDINAL_ENCODER_PATH)
+                    mlflow.log_artifact(f"{ORDINAL_ENCODER_PATH}/ordinal_encoder.pkl")
                     MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
                     with open(MODEL_VERSION, 'wb') as f:
                         pickle.dump(model, f)
@@ -124,7 +124,7 @@ def main():
             MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
             with open(MODEL_VERSION, 'wb') as f:
                 pickle.dump(model, f)
-            with open(ORDINAL_ENCODER_PATH, 'wb') as f:
+            with open(f"{ORDINAL_ENCODER_PATH}/ordinal_encoder.pkl", 'wb') as f:
                 pickle.dump(ordinal_encoder, f)
             data_df.to_parquet(DATA_PATH)
             consumer.close()
