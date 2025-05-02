@@ -6,6 +6,7 @@ from kafka import KafkaProducer
 from faker import Faker
 import datetime
 import click
+from pprint import pprint
 
 fake = Faker()
 
@@ -31,7 +32,7 @@ def create_producer():
             producer = KafkaProducer(
                 bootstrap_servers = KAFKA_BROKERS,
                 value_serializer = lambda v: json.dumps(v).encode('utf-8'),
-                client_id = f"{KAFKA_TOPIC}_client"#'fraud-producer'
+                client_id = f"{KAFKA_TOPIC}_client"
             )
             print("Kafka Producer connected!")
             return producer
@@ -200,8 +201,8 @@ def run_producer(
             )
             producer.send(KAFKA_TOPIC, value = transaction)
             # Limit console output frequency for readability
-            if random.random() < 0.1:
-                 print(f"Sent: {transaction}")
+            if random.random() < 0.05:
+                pprint(f"Transaction Fraud Detection: {transaction}")
             # Simulate varying transaction rate
             time.sleep(random.uniform(0.05, 0.5))
     except KeyboardInterrupt:
