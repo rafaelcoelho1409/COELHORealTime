@@ -4,12 +4,7 @@ import sys
 from typing import Any, Dict, Hashable
 from river import (
     compose, 
-    linear_model, 
     metrics, 
-    optim,
-    tree,
-    ensemble,
-    imblearn,
     drift,
     forest
 )
@@ -143,6 +138,7 @@ def load_or_create_ordinal_encoder(ordinal_encoders_folder):
     try:
         with open(f"{ordinal_encoders_folder}/ordinal_encoder.pkl", 'rb') as f:
             ordinal_encoder = pickle.load(f)
+        print("Ordinal encoder loaded from disk.")
     except FileNotFoundError as e:
         ordinal_encoder = CustomOrdinalEncoder()
         print(f"Creating ordinal encoder: {e}", file = sys.stderr)
@@ -152,147 +148,105 @@ def load_or_create_ordinal_encoder(ordinal_encoders_folder):
     return ordinal_encoder
 
 
-def process_sample(x, ordinal_encoder):
-    pipe1 = compose.Select(
-        "amount",
-        "account_age_days",
-        "cvv_provided",
-        "billing_address_match"
-    )
-    pipe1.learn_one(x)
-    x1 = pipe1.transform_one(x)
-    pipe2a = compose.Select(
-        "currency",
-        "merchant_id",
-        "payment_method",
-        "product_category",
-        "transaction_type",
-        #"user_agent"
-    )
-    pipe2a.learn_one(x)
-    x_pipe_2 = pipe2a.transform_one(x)
-    pipe3a = compose.Select(
-        "device_info"
-    )
-    pipe3a.learn_one(x)
-    x_pipe_3 = pipe3a.transform_one(x)
-    pipe3b = compose.FuncTransformer(
-        extract_device_info,
-    )
-    pipe3b.learn_one(x_pipe_3)
-    x_pipe_3 = pipe3b.transform_one(x_pipe_3)
-    pipe4a = compose.Select(
-        "timestamp",
-    )
-    pipe4a.learn_one(x)
-    x_pipe_4 = pipe4a.transform_one(x)
-    pipe4b = compose.FuncTransformer(
-        extract_timestamp_info,
-    )
-    pipe4b.learn_one(x_pipe_4)
-    x_pipe_4 = pipe4b.transform_one(x_pipe_4)
-    x_to_encode = x_pipe_2 | x_pipe_3 | x_pipe_4
-    ordinal_encoder.learn_one(x_to_encode)
-    x2 = ordinal_encoder.transform_one(x_to_encode)
-    return x1 | x2, ordinal_encoder
+def process_sample(x, ordinal_encoder, project_name):
+    if project_name == "Transaction Fraud Detection":
+        pipe1 = compose.Select(
+            "amount",
+            "account_age_days",
+            "cvv_provided",
+            "billing_address_match"
+        )
+        pipe1.learn_one(x)
+        x1 = pipe1.transform_one(x)
+        pipe2 = compose.Select(
+            "currency",
+            "merchant_id",
+            "payment_method",
+            "product_category",
+            "transaction_type",
+            #"user_agent"
+        )
+        pipe2.learn_one(x)
+        x_pipe_2 = pipe2.transform_one(x)
+        pipe3a = compose.Select(
+            "device_info"
+        )
+        pipe3a.learn_one(x)
+        x_pipe_3 = pipe3a.transform_one(x)
+        pipe3b = compose.FuncTransformer(
+            extract_device_info,
+        )
+        pipe3b.learn_one(x_pipe_3)
+        x_pipe_3 = pipe3b.transform_one(x_pipe_3)
+        pipe4a = compose.Select(
+            "timestamp",
+        )
+        pipe4a.learn_one(x)
+        x_pipe_4 = pipe4a.transform_one(x)
+        pipe4b = compose.FuncTransformer(
+            extract_timestamp_info,
+        )
+        pipe4b.learn_one(x_pipe_4)
+        x_pipe_4 = pipe4b.transform_one(x_pipe_4)
+        x_to_encode = x_pipe_2 | x_pipe_3 | x_pipe_4
+        ordinal_encoder.learn_one(x_to_encode)
+        x2 = ordinal_encoder.transform_one(x_to_encode)
+        return x1 | x2, ordinal_encoder
+    elif project_name == "Estimated Time of Arrival":
+        pipe1 = compose.Select(
+            'estimated_distance_km',
+            'temperature_celsius',
+            'hour_of_day',
+            'driver_rating',
+            'initial_estimated_travel_time_seconds',
+            'debug_traffic_factor',
+            'debug_weather_factor',
+            'debug_incident_delay_seconds',
+            'debug_driver_factor'
+        )
+        pipe1.learn_one(x)
+        x1 = pipe1.transform_one(x)
+        pipe2 = compose.Select(
+            'driver_id',
+            'vehicle_id',
+            'weather',
+            'vehicle_type'
+        )
+        pipe2.learn_one(x)
+        x_pipe_2 = pipe2.transform_one(x)
+        pipe3a = compose.Select(
+            "timestamp",
+        )
+        pipe3a.learn_one(x)
+        x_pipe_3 = pipe3a.transform_one(x)
+        pipe3b = compose.FuncTransformer(
+            extract_timestamp_info,
+        )
+        pipe3b.learn_one(x_pipe_3)
+        x_pipe_3 = pipe3b.transform_one(x_pipe_3)
+        x_to_encode = x_pipe_2 | x_pipe_3
+        ordinal_encoder.learn_one(x_to_encode)
+        x2 = ordinal_encoder.transform_one(x_to_encode)
+        return x1 | x2, ordinal_encoder
 
 
-def load_or_create_model(model_type, folder_path = None, from_scratch = False):
+def load_or_create_model(project_name, folder_path = None):
     """Load existing model or create a new one"""
-    if from_scratch == False:
-        #Take the most recent file
-        try:
-            model_files = os.listdir(folder_path)
-            model_files = [
-                os.path.join(folder_path, entry) 
-                for entry 
-                in model_files 
-                if os.path.isfile(os.path.join(folder_path, entry))]
-            #Get the most recent model
-            MODEL_PATH = max(model_files, key = os.path.getmtime)
-            with open(MODEL_PATH, 'rb') as f:
-                model = pickle.load(f)
-        except:
-            if model_type == "LogisticRegression":
-                model = linear_model.LogisticRegression(
-                    loss = optim.losses.CrossEntropyLoss(
-                        class_weight = {0: 1, 1: 10}),
-                    optimizer = optim.SGD(0.01)
-                )
-            elif model_type == "ADWINBoostingClassifier":
-                base_estimator = tree.HoeffdingAdaptiveTreeClassifier(
-                    splitter = tree.splitter.HistogramSplitter(),
-                    drift_detector = drift.ADWIN(),
-                    max_depth = 20,
-                    nominal_attributes = [
-                        "currency",
-                        "merchant_id",
-                        "payment_method",
-                        "product_category",
-                        "transaction_type",
-                        #"user_agent",
-                        "device_info_os",
-                        "device_info_browser"
-                    ],
-                    leaf_prediction = 'mc',#'nba',
-                    grace_period = 200,
-                    delta = 1e-7
-                )
-                boosting_classifier = ensemble.ADWINBoostingClassifier(
-                    model = base_estimator,
-                    n_models = 15,
-                )
-                model = imblearn.RandomOverSampler(
-                    classifier = boosting_classifier,
-                    desired_dist = {1: 0.5, 0: 0.5},
-                    seed = 42
-                )
-            elif model_type == "AdaptiveRandomForestClassifier":
-                model = forest.ARFClassifier(
-                    n_models = 10,                  # More models = better accuracy but higher latency
-                    drift_detector = drift.ADWIN(),  # Auto-detects concept drift
-                    warning_detector = drift.ADWIN(),
-                    metric = metrics.ROCAUC(),       # Optimizes for imbalanced data
-                    max_features = "sqrt",           # Better for high-dimensional data
-                    lambda_value = 6,               # Controls tree depth (higher = more complex)
-                    seed = 42
-                )
-    else:
-        if model_type == "LogisticRegression":
-            model = linear_model.LogisticRegression(
-                loss = optim.losses.CrossEntropyLoss(
-                    class_weight = {0: 1, 1: 10}),
-                optimizer = optim.SGD(0.01)
-            )
-        elif model_type == "ADWINBoostingClassifier":
-            base_estimator = tree.HoeffdingAdaptiveTreeClassifier(
-                splitter = tree.splitter.HistogramSplitter(),
-                drift_detector = drift.ADWIN(),
-                max_depth = 20,
-                nominal_attributes = [
-                    "currency",
-                    "merchant_id",
-                    "payment_method",
-                    "product_category",
-                    "transaction_type",
-                    #"user_agent",
-                    "os",
-                    "browser"
-                ],
-                leaf_prediction = 'mc',#'nba',
-                grace_period = 200,
-                delta = 1e-7
-            )
-            boosting_classifier = ensemble.ADWINBoostingClassifier(
-                model = base_estimator,
-                n_models = 15,
-            )
-            model = imblearn.RandomOverSampler(
-                classifier = boosting_classifier,
-                desired_dist = {1: 0.5, 0: 0.5},
-                seed = 42
-            )
-        elif model_type == "AdaptiveRandomForestClassifier":
+    #Take the most recent file
+    try:
+        model_files = os.listdir(folder_path)
+        model_files = [
+            os.path.join(folder_path, entry) 
+            for entry 
+            in model_files 
+            if os.path.isfile(os.path.join(folder_path, entry))]
+        #Get the most recent model
+        MODEL_PATH = max(model_files, key = os.path.getmtime)
+        with open(MODEL_PATH, 'rb') as f:
+            model = pickle.load(f)
+        print("Model loaded from disk.")
+    except:
+        if project_name == "Transaction Fraud Detection":
             model = forest.ARFClassifier(
                 n_models = 10,                  # More models = better accuracy but higher latency
                 drift_detector = drift.ADWIN(),  # Auto-detects concept drift
@@ -302,13 +256,27 @@ def load_or_create_model(model_type, folder_path = None, from_scratch = False):
                 lambda_value = 6,               # Controls tree depth (higher = more complex)
                 seed = 42
             )
+        elif project_name == "Estimated Time of Arrival":
+            model = forest.ARFRegressor(
+                n_models = 10,                  # More models = better accuracy but higher latency
+                drift_detector = drift.ADWIN(),  # Auto-detects concept drift
+                warning_detector = drift.ADWIN(),
+                metric = metrics.RMSE(),       # Optimizes for imbalanced data
+                max_features = "sqrt",           # Better for high-dimensional data
+                lambda_value = 6,               # Controls tree depth (higher = more complex)
+                seed = 42
+            )
+        print(f"Creating model: {project_name}", file = sys.stderr)
     return model
 
 
 def create_consumer(project_name):
     """Create and return Kafka consumer"""
-    if project_name == "Transaction Fraud Detection":
-        KAFKA_TOPIC = "transaction_fraud_detection"
+    consumer_name_dict = {
+        "Transaction Fraud Detection": "transaction_fraud_detection",
+        "Estimated Time of Arrival": "estimated_time_of_arrival"
+    }
+    KAFKA_TOPIC = consumer_name_dict[project_name]
     return KafkaConsumer(
         KAFKA_TOPIC,
         bootstrap_servers = KAFKA_BROKERS,
@@ -320,13 +288,18 @@ def create_consumer(project_name):
 
 def load_or_create_data(consumer, project_name):
     """Load existing model or create a new one"""
-    if project_name == "Transaction Fraud Detection":
-        DATA_PATH = "transaction_fraud_detection_data.parquet"
+    data_name_dict = {
+        "Transaction Fraud Detection": "transaction_fraud_detection_data.parquet",
+        "Estimated Time of Arrival": "estimated_time_of_arrival_data.parquet"
+    }
+    DATA_PATH = data_name_dict[project_name]
     try:
         data_df = pd.read_parquet(DATA_PATH)
+        print("Data loaded from disk.")
     except:
         for message in consumer:
             transaction = message.value
             break
         data_df = pd.DataFrame([transaction])
+        print(f"Creating data: {project_name}", file = sys.stderr)  
     return data_df

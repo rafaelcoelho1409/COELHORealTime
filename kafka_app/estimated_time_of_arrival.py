@@ -191,7 +191,8 @@ def run_producer(
             # Limit console output frequency for readability
             if random.random() < 0.05:
                 # Print only key info to keep console cleaner
-                pprint(f"Estimated Time of Arrival: {eta_event}")
+                print("###--- Estimated Time of Arrival ---###")
+                pprint(eta_event)
             # Simulate varying request rate (e.g., new ride request every 0.1 to 1 second)
             time.sleep(random.uniform(0.1, 1.0))
     except KeyboardInterrupt:

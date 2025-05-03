@@ -10,6 +10,7 @@ st.set_page_config(
 pages_dict = {
     #"Home": "applications/home.py",
     "Transaction Fraud Detection": "applications/transaction_fraud_detection.py",
+    "Estimated Time of Arrival": "applications/estimated_time_of_arrival.py",
 }
 pages = {
     "Home": st.Page("applications/home.py", title = "Home", icon = ":material/home:")} | {
@@ -23,6 +24,7 @@ pg = st.navigation({
         pages["Home"]],
     "Applications": [
         pages["Transaction Fraud Detection"],
+        pages["Estimated Time of Arrival"],
     ],
 })
 

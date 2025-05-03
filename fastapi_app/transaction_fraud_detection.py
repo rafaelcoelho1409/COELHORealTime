@@ -1,7 +1,5 @@
 from river import (
-    metrics, 
-    preprocessing,
-    imblearn
+    metrics
 )
 import pickle
 import os
@@ -27,26 +25,21 @@ os.makedirs("data", exist_ok = True)
 
 def main():
     # Initialize model and metrics
-    #MODEL_TYPE = "LogisticRegression"
-    #MODEL_TYPE = "ADWINBoostingClassifier"
-    MODEL_TYPE = "AdaptiveRandomForestClassifier"
     mlflow.set_tracking_uri("http://mlflow:5000")
     mlflow.set_experiment("Transaction Fraud Detection")
     ordinal_encoder = load_or_create_ordinal_encoder(
         ORDINAL_ENCODER_PATH
     )
-    scaler = preprocessing.StandardScaler()
     model = load_or_create_model(
-        MODEL_TYPE,
+        "Transaction Fraud Detection",
         MODEL_FOLDER
-        #from_scratch = True
     )
     # Create consumer
     consumer = create_consumer("Transaction Fraud Detection")
     print("Consumer started. Waiting for transactions...")
-    data_df = load_or_create_data(
-        consumer,
-        "Transaction Fraud Detection")
+    #data_df = load_or_create_data(
+    #    consumer,
+    #    "Transaction Fraud Detection")
     binary_classification_metrics = [
         'Accuracy',
         'Precision',          # Typically for the positive class (Fraud)
@@ -59,15 +52,14 @@ def main():
         x: getattr(metrics, x)() for x in binary_classification_metrics
     }
     BATCH_SIZE_OFFSET = 100
-    with mlflow.start_run(run_name = MODEL_TYPE):
+    with mlflow.start_run(run_name = model.__class__.__name__):
         try:
-            #fraud_count, normal_count = 0, 0
             for message in consumer:
                 transaction = message.value
                 # Create a new DataFrame from the received data
-                new_row = pd.DataFrame([transaction])
+                #new_row = pd.DataFrame([transaction])
                 # Append the new row to the existing DataFrame
-                data_df = pd.concat([data_df, new_row], ignore_index = True)
+                #data_df = pd.concat([data_df, new_row], ignore_index = True)
                 # Process the transaction
                 x = {
                     'transaction_id':        transaction['transaction_id'],
@@ -87,7 +79,10 @@ def main():
                     'cvv_provided':          transaction['cvv_provided'], # Boolean flag
                     'billing_address_match': transaction['billing_address_match'], # Boolean flag
                 }
-                x, ordinal_encoder = process_sample(x, ordinal_encoder)
+                x, ordinal_encoder = process_sample(
+                    x, 
+                    ordinal_encoder,
+                    "Transaction Fraud Detection")
                 y = transaction['is_fraud']
                 # Update the model
                 prediction = model.predict_one(x)
@@ -111,12 +106,12 @@ def main():
                     with open(f"{ORDINAL_ENCODER_PATH}/ordinal_encoder.pkl", 'wb') as f:
                         pickle.dump(ordinal_encoder, f)
                     mlflow.log_artifact(f"{ORDINAL_ENCODER_PATH}/ordinal_encoder.pkl")
+                if message.offset % (BATCH_SIZE_OFFSET * 100) == 0:
                     MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
                     with open(MODEL_VERSION, 'wb') as f:
                         pickle.dump(model, f)
                     mlflow.log_artifact(MODEL_VERSION)
-                    #print(f"Last prediction: {'Fraud' if prediction == 1 else 'Legit'}")
-                    data_df.to_parquet(DATA_PATH)
+                    #data_df.to_parquet(DATA_PATH)
         except Exception as e:
             print(f"Error processing message: {str(e)}")
             print("Stopping consumer...")
@@ -126,7 +121,7 @@ def main():
                 pickle.dump(model, f)
             with open(f"{ORDINAL_ENCODER_PATH}/ordinal_encoder.pkl", 'wb') as f:
                 pickle.dump(ordinal_encoder, f)
-            data_df.to_parquet(DATA_PATH)
+            #data_df.to_parquet(DATA_PATH)
             consumer.close()
             mlflow.end_run()
             print("Consumer closed.")

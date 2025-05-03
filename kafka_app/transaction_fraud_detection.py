@@ -202,7 +202,8 @@ def run_producer(
             producer.send(KAFKA_TOPIC, value = transaction)
             # Limit console output frequency for readability
             if random.random() < 0.05:
-                pprint(f"Transaction Fraud Detection: {transaction}")
+                print("###--- Transaction Fraud Detection ---###")
+                pprint(transaction)
             # Simulate varying transaction rate
             time.sleep(random.uniform(0.05, 0.5))
     except KeyboardInterrupt:

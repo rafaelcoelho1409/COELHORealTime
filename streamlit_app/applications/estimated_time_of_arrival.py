@@ -24,7 +24,7 @@ with tabs[0]: # Incremental ML
     sample = requests.post(
         "http://fastapi:8000/initial_sample",
         json = {
-            "project_name": "Transaction Fraud Detection"
+            "project_name": "Estimated Time of Arrival"
         }).json()
     with layout_grid_1.form("Predict"):
         form_cols1 = st.columns(2)
@@ -199,7 +199,7 @@ with tabs[0]: # Incremental ML
         }
         y_pred = requests.post(
             "http://fastapi:8000/predict",
-            json = {"project_name": "Transaction Fraud Detection"} | x).json()
+            json = {"project_name": "Transaction Fraud Detection"} | x).json() # {"project_name": "Transaction Fraud Detection", "data": x).json()
         fraud_prob_df = pd.DataFrame({
             "Fraud": [y_pred["fraud_probability"]],
             "Not Fraud": [1 - y_pred["fraud_probability"]]
