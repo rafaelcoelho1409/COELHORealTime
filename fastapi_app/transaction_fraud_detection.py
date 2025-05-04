@@ -95,7 +95,7 @@ def main():
                     print(f"Error updating metric {metric}: {str(e)}")
                 # Periodically log progress
                 if message.offset % BATCH_SIZE_OFFSET == 0:
-                    print(f"Processed {message.offset} messages")
+                    #print(f"Processed {message.offset} messages")
                     for metric in binary_classification_metrics:
                         try:
                             binary_classification_metrics_dict[metric].update(y, prediction)
@@ -106,13 +106,12 @@ def main():
                     with open(f"{ORDINAL_ENCODER_PATH}/ordinal_encoder.pkl", 'wb') as f:
                         pickle.dump(ordinal_encoder, f)
                     mlflow.log_artifact(f"{ORDINAL_ENCODER_PATH}/ordinal_encoder.pkl")
-                    data_df.to_parquet(DATA_PATH) #Erase after some time
                 if message.offset % (BATCH_SIZE_OFFSET * 100) == 0:
                     MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
                     with open(MODEL_VERSION, 'wb') as f:
                         pickle.dump(model, f)
                     mlflow.log_artifact(MODEL_VERSION)
-                    #data_df.to_parquet(DATA_PATH)
+                    data_df.to_parquet(DATA_PATH)
         except Exception as e:
             print(f"Error processing message: {str(e)}")
             print("Stopping consumer...")

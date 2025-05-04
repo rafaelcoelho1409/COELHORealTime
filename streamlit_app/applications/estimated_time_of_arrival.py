@@ -197,7 +197,7 @@ with tabs[0]: # Incremental ML
         for metric in metric_list:
             metrics_cols[i].metric(
                 metric,
-                f"{mlflow_metrics[f'metrics.{metric}']*100:.2f}%")
+                f"{mlflow_metrics[f'metrics.{metric}']:.2f}")
     style_metric_cards(
         background_color = "#000000"
     )
@@ -240,7 +240,7 @@ with tabs[0]: # Incremental ML
                 marker = go.scattermapbox.Marker(
                     size = locations_df['size'],
                     color = locations_df['color'],
-                    opacity = 0.8
+                    #opacity = 0.8
                 ),
                 text = locations_df['label'], # Use 'label' column for text next to marker
                 #hovertext=locations_df['text'], # Use 'text' column for hover info
@@ -248,7 +248,7 @@ with tabs[0]: # Incremental ML
                 #textposition='top right'
         ))
         fig_mapbox.update_layout(
-            title = 'Origin and Destination Map (Scattermapbox - using open-street-map style)',
+            title = 'Origin and Destination Map',
             autosize = True,
             hovermode = 'closest',
             mapbox = dict(
