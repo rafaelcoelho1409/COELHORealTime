@@ -50,7 +50,7 @@ def main():
     regression_metrics_dict = {
         x: getattr(metrics, x)() for x in regression_metrics
     }
-    BATCH_SIZE_OFFSET = 100
+    BATCH_SIZE_OFFSET = 1000
     with mlflow.start_run(run_name = model.__class__.__name__):
         try:
             for message in consumer:
@@ -107,10 +107,10 @@ def main():
                     with open(f"{ORDINAL_ENCODER_PATH}/ordinal_encoder.pkl", 'wb') as f:
                         pickle.dump(ordinal_encoder, f)
                     mlflow.log_artifact(f"{ORDINAL_ENCODER_PATH}/ordinal_encoder.pkl")
-                if message.offset % (BATCH_SIZE_OFFSET * 100) == 0:
                     MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
                     with open(MODEL_VERSION, 'wb') as f:
                         pickle.dump(model, f)
+                if message.offset % (BATCH_SIZE_OFFSET * 10) == 0:
                     mlflow.log_artifact(MODEL_VERSION)
                     data_df.to_parquet(DATA_PATH)
         except:
