@@ -98,58 +98,49 @@ async def lifespan(app: FastAPI):
         initial_sample_dict, \
         healthcheck
     # 1. Load data
-    try:
-        print("Loading data...")
-        consumer_dict = {
-            x: create_consumer(x)
-            for x in PROJECT_NAMES
-        }
-        data_dict = {
-            x: load_or_create_data(
-                consumer_dict[x],
-                x
-            ) for x in PROJECT_NAMES}
-        data_load_status = {}
-        data_message_dict = {}
-        for project_name in PROJECT_NAMES:
-            try:
-                data_load_status[project_name] = "success"
-                data_message_dict[project_name] = "Data loaded successfully"
-            except Exception as e:
-                data_load_status[project_name] = "failed"
-                data_message_dict[project_name] = f"Error: {e}"
-                print(f"Error loading data: {e}", file = sys.stderr)
-        healthcheck.data_load = data_load_status
-        healthcheck.data_message = data_message_dict
-        # 2. Create initial transaction data sample (requires data)
-        #initial_sample_dict = {}
-        initial_data_sample_loaded_status = {}
-        initial_data_sample_message_dict = {}
-        for project_name in PROJECT_NAMES:
-            try:
-                if data_dict[project_name] is not None and not data_dict[project_name].empty:
-                    project_name_pascal = project_name.replace("_", " ").title().replace(" ", "")
-                    initial_sample_dict[project_name] = globals()[project_name_pascal](
-                        **data_dict[project_name].sample(1).to_dict(orient = 'records')[0]
-                    )
-                    initial_data_sample_loaded_status[project_name] = True
-                    initial_data_sample_message_dict[project_name] = "Initial sample created."
-                else:
-                    initial_data_sample_loaded_status[project_name] = False
-                    initial_data_sample_message_dict[project_name] = "Data was not loaded or is empty, cannot create initial sample."
-            except Exception as e:
-                initial_data_sample_loaded_status[project_name] = False
-                initial_data_sample_message_dict[project_name] = f"Error creating initial sample: {e}"
-                print(f"Error creating initial sample: {e}", file = sys.stderr)
-        healthcheck.initial_data_sample_loaded = initial_data_sample_loaded_status
-        healthcheck.initial_data_sample_message = initial_data_sample_message_dict
-    except Exception as e:
-        for project_name in PROJECT_NAMES:
+    print("Loading data...")
+    consumer_dict = {
+        x: create_consumer(x)
+        for x in PROJECT_NAMES
+    }
+    data_dict = {
+        x: load_or_create_data(
+            consumer_dict[x],
+            x
+        ) for x in PROJECT_NAMES}
+    data_load_status = {}
+    data_message_dict = {}
+    for project_name in PROJECT_NAMES:
+        try:
+            data_load_status[project_name] = "success"
+            data_message_dict[project_name] = "Data loaded successfully"
+        except Exception as e:
             data_load_status[project_name] = "failed"
             data_message_dict[project_name] = f"Error: {e}"
-        healthcheck.data_load = data_load_status
-        healthcheck.data_message = data_message_dict
-        print(f"Error loading data: {e}", file = sys.stderr)
+            print(f"Error loading data: {e}", file = sys.stderr)
+    healthcheck.data_load = data_load_status
+    healthcheck.data_message = data_message_dict
+    # 2. Create initial transaction data sample (requires data)
+    initial_data_sample_loaded_status = {}
+    initial_data_sample_message_dict = {}
+    for project_name in PROJECT_NAMES:
+        try:
+            if data_dict[project_name] is not None and not data_dict[project_name].empty:
+                project_name_pascal = project_name.replace("_", " ").title().replace(" ", "")
+                initial_sample_dict[project_name] = globals()[project_name_pascal](
+                    **data_dict[project_name].sample(1).to_dict(orient = 'records')[0]
+                )
+                initial_data_sample_loaded_status[project_name] = True
+                initial_data_sample_message_dict[project_name] = "Initial sample created."
+            else:
+                initial_data_sample_loaded_status[project_name] = False
+                initial_data_sample_message_dict[project_name] = "Data was not loaded or is empty, cannot create initial sample."
+        except Exception as e:
+            initial_data_sample_loaded_status[project_name] = False
+            initial_data_sample_message_dict[project_name] = f"Error creating initial sample: {e}"
+            print(f"Error creating initial sample: {e}", file = sys.stderr)
+    healthcheck.initial_data_sample_loaded = initial_data_sample_loaded_status
+    healthcheck.initial_data_sample_message = initial_data_sample_message_dict
     # 3. Load or create the model
     model_load_status = {}
     model_message_dict = {}
@@ -302,7 +293,7 @@ async def predict(payload: dict):
     try:
         model = load_or_create_model(
             project_name,
-            folder_name)
+            f"models/{folder_name}")
         ordinal_encoder = load_or_create_ordinal_encoder(
             f"ordinal_encoders/{folder_name}"
         )

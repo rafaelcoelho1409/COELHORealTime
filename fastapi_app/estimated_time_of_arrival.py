@@ -35,9 +35,9 @@ def main():
     # Create consumer
     consumer = create_consumer("Estimated Time of Arrival")
     print("Consumer started. Waiting for transactions...")
-    #data_df = load_or_create_data(
-    #    consumer,
-    #    "Estimated Time of Arrival")
+    data_df = load_or_create_data(
+        consumer,
+        "Estimated Time of Arrival")
     regression_metrics = [
         'MAE',
         'MAPE',
@@ -56,9 +56,9 @@ def main():
             for message in consumer:
                 eta_event = message.value
                 # Create a new DataFrame from the received data
-                #new_row = pd.DataFrame([eta_event])
+                new_row = pd.DataFrame([eta_event])
                 # Append the new row to the existing DataFrame
-                #data_df = pd.concat([data_df, new_row], ignore_index = True)
+                data_df = pd.concat([data_df, new_row], ignore_index = True)
                 # Process the transaction
                 x = {
                     'trip_id':                               eta_event['trip_id'],
@@ -107,6 +107,7 @@ def main():
                     with open(f"{ORDINAL_ENCODER_PATH}/ordinal_encoder.pkl", 'wb') as f:
                         pickle.dump(ordinal_encoder, f)
                     mlflow.log_artifact(f"{ORDINAL_ENCODER_PATH}/ordinal_encoder.pkl")
+                    data_df.to_parquet(DATA_PATH) #Erase after some time
                 if message.offset % (BATCH_SIZE_OFFSET * 100) == 0:
                     MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
                     with open(MODEL_VERSION, 'wb') as f:
@@ -122,7 +123,7 @@ def main():
                 pickle.dump(model, f)
             with open(f"{ORDINAL_ENCODER_PATH}/ordinal_encoder.pkl", 'wb') as f:
                 pickle.dump(ordinal_encoder, f)
-            #data_df.to_parquet(DATA_PATH)
+            data_df.to_parquet(DATA_PATH)
             consumer.close()
             mlflow.end_run()
             print("Consumer closed.")

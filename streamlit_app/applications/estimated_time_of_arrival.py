@@ -6,10 +6,13 @@ import pandas as pd
 from faker import Faker
 import datetime as dt
 import plotly.express as px
+import plotly.graph_objects as go
+import plotly.io as pio
 from functions import (
     timestamp_to_api_response
 )
 
+pio.renderers.default = "notebook_connected"
 fake = Faker()
 
 tabs = st.tabs([
@@ -28,15 +31,26 @@ with tabs[0]: # Incremental ML
         }).json()
     with layout_grid_1.form("Predict"):
         form_cols1 = st.columns(2)
-        amount = form_cols1[0].number_input(
-            "Amount", 
-            value = sample["amount"], 
-            step = 0.01)
-        account_age_days = form_cols1[1].number_input(
-            "Account Age (days)", 
-            value = sample["account_age_days"],
-            min_value = 0,
-            step = 1)
+        driver_id_options = requests.post(
+            "http://fastapi:8000/unique_values",
+            json = {
+                "column_name": "driver_id",
+                "project_name": "Estimated Time of Arrival"
+            }).json()["unique_values"]
+        driver_id = form_cols1[0].selectbox(
+            "Driver ID", 
+            driver_id_options, 
+            index = driver_id_options.index(sample["driver_id"]))
+        vehicle_id_options = requests.post(
+            "http://fastapi:8000/unique_values",
+            json = {
+                "column_name": "vehicle_id",
+                "project_name": "Estimated Time of Arrival"
+            }).json()["unique_values"]
+        vehicle_id = form_cols1[1].selectbox(
+            "Vehicle ID", 
+            vehicle_id_options, 
+            index = vehicle_id_options.index(sample["vehicle_id"]))
         form_cols2 = st.columns(2)
         sample["timestamp"] = dt.datetime.strptime(
                 sample["timestamp"],
@@ -55,118 +69,129 @@ with tabs[0]: # Incremental ML
         timestamp = timestamp_to_api_response(
             timestamp_date, 
             timestamp_time)
-        currency_options = requests.post(
-            "http://fastapi:8000/unique_values",
-            json = {
-                "column_name": "currency",
-                "project_name": "Transaction Fraud Detection"
-            }).json()["unique_values"]
-        currency = st.selectbox(
-            "Currency", 
-            currency_options, 
-            index = currency_options.index(sample["currency"]))
         form_cols3 = st.columns(2)
-        merchant_id_options = requests.post(
-            "http://fastapi:8000/unique_values",
-            json = {
-                "column_name": "merchant_id",
-                "project_name": "Transaction Fraud Detection"
-            }).json()["unique_values"]
-        merchant_id = form_cols3[0].selectbox(
-            "Merchant ID", 
-            merchant_id_options, 
-            index = merchant_id_options.index(sample["merchant_id"]))
-        product_category_options = requests.post(
-            "http://fastapi:8000/unique_values",
-            json = {
-                "column_name": "product_category",
-                "project_name": "Transaction Fraud Detection"
-            }).json()["unique_values"]
-        product_category = form_cols3[1].selectbox(
-            "Product Category", 
-            product_category_options, 
-            index = product_category_options.index(sample["product_category"]))
+        origin_lat = form_cols3[0].number_input(
+            "Origin Latitude", 
+            value = sample["origin"]["lat"],
+            min_value = 29.5,
+            max_value = 30.1,
+            step = 0.0001)
+        origin_lon = form_cols3[1].number_input(
+            "Origin Longitude", 
+            value = sample["origin"]["lon"],
+            min_value = -95.8,
+            max_value = -95.0,
+            step = 0.0001)
         form_cols4 = st.columns(2)
-        transaction_type_options = requests.post(
+        destination_lat = form_cols4[0].number_input(
+            "Destination Latitude", 
+            value = sample["destination"]["lat"],
+            min_value = 29.5,
+            max_value = 30.1,
+            step = 0.0001)
+        destination_lon = form_cols4[1].number_input(
+            "Destination Longitude", 
+            value = sample["destination"]["lon"],
+            min_value = -95.8,
+            max_value = -95.0,
+            step = 0.0001)
+        forms_cols5 = st.columns(2)
+        weather_options = requests.post(
             "http://fastapi:8000/unique_values",
             json = {
-                "column_name": "transaction_type",
-                "project_name": "Transaction Fraud Detection"
+                "column_name": "weather",
+                "project_name": "Estimated Time of Arrival"
             }).json()["unique_values"]
-        transaction_type = form_cols4[0].selectbox(
-            "Transaction Type", 
-            transaction_type_options, 
-            index = transaction_type_options.index(sample["transaction_type"]))
-        payment_method_options = requests.post(
+        weather = forms_cols5[0].selectbox(
+            "Weather", 
+            weather_options, 
+            index = weather_options.index(sample["weather"]))
+        vehicle_type_options = requests.post(
             "http://fastapi:8000/unique_values",
             json = {
-                "column_name": "payment_method",
-                "project_name": "Transaction Fraud Detection"
+                "column_name": "vehicle_type",
+                "project_name": "Estimated Time of Arrival"
             }).json()["unique_values"]
-        payment_method = form_cols4[1].selectbox(
-            "Payment Method", 
-            payment_method_options, 
-            index = payment_method_options.index(sample["payment_method"]))
-        form_cols5 = st.columns(2)
-        lat = form_cols5[0].number_input(
-            "Latitude", 
-            value = sample["location"]["lat"],
-            min_value = -90.0,
-            max_value = 90.0,
-            step = 0.0001)
-        lon = form_cols5[1].number_input(
-            "Longitude", 
-            value = sample["location"]["lon"],
-            min_value = -180.0,
-            max_value = 180.0,
-            step = 0.0001)
+        vehicle_type = forms_cols5[1].selectbox(
+            "Vehicle Type", 
+            vehicle_type_options, 
+            index = vehicle_type_options.index(sample["vehicle_type"]))
         form_cols6 = st.columns(2)
-        device_info_options = requests.post(
-            "http://fastapi:8000/unique_values",
-            json = {
-                "column_name": "device_info",
-                "project_name": "Transaction Fraud Detection"
-            }).json()["unique_values"]
-        device_info_options = pd.DataFrame([eval(x) for x in device_info_options])
-        browser_options = device_info_options["browser"].unique().tolist()
-        os_options = device_info_options["os"].unique().tolist()
-        browser = form_cols6[0].selectbox(
-            "Browser",
-            browser_options,
-            index = browser_options.index(sample["device_info"]["browser"]))    
-        os = form_cols6[1].selectbox(
-            "OS",
-            os_options,
-            index = os_options.index(sample["device_info"]["os"]))
+        hour_of_day = form_cols6[0].number_input(
+            "Hour of Day", 
+            value = sample["hour_of_day"],
+            min_value = 0,
+            max_value = 23,
+            step = 1)
+        driver_rating = form_cols6[1].number_input(
+            "Driver Rating", 
+            value = sample["driver_rating"],
+            min_value = 3.5,
+            max_value = 5.0,
+            step = 0.1
+        )
         form_cols7 = st.columns(2)
-        cvv_provided = form_cols7[0].checkbox(
-            "CVV Provided", 
-            value = sample["cvv_provided"])
-        billing_address_match = form_cols7[1].checkbox(
-            "Billing Address Match", 
-            value = sample["billing_address_match"])
-        transaction_id = sample['transaction_id']
-        user_id = sample['user_id']
-        ip_address = sample['ip_address']
-        user_agent = sample['user_agent']
-        st.caption(f"**Transaction ID:** {transaction_id}")
-        st.caption(f"**User ID:** {user_id}")
-        st.caption(f"**IP Address:** {ip_address}")
-        st.caption(f"**User Agent:** {user_agent}")
+        debug_traffic_factor = form_cols7[0].number_input(
+            "Debug Traffic Factor", 
+            value = sample["debug_traffic_factor"],
+            min_value = 0.8,
+            max_value = 1.4,
+            step = 0.1
+        )
+        debug_weather_factor = form_cols7[1].number_input(
+            "Debug Weather Factor", 
+            value = sample["debug_weather_factor"],
+            min_value = 1.0,
+            max_value = 2.0,
+            step = 0.1
+        )
+        form_cols8 = st.columns(2)
+        debug_incident_delay_seconds = form_cols8[0].number_input(
+            "Debug Incident Delay (seconds)", 
+            value = int(sample["debug_incident_delay_seconds"]),
+            min_value = 0, 
+            max_value = 1800,   
+            step = 1
+        )
+        debug_driver_factor = form_cols8[1].number_input(
+            "Debug Driver Factor", 
+            value = sample["debug_driver_factor"],
+            min_value = 1.0 - (5.0 - 4.5) * 0.05, #5.0: max driver rating
+            max_value = 1.0 - (3.5 - 4.5) * 0.05, #3.5: min driver rating
+            step = 0.1
+        )
+        form_cols9 = st.columns(2)
+        temperature_celsius = form_cols9[0].number_input(
+            "Temperature (Celsius)", 
+            value = sample["temperature_celsius"],
+            min_value = -50.0,
+            max_value = 50.0,
+            step = 0.1
+        )
+        initial_estimated_travel_time_seconds = form_cols9[1].number_input(
+            "Initial Estimated Travel Time (seconds)", 
+            value = int(sample["initial_estimated_travel_time_seconds"]),
+            min_value = 60, 
+            max_value = int((sample["estimated_distance_km"] / 40) * 3600 * 1.1),  
+            #AVG_SPEED_KMH = 40; 1.1 comes from random.uniform(0.9, 1.1)
+            step = 1)
+        trip_id = sample["trip_id"]
+        st.caption(f"**Trip ID:** {trip_id}")
         predict_button = st.form_submit_button(
             "Predict",
             use_container_width = True)
-    layout_grid_2.header("Classification Metrics")
+    layout_grid_2.header("Regression Metrics")
     mlflow_metrics = requests.post(
         "http://fastapi:8000/mlflow_metrics",
         json = {
-            "project_name": "Transaction Fraud Detection"
+            "project_name": "Estimated Time of Arrival"
         }).json()
-    metrics_cols = layout_grid_2.columns(3)
+    metrics_cols = layout_grid_2.columns(4)
     metrics_cols_dict = {
-        0: ["F1", "Accuracy"],
-        1: ["Recall", "Precision"],
-        2: ["ROCAUC", "GeometricMean"]
+        0: ["MAE", "MAPE"],
+        1: ["MSE", "R2"],
+        2: ["RMSE", "RMSLE"],
+        3: ["SMAPE"]
     }
     for i, metric_list in zip(metrics_cols_dict.keys(), metrics_cols_dict.values()):
         for metric in metric_list:
@@ -178,43 +203,99 @@ with tabs[0]: # Incremental ML
     )
     layout_grid_2.divider()
     if predict_button:
-        layout_grid_2.header("Prediction")
         x = {
-            'transaction_id':        transaction_id,
-            'user_id':               user_id,
-            'timestamp':             timestamp + ".000000+00:00",
-            'amount':                amount,
-            'currency':              currency,
-            'merchant_id':           merchant_id,
-            'product_category':      product_category,
-            'transaction_type':      transaction_type,
-            'payment_method':        payment_method,
-            'location':              {'lat': lat, 'lon': lon},
-            'ip_address':            ip_address,
-            'device_info':           {'os': os, 'browser': browser}, # Nested structure for device details
-            'user_agent':            user_agent,
-            'account_age_days':      account_age_days,
-            'cvv_provided':          cvv_provided, # Boolean flag
-            'billing_address_match': billing_address_match, # Boolean flag
+            'trip_id':                               trip_id,
+            'driver_id':                             driver_id,
+            'vehicle_id':                            vehicle_id,
+            'timestamp':                             timestamp + ".000000+00:00",
+            'origin':                                {"lat": origin_lat, "lon": origin_lon},
+            'destination':                           {"lat": destination_lat, "lon": destination_lon},
+            'estimated_distance_km':                 sample["estimated_distance_km"],
+            'weather':                               weather,
+            'temperature_celsius':                   temperature_celsius,
+            'day_of_week':                           sample['day_of_week'],
+            'hour_of_day':                           hour_of_day,
+            'driver_rating':                         driver_rating,
+            'vehicle_type':                          vehicle_type,
+            'initial_estimated_travel_time_seconds': initial_estimated_travel_time_seconds,
+            'debug_traffic_factor':                  debug_traffic_factor,
+            'debug_weather_factor':                  debug_weather_factor,
+            'debug_incident_delay_seconds':          debug_incident_delay_seconds,
+            'debug_driver_factor':                   debug_driver_factor
         }
+        map_and_pred_grid = layout_grid_2.columns(2)
+        map_and_pred_grid[0].header("Origin and Destination")
+        locations_df = pd.DataFrame({
+            'lat': [origin_lat, destination_lat],
+            'lon': [origin_lon, destination_lon],
+            'label': ['Origin', 'Destination'],
+            'color': ['blue', 'red'], # Assign colors
+            'size': [20, 20] # Assign sizes
+        })
+        fig_mapbox = go.Figure(
+            go.Scattermapbox(
+                lat = locations_df['lat'],
+                lon = locations_df['lon'],
+                mode = 'markers+text', # Show markers and text labels next to them
+                marker = go.scattermapbox.Marker(
+                    size = locations_df['size'],
+                    color = locations_df['color'],
+                    opacity = 0.8
+                ),
+                text = locations_df['label'], # Use 'label' column for text next to marker
+                #hovertext=locations_df['text'], # Use 'text' column for hover info
+                #hoverinfo='text', # Show only hovertext on hover
+                #textposition='top right'
+        ))
+        fig_mapbox.update_layout(
+            title = 'Origin and Destination Map (Scattermapbox - using open-street-map style)',
+            autosize = True,
+            hovermode = 'closest',
+            mapbox = dict(
+                #accesstoken = mapbox_access_token, # Token needed for styles other than open-street-map
+                bearing = 0,
+                center = dict(
+                    lat = (origin_lat + destination_lat) / 2,
+                    lon = (origin_lon + destination_lon) / 2
+                ),
+                pitch = 0,
+                zoom = 10,
+                style = 'open-street-map' # This style works without a token
+                # style='streets' # Requires a token
+            ),
+            margin = {"r": 0, "t": 30, "l": 0, "b": 0}
+        )
+        map_and_pred_grid[0].plotly_chart(
+            fig_mapbox,
+            use_container_width = True
+        )
+        map_and_pred_grid[0].caption(
+            f"Estimated Distance: {sample['estimated_distance_km']} km")
+        map_and_pred_grid[1].header("ETA - Prediction")
         y_pred = requests.post(
             "http://fastapi:8000/predict",
-            json = {"project_name": "Transaction Fraud Detection"} | x).json() # {"project_name": "Transaction Fraud Detection", "data": x).json()
-        fraud_prob_df = pd.DataFrame({
-            "Fraud": [y_pred["fraud_probability"]],
-            "Not Fraud": [1 - y_pred["fraud_probability"]]
-        })
-        fraud_prob_fig = px.pie(
-            fraud_prob_df,
-            values = fraud_prob_df.iloc[0],
-            names = fraud_prob_df.columns,
-            title = f"Fraud Probability: {y_pred['fraud_probability']:.2%} - {"Fraud" if y_pred['prediction'] == 1 else "Not Fraud"}",
-            color_discrete_sequence = ['#FF0000', '#0000FF'],
-            hole = 0.2
+            json = {"project_name": "Estimated Time of Arrival"} | x).json()[
+                "Estimated Time of Arrival"
+            ]
+        pred_fig = go.Figure()
+        pred_fig.add_trace(
+            go.Indicator(
+                mode = "number",
+                value = y_pred,
+                title = {'text': "Seconds"},
+                domain = {'row': 0, 'column': 0}
+            ))
+        pred_fig.add_trace(
+            go.Indicator(
+                mode = "number",
+                value = round(y_pred / 60, 2),
+                title = {'text': "Minutes"},
+                domain = {'row': 1, 'column': 0}
+            ))
+        pred_fig.update_layout(
+            grid = {'rows': 2, 'columns': 1, 'pattern': "independent"},
+            )
+        map_and_pred_grid[1].plotly_chart(
+            pred_fig,
+            use_container_width = True
         )
-        fraud_prob_fig.update_traces(
-            textposition = 'inside', 
-            textinfo = 'percent+label')
-        layout_grid_2.plotly_chart(
-            fraud_prob_fig,
-            use_container_width = True)

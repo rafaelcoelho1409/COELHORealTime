@@ -292,7 +292,7 @@ def load_or_create_data(consumer, project_name):
         "Transaction Fraud Detection": "transaction_fraud_detection_data.parquet",
         "Estimated Time of Arrival": "estimated_time_of_arrival_data.parquet"
     }
-    DATA_PATH = data_name_dict[project_name]
+    DATA_PATH = f"data/{data_name_dict[project_name]}"
     try:
         data_df = pd.read_parquet(DATA_PATH)
         print("Data loaded from disk.")
