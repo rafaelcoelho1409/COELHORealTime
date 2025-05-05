@@ -10,36 +10,36 @@ from functions import (
     load_or_create_model,
     create_consumer,
     load_or_create_data,
-    load_or_create_ordinal_encoder,
+    load_or_create_encoders,
 )
 
 DATA_PATH = "data/transaction_fraud_detection_data.parquet"
 MODEL_FOLDER = "models/transaction_fraud_detection"
-ORDINAL_ENCODER_PATH = "ordinal_encoders/transaction_fraud_detection"
-FRAUD_PROBABILITY = 0.01
+ENCODERS_PATH = "encoders/transaction_fraud_detection_encoders.pkl"
+PROJECT_NAME = "Transaction Fraud Detection"
 
 os.makedirs(MODEL_FOLDER, exist_ok = True)
-os.makedirs(ORDINAL_ENCODER_PATH, exist_ok = True)
+os.makedirs("encoders", exist_ok = True)
 os.makedirs("data", exist_ok = True)
 
 
 def main():
     # Initialize model and metrics
     mlflow.set_tracking_uri("http://mlflow:5000")
-    mlflow.set_experiment("Transaction Fraud Detection")
-    ordinal_encoder = load_or_create_ordinal_encoder(
-        ORDINAL_ENCODER_PATH
+    mlflow.set_experiment(PROJECT_NAME)
+    encoders = load_or_create_encoders(
+        PROJECT_NAME
     )
     model = load_or_create_model(
-        "Transaction Fraud Detection",
+        PROJECT_NAME,
         MODEL_FOLDER
     )
     # Create consumer
-    consumer = create_consumer("Transaction Fraud Detection")
+    consumer = create_consumer(PROJECT_NAME)
     print("Consumer started. Waiting for transactions...")
     data_df = load_or_create_data(
         consumer,
-        "Transaction Fraud Detection")
+        PROJECT_NAME)
     binary_classification_metrics = [
         'Accuracy',
         'Precision',          # Typically for the positive class (Fraud)
@@ -79,14 +79,14 @@ def main():
                     'cvv_provided':          transaction['cvv_provided'], # Boolean flag
                     'billing_address_match': transaction['billing_address_match'], # Boolean flag
                 }
-                x, ordinal_encoder = process_sample(
+                x, encoders = process_sample(
                     x, 
-                    ordinal_encoder,
-                    "Transaction Fraud Detection")
+                    encoders,
+                    PROJECT_NAME)
                 y = transaction['is_fraud']
                 # Update the model
-                prediction = model.predict_one(x)
                 model.learn_one(x, y)
+                prediction = model.predict_one(x)
                 # Update metrics if provided
                 try:
                     for metric in binary_classification_metrics:
@@ -103,9 +103,9 @@ def main():
                             print(f"Error updating metric {metric}: {str(e)}")
                         mlflow.log_metric(metric, binary_classification_metrics_dict[metric].get())
                         #print(f"{metric}: {binary_classification_metrics_dict[metric].get():.2%}")
-                    with open(f"{ORDINAL_ENCODER_PATH}/ordinal_encoder.pkl", 'wb') as f:
-                        pickle.dump(ordinal_encoder, f)
-                    mlflow.log_artifact(f"{ORDINAL_ENCODER_PATH}/ordinal_encoder.pkl")
+                    with open(ENCODERS_PATH, 'wb') as f:
+                        pickle.dump(encoders, f)
+                    mlflow.log_artifact(ENCODERS_PATH)
                     MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
                     with open(MODEL_VERSION, 'wb') as f:
                         pickle.dump(model, f)
@@ -119,8 +119,8 @@ def main():
             MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
             with open(MODEL_VERSION, 'wb') as f:
                 pickle.dump(model, f)
-            with open(f"{ORDINAL_ENCODER_PATH}/ordinal_encoder.pkl", 'wb') as f:
-                pickle.dump(ordinal_encoder, f)
+            with open(ENCODERS_PATH, 'wb') as f:
+                pickle.dump(encoders, f)
             data_df.to_parquet(DATA_PATH)
             consumer.close()
             mlflow.end_run()

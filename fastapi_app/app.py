@@ -11,12 +11,13 @@ from functions import (
     load_or_create_model,
     load_or_create_data,
     create_consumer,
-    load_or_create_ordinal_encoder,
+    load_or_create_encoders,
 )
 
 PROJECT_NAMES = [
     "Transaction Fraud Detection", 
-    "Estimated Time of Arrival"
+    "Estimated Time of Arrival",
+    "E-Commerce Customer Interactions"
 ]
 
 
@@ -24,14 +25,14 @@ PROJECT_NAMES = [
 consumer_dict = {x: None for x in PROJECT_NAMES}
 data_dict = {x: None for x in PROJECT_NAMES}
 model_dict = {x: None for x in PROJECT_NAMES}
-ordinal_encoder_dict = {x: None for x in PROJECT_NAMES}
+encoders_dict = {x: None for x in PROJECT_NAMES}
 initial_sample_dict = {x: None for x in PROJECT_NAMES} # Also move this initialization
 
 
 class Healthcheck(BaseModel):
     model_load: dict[str, str] | dict[str, None] = {x: None for x in PROJECT_NAMES} # "success", "failed", "not_attempted"
     model_message: dict[str, str] | dict[str, None] = {x: None for x in PROJECT_NAMES}
-    ordinal_encoder_load: dict[str, str] | dict[str, None] = {x: None for x in PROJECT_NAMES} # "success", "failed", "not_attempted"
+    encoders_load: dict[str, str] | dict[str, None] = {x: None for x in PROJECT_NAMES} # "success", "failed", "not_attempted"
     data_load: dict[str, str] | dict[str, None] = {x: None for x in PROJECT_NAMES} # Added data load status
     data_message: dict[str, str] | dict[str, None] = {x: None for x in PROJECT_NAMES} # Added data load message
     initial_data_sample_loaded: dict[str, bool] | dict[str, None] = {x: None for x in PROJECT_NAMES} # Added sample status
@@ -41,7 +42,7 @@ class Healthcheck(BaseModel):
 # Initialize healthcheck with default state
 healthcheck = Healthcheck(
     model_load = {x: "not_attempted" for x in PROJECT_NAMES},
-    ordinal_encoder_load = {x: "not_attempted" for x in PROJECT_NAMES},
+    encoders_load = {x: "not_attempted" for x in PROJECT_NAMES},
     data_load = {x: "not_attempted" for x in PROJECT_NAMES},
     initial_data_sample_loaded = {x: False for x in PROJECT_NAMES}
 )
@@ -88,13 +89,31 @@ class EstimatedTimeOfArrival(BaseModel):
     debug_driver_factor: float
 
 
+class ECommerceCustomerInteractions(BaseModel):
+    customer_id: str | None
+    device_info: dict | None
+    event_id: str | None
+    event_type: str | None
+    location: dict | None
+    page_url: str | None
+    price: float | None
+    product_category: str | None
+    product_id: str | None
+    quantity: int | None
+    referrer_url: str | None
+    search_query: str | None
+    session_event_sequence: int | None
+    session_id: str | None
+    time_on_page_seconds: int | None
+    timestamp: str | None
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global \
         consumer_dict, \
         data_dict, \
         model_dict, \
-        ordinal_encoder_dict, \
+        encoders_dict, \
         initial_sample_dict, \
         healthcheck
     # 1. Load data
@@ -126,7 +145,7 @@ async def lifespan(app: FastAPI):
     for project_name in PROJECT_NAMES:
         try:
             if data_dict[project_name] is not None and not data_dict[project_name].empty:
-                project_name_pascal = project_name.replace("_", " ").title().replace(" ", "")
+                project_name_pascal = project_name.replace("_", " ").replace("-", " ").title().replace(" ", "")
                 initial_sample_dict[project_name] = globals()[project_name_pascal](
                     **data_dict[project_name].sample(1).to_dict(orient = 'records')[0]
                 )
@@ -147,7 +166,7 @@ async def lifespan(app: FastAPI):
     for project_name in PROJECT_NAMES:
         try:
             print("Loading model...")
-            model_folder_name = project_name.lower().replace(' ', '_')
+            model_folder_name = project_name.lower().replace(' ', '_').replace("-", "_")
             model_folder = f"models/{model_folder_name}"
             model_dict[project_name] = load_or_create_model(
                 project_name,
@@ -163,22 +182,20 @@ async def lifespan(app: FastAPI):
     healthcheck.model_load = model_load_status
     healthcheck.model_message = model_message_dict
     # 4. Create or load the ordinal encoders
-    ordinal_encoder_dict = {}
-    ordinal_encoder_load_status = {}
+    encoders_dict = {}
+    encoders_load_status = {}
     print("Loading encoders...")
     for project_name in PROJECT_NAMES:
         try:
-            ordinal_encoder_folder_name = project_name.lower().replace(' ', '_')
-            ordinal_encoder_folder = f"ordinal_encoders/{ordinal_encoder_folder_name}"
-            ordinal_encoder_dict[project_name] = load_or_create_ordinal_encoder(
-                ordinal_encoder_folder
+            encoders_dict[project_name] = load_or_create_encoders(
+                project_name
             )
-            ordinal_encoder_load_status[project_name] = "success"
+            encoders_load_status[project_name] = "success"
             print("Encoder loaded successfully.")
         except Exception as e:
-            ordinal_encoder_load_status[project_name] = "failed"
+            encoders_load_status[project_name] = "failed"
             print(f"Error loading encoder: {e}", file = sys.stderr)
-    healthcheck.ordinal_encoder_load = ordinal_encoder_load_status
+    healthcheck.encoders_load = encoders_load_status
     try:
         print("Loading MLflow...")
         mlflow.set_tracking_uri("http://mlflow:5000")
@@ -281,25 +298,25 @@ async def predict(payload: dict):
     #IMPORTANT OBSERVATION: payload must be something in this format:
     #{project_name: PROJECT_NAME} | {transaction: TransactionFraudDetection}
     #{project_name: PROJECT_NAME} | {eta_event: EstimatedTimeOfArrival}
-    global ordinal_encoder_dict, model_dict
-    if model_dict[payload["project_name"]] is None or ordinal_encoder_dict[payload["project_name"]] is None:
+    global encoders_dict, model_dict
+    if model_dict[payload["project_name"]] is None or encoders_dict[payload["project_name"]] is None:
         raise HTTPException(
             status_code = 503, 
             detail = "Model or encoders are not loaded.")
     x = payload
     project_name = x["project_name"]
-    folder_name = project_name.lower().replace(' ', '_')
+    folder_name = project_name.lower().replace(' ', '_').replace("-", "_")
     del x["project_name"]
     try:
         model = load_or_create_model(
             project_name,
             f"models/{folder_name}")
-        ordinal_encoder = load_or_create_ordinal_encoder(
-            f"ordinal_encoders/{folder_name}"
+        encoders = load_or_create_encoders(
+            project_name
         )
         processed_x, _ = process_sample(
             x, 
-            ordinal_encoder,
+            encoders,
             project_name) # Discard returned encoders if they are meant to be global state
         if project_name == "Transaction Fraud Detection":
             y_pred_proba = model.predict_proba_one(processed_x) # Use processed data
@@ -314,6 +331,11 @@ async def predict(payload: dict):
             return {
                 "Estimated Time of Arrival": y_pred
             }
+        elif project_name == "E-Commerce Customer Interactions":
+            y_pred = model.predict_one(processed_x) # Use processed data
+            return {
+                "cluster": y_pred
+            }
     except Exception as e:
         print(f"Error during prediction: {e}", file = sys.stderr)
         raise HTTPException(
@@ -325,16 +347,22 @@ class OrdinalEncoderRequest(BaseModel):
 
 @app.post("/get_ordinal_encoder")
 async def get_ordinal_encoder(request: OrdinalEncoderRequest):
-    global ordinal_encoder
-    folder_name = request.project_name.lower().replace(' ', '_')
-    ordinal_encoder = load_or_create_ordinal_encoder(
-        f"ordinal_encoders/{folder_name}"
+    global encoders
+    encoders = load_or_create_encoders(
+        request.project_name
     )
-    if ordinal_encoder is None:
+    if None in encoders.values():
         raise HTTPException(
             status_code = 503, 
             detail = "Ordinal encoder is not loaded.")
-    return ordinal_encoder.get_feature_mappings()
+    if request.project_name in ["Transaction Fraud Detection", "Estimated Time of Arrival"]:
+        return {
+            "ordinal_encoder": encoders["ordinal_encoder"].get_feature_mappings()
+        }
+    elif request.project_name in ["E-Commerce Customer Interactions"]:
+        return {
+            "standard_scaler": encoders["standard_scaler"].counts,
+        }
 
 
 

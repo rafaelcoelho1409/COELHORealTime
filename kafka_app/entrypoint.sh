@@ -24,5 +24,8 @@ python3 estimated_time_of_arrival.py \
   --bad-weather-probability 0.1 \
   --incident-probability 0.02 &
 
+python3 e_commerce_customer_interactions.py \
+  --event-rate-per-minute 600 &
+
 
 wait

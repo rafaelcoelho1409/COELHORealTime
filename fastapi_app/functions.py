@@ -3,10 +3,13 @@ import os
 import sys
 from typing import Any, Dict, Hashable
 from river import (
+    base,
     compose, 
     metrics, 
     drift,
-    forest
+    forest,
+    cluster,
+    preprocessing
 )
 from kafka import KafkaConsumer
 import json
@@ -113,6 +116,27 @@ class CustomOrdinalEncoder:
         feature_details = ", ".join([f"{name}: {len(mapping)} categories" for name, mapping in self._feature_mappings.items()])
         return f"CustomPicklableOrdinalEncoder(features={num_features} [{feature_details}])"
     
+class DictImputer(base.Transformer):
+    """
+    Imputes missing values (None or missing keys) for specified features in a dictionary.
+
+    Parameters
+    ----------
+    on
+        List of feature names to impute.
+    fill_value
+        The value to use for imputation.
+    """
+    def __init__(self, on: list, fill_value):
+        self.on = on
+        self.fill_value = fill_value
+    def transform_one(self, x: dict):
+        x_transformed = x.copy()
+        for feature in self.on:
+            if x_transformed.get(feature) is None:
+                x_transformed[feature] = self.fill_value
+        return x_transformed
+    
 
 def extract_device_info(x):
     x_ = x['device_info']
@@ -134,21 +158,51 @@ def extract_timestamp_info(x):
         'second': x_.second
     }
 
-def load_or_create_ordinal_encoder(ordinal_encoders_folder):
+def extract_coordinates(x):
+    x_ = x['location']
+    return {
+        'lat': x_['lat'],
+        'lon': x_['lon'],
+    }
+
+def load_or_create_encoders(project_name):
+    encoders_folders = {
+        "Transaction Fraud Detection": "encoders/transaction_fraud_detection_encoders.pkl",
+        "Estimated Time of Arrival": "encoders/estimated_time_of_arrival.pkl",
+        "E-Commerce Customer Interactions": "encoders/e_commerce_customer_interactions.pkl"
+    }
+    encoder_path = encoders_folders[project_name]
     try:
-        with open(f"{ordinal_encoders_folder}/ordinal_encoder.pkl", 'rb') as f:
-            ordinal_encoder = pickle.load(f)
+        with open(encoder_path, 'rb') as f:
+            encoders = pickle.load(f)
         print("Ordinal encoder loaded from disk.")
     except FileNotFoundError as e:
-        ordinal_encoder = CustomOrdinalEncoder()
-        print(f"Creating ordinal encoder: {e}", file = sys.stderr)
+        if project_name in ["Transaction Fraud Detection", "Estimated Time of Arrival"]:
+            encoders = {
+                "ordinal_encoder": CustomOrdinalEncoder()
+            }
+        elif project_name in ["E-Commerce Customer Interactions"]:
+            encoders = {
+                "standard_scaler": preprocessing.StandardScaler(),
+                "feature_hasher": preprocessing.FeatureHasher()
+            }
+        print(f"Creating encoders: {e}", file = sys.stderr)
     except Exception as e:
-        ordinal_encoder = CustomOrdinalEncoder()
-        print(f"Error loading ordinal encoder: {e}", file = sys.stderr)
-    return ordinal_encoder
+        if project_name in ["Transaction Fraud Detection", "Estimated Time of Arrival"]:
+            encoders = {
+                "ordinal_encoder": CustomOrdinalEncoder()
+            }
+        elif project_name in ["E-Commerce Customer Interactions"]:
+            encoders = {
+                "standard_scaler": preprocessing.StandardScaler(),
+                "feature_hasher": preprocessing.FeatureHasher()
+            }
+        print(f"Creating encoders: {e}", file = sys.stderr)
+    return encoders
 
 
-def process_sample(x, ordinal_encoder, project_name):
+
+def process_sample(x, encoders, project_name):
     if project_name == "Transaction Fraud Detection":
         pipe1 = compose.Select(
             "amount",
@@ -189,9 +243,11 @@ def process_sample(x, ordinal_encoder, project_name):
         pipe4b.learn_one(x_pipe_4)
         x_pipe_4 = pipe4b.transform_one(x_pipe_4)
         x_to_encode = x_pipe_2 | x_pipe_3 | x_pipe_4
-        ordinal_encoder.learn_one(x_to_encode)
-        x2 = ordinal_encoder.transform_one(x_to_encode)
-        return x1 | x2, ordinal_encoder
+        encoders["ordinal_encoder"].learn_one(x_to_encode)
+        x2 = encoders["ordinal_encoder"].transform_one(x_to_encode)
+        return x1 | x2, {
+            "ordinal_encoder": encoders["ordinal_encoder"]
+        }
     elif project_name == "Estimated Time of Arrival":
         pipe1 = compose.Select(
             'estimated_distance_km',
@@ -225,9 +281,98 @@ def process_sample(x, ordinal_encoder, project_name):
         pipe3b.learn_one(x_pipe_3)
         x_pipe_3 = pipe3b.transform_one(x_pipe_3)
         x_to_encode = x_pipe_2 | x_pipe_3
-        ordinal_encoder.learn_one(x_to_encode)
-        x2 = ordinal_encoder.transform_one(x_to_encode)
-        return x1 | x2, ordinal_encoder
+        encoders["ordinal_encoder"].learn_one(x_to_encode)
+        x2 = encoders["ordinal_encoder"].transform_one(x_to_encode)
+        return x1 | x2, {
+            "ordinal_encoder": encoders["ordinal_encoder"]
+        }
+    elif project_name == "E-Commerce Customer Interactions":
+        pipe1 = compose.Select(
+            'price',
+            'quantity',
+            'session_event_sequence',
+            'time_on_page_seconds'
+        )
+        pipe1.learn_one(x)
+        x1 = pipe1.transform_one(x)
+        pipe2 = compose.Select(
+            'event_type',
+            'product_category',
+            'product_id',
+            'referrer_url',
+        )
+        pipe2.learn_one(x)
+        x_pipe_2 = pipe2.transform_one(x)
+        pipe3a = compose.Select(
+            "device_info"
+        )
+        pipe3a.learn_one(x)
+        x_pipe_3 = pipe3a.transform_one(x)
+        pipe3b = compose.FuncTransformer(
+            extract_device_info,
+        )
+        pipe3b.learn_one(x_pipe_3)
+        x_pipe_3 = pipe3b.transform_one(x_pipe_3)
+        pipe4a = compose.Select(
+            "timestamp",
+        )
+        pipe4a.learn_one(x)
+        x_pipe_4 = pipe4a.transform_one(x)
+        pipe4b = compose.FuncTransformer(
+            extract_timestamp_info,
+        )
+        pipe4b.learn_one(x_pipe_4)
+        x_pipe_4 = pipe4b.transform_one(x_pipe_4)
+        pipe5a = compose.Select(
+            "location",
+        )
+        pipe5a.learn_one(x)
+        x_pipe_5 = pipe5a.transform_one(x)
+        pipe5b = compose.FuncTransformer(
+            extract_coordinates,
+        )
+        pipe5b.learn_one(x_pipe_5)
+        x_pipe_5 = pipe5b.transform_one(x_pipe_5)
+        x_to_prep = x1 | x_pipe_2 | x_pipe_3 | x_pipe_4 | x_pipe_5
+        x_to_prep = DictImputer(
+            fill_value = False, 
+            on = list(x_to_prep.keys())).transform_one(
+                x_to_prep)
+        numerical_features = [
+            'price',
+            'session_event_sequence',
+            'time_on_page_seconds',
+            'quantity'
+        ]
+        categorical_features = [
+            'event_type',
+            'product_category',
+            'product_id',
+            'referrer_url',
+            'os',
+            'browser',
+            'year',
+            'month',
+            'day',
+            'hour',
+            'minute',
+            'second',
+            #'weekday'
+        ]
+        num_pipe = compose.Select(*numerical_features)
+        num_pipe.learn_one(x_to_prep)
+        x_num = num_pipe.transform_one(x_to_prep)
+        cat_pipe = compose.Select(*categorical_features)
+        cat_pipe.learn_one(x_to_prep)
+        x_cat = cat_pipe.transform_one(x_to_prep)
+        encoders["standard_scaler"].learn_one(x_num)
+        x_scaled = encoders["standard_scaler"].transform_one(x_num)
+        encoders["feature_hasher"].learn_one(x_cat)
+        x_hashed = encoders["feature_hasher"].transform_one(x_cat)
+        return x_scaled | x_hashed, {
+            "standard_scaler": encoders["standard_scaler"], 
+            "feature_hasher": encoders["feature_hasher"]
+        }
 
 
 def load_or_create_model(project_name, folder_path = None):
@@ -266,6 +411,12 @@ def load_or_create_model(project_name, folder_path = None):
                 lambda_value = 6,               # Controls tree depth (higher = more complex)
                 seed = 42
             )
+        elif project_name == "E-Commerce Customer Interactions":
+            model = cluster.DBSTREAM(
+                clustering_threshold = 1.0,
+                fading_factor = 0.01,
+                cleanup_interval = 2,
+            )
         print(f"Creating model: {project_name}", file = sys.stderr)
     return model
 
@@ -274,7 +425,8 @@ def create_consumer(project_name):
     """Create and return Kafka consumer"""
     consumer_name_dict = {
         "Transaction Fraud Detection": "transaction_fraud_detection",
-        "Estimated Time of Arrival": "estimated_time_of_arrival"
+        "Estimated Time of Arrival": "estimated_time_of_arrival",
+        "E-Commerce Customer Interactions": "e_commerce_customer_interactions"
     }
     KAFKA_TOPIC = consumer_name_dict[project_name]
     return KafkaConsumer(
@@ -290,7 +442,8 @@ def load_or_create_data(consumer, project_name):
     """Load existing model or create a new one"""
     data_name_dict = {
         "Transaction Fraud Detection": "transaction_fraud_detection_data.parquet",
-        "Estimated Time of Arrival": "estimated_time_of_arrival_data.parquet"
+        "Estimated Time of Arrival": "estimated_time_of_arrival_data.parquet",
+        "E-Commerce Customer Interactions": "e_commerce_customer_interactions_data.parquet"
     }
     DATA_PATH = f"data/{data_name_dict[project_name]}"
     try:

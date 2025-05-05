@@ -10,34 +10,35 @@ from functions import (
     load_or_create_model,
     create_consumer,
     load_or_create_data,
-    load_or_create_ordinal_encoder,
+    load_or_create_encoders,
 )
 
 DATA_PATH = "data/estimated_time_of_arrival_data.parquet"
 MODEL_FOLDER = "models/estimated_time_of_arrival"
-ORDINAL_ENCODER_PATH = "ordinal_encoders/estimated_time_of_arrival"
+ENCODERS_PATH = "encoders/estimated_time_of_arrival.pkl"
+PROJECT_NAME = "Estimated Time of Arrival"
 
 os.makedirs(MODEL_FOLDER, exist_ok = True)
-os.makedirs(ORDINAL_ENCODER_PATH, exist_ok = True)
+os.makedirs("encoders", exist_ok = True)
 os.makedirs("data", exist_ok = True)
 
 def main():
     # Initialize model and metrics
     mlflow.set_tracking_uri("http://mlflow:5000")
     mlflow.set_experiment("Estimated Time of Arrival")
-    ordinal_encoder = load_or_create_ordinal_encoder(
-        ORDINAL_ENCODER_PATH
+    encoders = load_or_create_encoders(
+        PROJECT_NAME
     )
     model = load_or_create_model(
-        "Estimated Time of Arrival",
+        PROJECT_NAME,
         MODEL_FOLDER
     )
     # Create consumer
-    consumer = create_consumer("Estimated Time of Arrival")
+    consumer = create_consumer(PROJECT_NAME)
     print("Consumer started. Waiting for transactions...")
     data_df = load_or_create_data(
         consumer,
-        "Estimated Time of Arrival")
+        PROJECT_NAME)
     regression_metrics = [
         'MAE',
         'MAPE',
@@ -80,14 +81,14 @@ def main():
                     'debug_incident_delay_seconds':          eta_event['debug_incident_delay_seconds'],
                     'debug_driver_factor':                   eta_event['debug_driver_factor']
                 }
-                x, ordinal_encoder = process_sample(
+                x, encoders = process_sample(
                     x, 
-                    ordinal_encoder,
-                    "Estimated Time of Arrival")
+                    encoders,
+                    PROJECT_NAME)
                 y = eta_event['simulated_actual_travel_time_seconds']
                 # Update the model
-                prediction = model.predict_one(x)
                 model.learn_one(x, y)
+                prediction = model.predict_one(x)
                 # Update metrics if provided
                 try:
                     for metric in regression_metrics:
@@ -104,9 +105,9 @@ def main():
                             print(f"Error updating metric {metric}: {str(e)}")
                         mlflow.log_metric(metric, regression_metrics_dict[metric].get())
                         #print(f"{metric}: {binary_classification_metrics_dict[metric].get():.2%}")
-                    with open(f"{ORDINAL_ENCODER_PATH}/ordinal_encoder.pkl", 'wb') as f:
-                        pickle.dump(ordinal_encoder, f)
-                    mlflow.log_artifact(f"{ORDINAL_ENCODER_PATH}/ordinal_encoder.pkl")
+                    with open(ENCODERS_PATH, 'wb') as f:
+                        pickle.dump(encoders, f)
+                    mlflow.log_artifact(ENCODERS_PATH)
                     MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
                     with open(MODEL_VERSION, 'wb') as f:
                         pickle.dump(model, f)
@@ -120,8 +121,8 @@ def main():
             MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
             with open(MODEL_VERSION, 'wb') as f:
                 pickle.dump(model, f)
-            with open(f"{ORDINAL_ENCODER_PATH}/ordinal_encoder.pkl", 'wb') as f:
-                pickle.dump(ordinal_encoder, f)
+            with open(ENCODERS_PATH, 'wb') as f:
+                pickle.dump(encoders, f)
             data_df.to_parquet(DATA_PATH)
             consumer.close()
             mlflow.end_run()
