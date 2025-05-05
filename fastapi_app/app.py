@@ -3,9 +3,21 @@ from fastapi import (
     HTTPException
 )
 from contextlib import asynccontextmanager
-from pydantic import BaseModel
+from pydantic import (
+    BaseModel, 
+    validator, 
+    Field, 
+    field_validator
+)
 import sys
 import mlflow
+from typing import (
+    Optional,
+    Any,
+    Dict
+)
+import math
+from pprint import pprint
 from functions import (
     process_sample,
     load_or_create_model,
@@ -89,23 +101,94 @@ class EstimatedTimeOfArrival(BaseModel):
     debug_driver_factor: float
 
 
+class DeviceInfo(BaseModel):
+    """Pydantic model for device information."""
+    device_type: Optional[str] = None
+    browser: Optional[str] = None
+    os: Optional[str] = None # Changed 'os' from os_type in generator output
+
+class Location(BaseModel):
+    """Pydantic model for location."""
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+
+    # Add validators within the nested model for its float fields
+    @field_validator('lat', 'lon', mode='before')
+    @classmethod
+    def check_location_coords_finite(cls, v: Any) -> Optional[float]:
+        """
+        Convert non-finite float values (NaN, Infinity) to None for lat/lon
+        before standard validation.
+        """
+        # Use math.isfinite() which checks for both NaN and +/- Infinity
+        if isinstance(v, float) and not math.isfinite(v):
+            return None
+        # Return the original value if it's finite, None, or not a float type
+        # Pydantic's standard validation will still run afterwards.
+        return v
+
+# --- Main Model with Fixes ---
+
 class ECommerceCustomerInteractions(BaseModel):
-    customer_id: str | None
-    device_info: dict | None
-    event_id: str | None
-    event_type: str | None
-    location: dict | None
-    page_url: str | None
-    price: float | None
-    product_category: str | None
-    product_id: str | None
-    quantity: int | None
-    referrer_url: str | None
-    search_query: str | None
-    session_event_sequence: int | None
-    session_id: str | None
-    time_on_page_seconds: int | None
-    timestamp: str | None
+    """Pydantic model for validating e-commerce customer interaction events."""
+    customer_id: Optional[str] = None
+    # Use the nested DeviceInfo model
+    device_info: Optional[DeviceInfo] = None
+    event_id: Optional[str] = None
+    event_type: Optional[str] = None
+    # Use the nested Location model
+    location: Optional[Location] = None
+    page_url: Optional[str] = None
+    price: Optional[float] = None # Allow float or None for price
+    product_category: Optional[str] = None
+    product_id: Optional[str] = None
+    # Keep quantity as Optional[int]
+    quantity: Optional[int] = None
+    referrer_url: Optional[str] = None
+    search_query: Optional[str] = None
+    session_event_sequence: Optional[int] = None
+    session_id: Optional[str] = None
+    time_on_page_seconds: Optional[int] = None
+    # Consider using datetime type if you process timestamps
+    timestamp: Optional[str] = None
+
+    # Pydantic v2 validator syntax using @field_validator
+    # Validator for quantity (handle potential float NaN input before int validation)
+    @field_validator('quantity', mode='before')
+    @classmethod
+    def check_quantity_is_finite_int(cls, v: Any) -> Optional[int]:
+        """Convert float NaN to None before checking if input is valid Optional[int]."""
+        # Check specifically for float('nan') as infinity doesn't make sense for quantity
+        if isinstance(v, float) and math.isnan(v):
+            return None
+        return v # Let Pydantic validate if it's int or None
+    # Add validator for the price field
+    @field_validator('price', mode='before')
+    @classmethod
+    def check_price_is_finite(cls, v: Any) -> Optional[float]:
+        """
+        Convert non-finite float values (NaN, Infinity) to None for price
+        before standard validation.
+        """
+        # Use math.isfinite() which checks for both NaN and +/- Infinity
+        if isinstance(v, float) and not math.isfinite(v):
+            return None
+        return v # Return original value for standard Pydantic float validation
+    # Validator to ensure nested fields are dicts or None before processing
+    @field_validator('device_info', 'location', mode='before')
+    @classmethod
+    def ensure_dict_or_none(cls, v: Any) -> Optional[Dict]:
+        """Ensure input is a dictionary or None before nested model validation."""
+        if v is None or isinstance(v, dict):
+            return v
+        # Let Pydantic raise the appropriate error if it's not a dict/None
+        return v
+    class Config:
+        """Pydantic model configuration."""
+        # Example: If you need to allow extra fields not defined in the model
+        # extra = 'ignore'
+        pass
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -245,6 +328,9 @@ async def get_sample(request: SampleRequest):
             detail = "Data is not loaded.")
     try:
         sample = data_dict[request.project_name].sample(1).to_dict(orient = 'records')[0]
+        if request.project_name ==  "E-Commerce Customer Interactions":
+            sample = ECommerceCustomerInteractions.model_validate(sample)
+        pprint(sample)
         return sample
     except Exception as e:
         raise HTTPException(
@@ -290,7 +376,11 @@ async def get_initial_sample(request: InitialSampleRequest):
         raise HTTPException(
             status_code = 503, 
             detail = "Initial transaction data sample is not loaded.")
-    return initial_sample_dict[request.project_name]
+    if request.project_name == "E-Commerce Customer Interactions":
+        initial_sample = ECommerceCustomerInteractions.model_validate(initial_sample_dict[request.project_name])
+        return initial_sample
+    else:
+        return initial_sample_dict[request.project_name]
 
 
 @app.post("/predict")
