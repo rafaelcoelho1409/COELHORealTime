@@ -12,3 +12,4 @@ ordinal_encoders/
 *.parquet
 *.log
 .env
+*.json

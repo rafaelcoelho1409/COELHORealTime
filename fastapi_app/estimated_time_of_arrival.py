@@ -25,7 +25,7 @@ os.makedirs("data", exist_ok = True)
 def main():
     # Initialize model and metrics
     mlflow.set_tracking_uri("http://mlflow:5000")
-    mlflow.set_experiment("Estimated Time of Arrival")
+    mlflow.set_experiment(PROJECT_NAME)
     encoders = load_or_create_encoders(
         PROJECT_NAME
     )
@@ -112,7 +112,7 @@ def main():
                     with open(MODEL_VERSION, 'wb') as f:
                         pickle.dump(model, f)
                 if message.offset % (BATCH_SIZE_OFFSET * 10) == 0:
-                    mlflow.log_artifact(MODEL_VERSION)
+                    #mlflow.log_artifact(MODEL_VERSION)
                     data_df.to_parquet(DATA_PATH)
         except:
             print(f"Error processing message: {str(e)}")

@@ -133,15 +133,15 @@ def generate_customer_event(event_rate_per_minute):
             'id': product_id, 'category': product_category, 'price': price
             }
         if event_type in ['add_to_cart', 'purchase']:
-             quantity = random.randint(1, 4) # Slightly lower max quantity perhaps
+            quantity = random.randint(1, 4) # Slightly lower max quantity perhaps
         if event_type == 'purchase':
-             # Simulate checkout page view before purchase completion
-             time_on_page_seconds = random.randint(30, 180)
-             # Clear focus after purchase
-             session_data['current_product_focus'] = None
+            # Simulate checkout page view before purchase completion
+            time_on_page_seconds = random.randint(30, 180)
+            # Clear focus after purchase
+            session_data['current_product_focus'] = None
         if event_type == 'leave_review':
-             # Assume review happens after purchase, clear focus
-             session_data['current_product_focus'] = None
+            # Assume review happens after purchase, clear focus
+            session_data['current_product_focus'] = None
     elif event_type == 'search':
         # Generate more typical English search terms
         search_query = ' '.join(fake.words(nb = random.randint(1, 4)))

@@ -14,6 +14,7 @@ from functions import (
 
 pio.renderers.default = "notebook_connected"
 fake = Faker()
+PROJECT_NAME = "Estimated Time of Arrival"
 
 tabs = st.tabs([
     "Incremental ML",
@@ -27,7 +28,7 @@ with tabs[0]: # Incremental ML
     sample = requests.post(
         "http://fastapi:8000/initial_sample",
         json = {
-            "project_name": "Estimated Time of Arrival"
+            "project_name": PROJECT_NAME
         }).json()
     with layout_grid_1.form("Predict"):
         form_cols1 = st.columns(2)
@@ -35,7 +36,7 @@ with tabs[0]: # Incremental ML
             "http://fastapi:8000/unique_values",
             json = {
                 "column_name": "driver_id",
-                "project_name": "Estimated Time of Arrival"
+                "project_name": PROJECT_NAME
             }).json()["unique_values"]
         driver_id = form_cols1[0].selectbox(
             "Driver ID", 
@@ -45,7 +46,7 @@ with tabs[0]: # Incremental ML
             "http://fastapi:8000/unique_values",
             json = {
                 "column_name": "vehicle_id",
-                "project_name": "Estimated Time of Arrival"
+                "project_name": PROJECT_NAME
             }).json()["unique_values"]
         vehicle_id = form_cols1[1].selectbox(
             "Vehicle ID", 
@@ -100,7 +101,7 @@ with tabs[0]: # Incremental ML
             "http://fastapi:8000/unique_values",
             json = {
                 "column_name": "weather",
-                "project_name": "Estimated Time of Arrival"
+                "project_name": PROJECT_NAME
             }).json()["unique_values"]
         weather = forms_cols5[0].selectbox(
             "Weather", 
@@ -110,7 +111,7 @@ with tabs[0]: # Incremental ML
             "http://fastapi:8000/unique_values",
             json = {
                 "column_name": "vehicle_type",
-                "project_name": "Estimated Time of Arrival"
+                "project_name": PROJECT_NAME
             }).json()["unique_values"]
         vehicle_type = forms_cols5[1].selectbox(
             "Vehicle Type", 
@@ -184,7 +185,7 @@ with tabs[0]: # Incremental ML
     mlflow_metrics = requests.post(
         "http://fastapi:8000/mlflow_metrics",
         json = {
-            "project_name": "Estimated Time of Arrival"
+            "project_name": PROJECT_NAME
         }).json()
     metrics_cols = layout_grid_2.columns(4)
     metrics_cols_dict = {
@@ -274,7 +275,7 @@ with tabs[0]: # Incremental ML
         map_and_pred_grid[1].header("ETA - Prediction")
         y_pred = requests.post(
             "http://fastapi:8000/predict",
-            json = {"project_name": "Estimated Time of Arrival"} | x).json()[
+            json = {"project_name": PROJECT_NAME} | x).json()[
                 "Estimated Time of Arrival"
             ]
         pred_fig = go.Figure()

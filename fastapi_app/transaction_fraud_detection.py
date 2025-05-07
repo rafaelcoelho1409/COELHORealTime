@@ -105,12 +105,12 @@ def main():
                         #print(f"{metric}: {binary_classification_metrics_dict[metric].get():.2%}")
                     with open(ENCODERS_PATH, 'wb') as f:
                         pickle.dump(encoders, f)
-                    mlflow.log_artifact(ENCODERS_PATH)
+                    #mlflow.log_artifact(ENCODERS_PATH)
                     MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
                     with open(MODEL_VERSION, 'wb') as f:
                         pickle.dump(model, f)
                 if message.offset % (BATCH_SIZE_OFFSET * 10) == 0:
-                    mlflow.log_artifact(MODEL_VERSION)
+                #    mlflow.log_artifact(MODEL_VERSION)
                     data_df.to_parquet(DATA_PATH)
         except Exception as e:
             print(f"Error processing message: {str(e)}")

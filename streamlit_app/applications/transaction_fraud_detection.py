@@ -11,6 +11,7 @@ from functions import (
 )
 
 fake = Faker()
+PROJECT_NAME = "Transaction Fraud Detection"
 
 tabs = st.tabs([
     "Incremental ML",
@@ -24,7 +25,7 @@ with tabs[0]: # Incremental ML
     sample = requests.post(
         "http://fastapi:8000/initial_sample",
         json = {
-            "project_name": "Transaction Fraud Detection"
+            "project_name": PROJECT_NAME
         }).json()
     with layout_grid_1.form("Predict"):
         form_cols1 = st.columns(2)
@@ -59,7 +60,7 @@ with tabs[0]: # Incremental ML
             "http://fastapi:8000/unique_values",
             json = {
                 "column_name": "currency",
-                "project_name": "Transaction Fraud Detection"
+                "project_name": PROJECT_NAME
             }).json()["unique_values"]
         currency = st.selectbox(
             "Currency", 
@@ -70,7 +71,7 @@ with tabs[0]: # Incremental ML
             "http://fastapi:8000/unique_values",
             json = {
                 "column_name": "merchant_id",
-                "project_name": "Transaction Fraud Detection"
+                "project_name": PROJECT_NAME
             }).json()["unique_values"]
         merchant_id = form_cols3[0].selectbox(
             "Merchant ID", 
@@ -80,7 +81,7 @@ with tabs[0]: # Incremental ML
             "http://fastapi:8000/unique_values",
             json = {
                 "column_name": "product_category",
-                "project_name": "Transaction Fraud Detection"
+                "project_name": PROJECT_NAME
             }).json()["unique_values"]
         product_category = form_cols3[1].selectbox(
             "Product Category", 
@@ -91,7 +92,7 @@ with tabs[0]: # Incremental ML
             "http://fastapi:8000/unique_values",
             json = {
                 "column_name": "transaction_type",
-                "project_name": "Transaction Fraud Detection"
+                "project_name": PROJECT_NAME
             }).json()["unique_values"]
         transaction_type = form_cols4[0].selectbox(
             "Transaction Type", 
@@ -101,7 +102,7 @@ with tabs[0]: # Incremental ML
             "http://fastapi:8000/unique_values",
             json = {
                 "column_name": "payment_method",
-                "project_name": "Transaction Fraud Detection"
+                "project_name": PROJECT_NAME
             }).json()["unique_values"]
         payment_method = form_cols4[1].selectbox(
             "Payment Method", 
@@ -125,7 +126,7 @@ with tabs[0]: # Incremental ML
             "http://fastapi:8000/unique_values",
             json = {
                 "column_name": "device_info",
-                "project_name": "Transaction Fraud Detection"
+                "project_name": PROJECT_NAME
             }).json()["unique_values"]
         device_info_options = pd.DataFrame([eval(x) for x in device_info_options])
         browser_options = device_info_options["browser"].unique().tolist()
@@ -160,7 +161,7 @@ with tabs[0]: # Incremental ML
     mlflow_metrics = requests.post(
         "http://fastapi:8000/mlflow_metrics",
         json = {
-            "project_name": "Transaction Fraud Detection"
+            "project_name": PROJECT_NAME
         }).json()
     metrics_cols = layout_grid_2.columns(3)
     metrics_cols_dict = {
@@ -199,7 +200,7 @@ with tabs[0]: # Incremental ML
         }
         y_pred = requests.post(
             "http://fastapi:8000/predict",
-            json = {"project_name": "Transaction Fraud Detection"} | x).json()
+            json = {"project_name": PROJECT_NAME} | x).json()
         fraud_prob_df = pd.DataFrame({
             "Fraud": [y_pred["fraud_probability"]],
             "Not Fraud": [1 - y_pred["fraud_probability"]]

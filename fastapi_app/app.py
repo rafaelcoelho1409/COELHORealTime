@@ -18,6 +18,8 @@ from typing import (
 )
 import math
 from pprint import pprint
+import pickle
+import json
 from functions import (
     process_sample,
     load_or_create_model,
@@ -105,7 +107,7 @@ class DeviceInfo(BaseModel):
     """Pydantic model for device information."""
     device_type: Optional[str] = None
     browser: Optional[str] = None
-    os: Optional[str] = None # Changed 'os' from os_type in generator output
+    os: Optional[str] = None 
 
 class Location(BaseModel):
     """Pydantic model for location."""
@@ -469,3 +471,31 @@ async def get_mlflow_metrics(request: MLflowMetricsRequest):
     )
     run_df = runs_df.iloc[0]
     return run_df.to_dict()
+
+
+@app.get("/cluster_counts")
+async def get_cluster_counts():
+    try:
+        with open("data/cluster_counts.json", 'r') as f:
+            cluster_counts = json.load(f)
+        return cluster_counts
+    except:
+        return {}
+    
+
+class ClusterFeatureCountsRequest(BaseModel):
+    column_name: str
+
+
+@app.post("/cluster_feature_counts")
+async def get_cluster_counts(request: ClusterFeatureCountsRequest):
+    try:
+        with open("data/cluster_feature_counts.json", 'r') as f:
+            cluster_counts = json.load(f)
+        clusters = list(cluster_counts.keys())
+        return {
+            x: cluster_counts[x][request.column_name]
+            for x in clusters
+        }
+    except:
+        return {}
