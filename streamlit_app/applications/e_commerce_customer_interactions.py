@@ -7,6 +7,7 @@ from faker import Faker
 import datetime as dt
 import plotly.express as px
 import plotly.graph_objects as go
+import uuid
 from functions import (
     timestamp_to_api_response,
     convert_cluster_feature_dict_to_dataframe,
@@ -278,9 +279,9 @@ with tabs[0]: # Incremental ML
                 feature_per_cluster_options,
                 index = (
                     feature_per_cluster_options.index(
-                        st.session_state["feature_per_cluster2"]
+                        st.session_state["feature_per_cluster2"])
                         if "feature_per_cluster2" in st.session_state
-                        else 0)
+                        else 0
                 ),
                 #key = "feature_per_cluster2"
             )
@@ -331,7 +332,8 @@ with tabs[0]: # Incremental ML
             use_container_width = True)
         feature_per_cluster = layout_grid_2_cols[1].selectbox(
             "Feature per cluster",
-            feature_per_cluster_options)
+            feature_per_cluster_options,
+            key = str(uuid.uuid4()))
         cluster_feature_counts = requests.post(
             "http://fastapi:8000/cluster_feature_counts",
             json = {
