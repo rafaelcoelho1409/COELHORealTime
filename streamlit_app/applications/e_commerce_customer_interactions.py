@@ -24,6 +24,7 @@ tabs = st.tabs([
 
 
 with tabs[0]: # Incremental ML
+    st.caption("**Incremental ML model:** DBSTREAM (River)")
     layout_grid = grid([0.3, 0.7])
     layout_grid_1 = layout_grid.container()
     layout_grid_2 = layout_grid.container()
@@ -62,13 +63,13 @@ with tabs[0]: # Incremental ML
             value = sample["location"]["lat"],
             min_value = 29.5,
             max_value = 30.1,
-            step = 0.0001)
+            step = 0.001)
         lon = form_cols2[1].number_input(
             "Longitude", 
             value = sample["location"]["lon"],
             min_value = -95.8,
             max_value = -95.0,
-            step = 0.0001)
+            step = 0.001)
         form_cols3 = st.columns(2)
         event_type_options = requests.post(
             "http://fastapi:8000/unique_values",
@@ -125,6 +126,7 @@ with tabs[0]: # Incremental ML
                 "column_name": "session_event_sequence",
                 "project_name": PROJECT_NAME
             }).json()["unique_values"]
+        session_event_sequence_options = [int(x) for x in session_event_sequence_options]
         session_event_sequence = form_cols5[1].number_input(
             "Session Event Sequence", 
             value = sample["session_event_sequence"],
@@ -139,10 +141,10 @@ with tabs[0]: # Incremental ML
                 "column_name": "quantity",
                 "project_name": PROJECT_NAME
             }).json()["unique_values"]
-        quantity_options.remove("nan")
+        quantity_options = [int(float(x)) if x != "nan" else 1 for x in quantity_options]   
         quantity = form_cols6[0].number_input(
             "Quantity", 
-            value = sample["quantity"],
+            value = sample["quantity"] if sample["quantity"] is not None else int(float(min(quantity_options))),
             min_value = int(float(min(quantity_options))),
             max_value = int(float(max(quantity_options))),
             step = 1
@@ -153,6 +155,7 @@ with tabs[0]: # Incremental ML
                 "column_name": "time_on_page_seconds",
                 "project_name": PROJECT_NAME
             }).json()["unique_values"]
+        time_on_page_seconds_options = [int(float(x)) for x in time_on_page_seconds_options]
         time_on_page_seconds = form_cols6[1].number_input(
             "Time on page (seconds)", 
             value = sample["time_on_page_seconds"],

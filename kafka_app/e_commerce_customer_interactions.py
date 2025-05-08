@@ -155,8 +155,8 @@ def generate_customer_event(event_rate_per_minute):
     os_type = random.choice(OS_TYPES)
     # Use Houston coordinates
     location = {
-        'lat': round(random.uniform(LAT_BOUNDS_HOU[0], LAT_BOUNDS_HOU[1]), 6),
-        'lon': round(random.uniform(LON_BOUNDS_HOU[0], LON_BOUNDS_HOU[1]), 6)
+        'lat': round(random.uniform(LAT_BOUNDS_HOU[0], LAT_BOUNDS_HOU[1]), 3),
+        'lon': round(random.uniform(LON_BOUNDS_HOU[0], LON_BOUNDS_HOU[1]), 3)
     }
     # Simulate referrer (simplified) - using global sites
     if events_so_far == 0:

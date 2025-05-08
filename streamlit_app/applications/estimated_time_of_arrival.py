@@ -22,6 +22,7 @@ tabs = st.tabs([
 
 
 with tabs[0]: # Incremental ML
+    st.caption("**Incremental ML model:** Adaptive Random Forest Regressor (River)")
     layout_grid = grid([0.3, 0.7])
     layout_grid_1 = layout_grid.container()
     layout_grid_2 = layout_grid.container()
@@ -230,48 +231,69 @@ with tabs[0]: # Incremental ML
             'lat': [origin_lat, destination_lat],
             'lon': [origin_lon, destination_lon],
             'label': ['Origin', 'Destination'],
-            'color': ['blue', 'red'], # Assign colors
-            'size': [20, 20] # Assign sizes
+            'color': ['blue', 'red'], # Assign colors for markers
+            'size': [20, 20] # Assign sizes for markers
         })
-        fig_mapbox = go.Figure(
+        # Create a list of traces
+        traces = []
+        # 1. Add trace for the markers (Origin and Destination points)
+        traces.append(
             go.Scattermapbox(
                 lat = locations_df['lat'],
                 lon = locations_df['lon'],
-                mode = 'markers+text', # Show markers and text labels next to them
+                mode = 'markers+text', # Show markers and text labels
                 marker = go.scattermapbox.Marker(
                     size = locations_df['size'],
                     color = locations_df['color'],
-                    #opacity = 0.8
+                    # opacity=0.8
                 ),
-                text = locations_df['label'], # Use 'label' column for text next to marker
-                #hovertext=locations_df['text'], # Use 'text' column for hover info
-                #hoverinfo='text', # Show only hovertext on hover
-                #textposition='top right'
-        ))
+                text = locations_df['label'], # Text next to markers
+                textposition = 'bottom right', # Adjust text position as needed
+                name = "Locations" # Added name for legend
+            )
+        )
+        # 2. Add trace for the dotted line connecting Origin and Destination
+        traces.append(
+            go.Scattermapbox(
+                lat = [origin_lat, destination_lat], # Latitudes for the line
+                lon = [origin_lon, destination_lon], # Longitudes for the line
+                mode = 'lines',
+                line = go.scattermapbox.Line(
+                    width = 2,
+                    color = 'black', # Or any color you prefer for the line
+                    #dash = 'dot'    # Style of the line: 'solid', 'dot', 'dash', 'longdash', 'dashdot', or 'longdashdot'
+                ),
+                name = "Route (approx.)", # Added name for legend
+                hoverinfo = 'none' # Optional: disable hover for the line itself
+            )
+        )
+        # Create the figure with both traces
+        fig_mapbox = go.Figure(data = traces)
         fig_mapbox.update_layout(
             title = 'Origin and Destination Map',
             autosize = True,
+            showlegend = False, # Set to True if you want to show legend for "Locations" and "Route"
             hovermode = 'closest',
             mapbox = dict(
-                #accesstoken = mapbox_access_token, # Token needed for styles other than open-street-map
+                # accesstoken = mapbox_access_token, # Token needed for styles other than open-street-map
                 bearing = 0,
                 center = dict(
                     lat = (origin_lat + destination_lat) / 2,
                     lon = (origin_lon + destination_lon) / 2
                 ),
                 pitch = 0,
-                zoom = 10,
+                zoom = 9 if abs(origin_lat - destination_lat) > 0.01 or abs(origin_lon - destination_lon) > 0.01 else 11, # Adjust zoom
                 style = 'open-street-map' # This style works without a token
-                # style='streets' # Requires a token
             ),
-            margin = {"r": 0, "t": 30, "l": 0, "b": 0}
+            margin = {"r": 0, "t": 30, "l": 0, "b": 0},
+            height = 300 # Retaining your height setting
         )
         map_and_pred_grid[0].plotly_chart(
             fig_mapbox,
             use_container_width = True
         )
         map_and_pred_grid[0].caption(
-            f"Estimated Distance: {sample['estimated_distance_km']} km")
+            f"Estimated Distance: {sample['estimated_distance_km']:.2f} km")
         map_and_pred_grid[1].header("ETA - Prediction")
         y_pred = requests.post(
             "http://fastapi:8000/predict",

@@ -19,6 +19,7 @@ tabs = st.tabs([
 
 
 with tabs[0]: # Incremental ML
+    st.caption("**Incremental ML model:** Adaptive Random Forest Classifier (River)")
     layout_grid = grid([0.3, 0.7])
     layout_grid_1 = layout_grid.container()
     layout_grid_2 = layout_grid.container()
