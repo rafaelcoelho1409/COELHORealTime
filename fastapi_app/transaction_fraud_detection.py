@@ -51,7 +51,7 @@ def main():
     binary_classification_metrics_dict = {
         x: getattr(metrics, x)() for x in binary_classification_metrics
     }
-    BATCH_SIZE_OFFSET = 1000
+    BATCH_SIZE_OFFSET = 100
     with mlflow.start_run(run_name = model.__class__.__name__):
         try:
             for message in consumer:
@@ -106,11 +106,10 @@ def main():
                     with open(ENCODERS_PATH, 'wb') as f:
                         pickle.dump(encoders, f)
                     #mlflow.log_artifact(ENCODERS_PATH)
+                if message.offset % (BATCH_SIZE_OFFSET * 10) == 0:
                     MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
                     with open(MODEL_VERSION, 'wb') as f:
                         pickle.dump(model, f)
-                if message.offset % (BATCH_SIZE_OFFSET * 10) == 0:
-                #    mlflow.log_artifact(MODEL_VERSION)
                     data_df.to_parquet(DATA_PATH)
         except Exception as e:
             print(f"Error processing message: {str(e)}")

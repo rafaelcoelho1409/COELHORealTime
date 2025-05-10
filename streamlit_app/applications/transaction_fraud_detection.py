@@ -7,11 +7,22 @@ from faker import Faker
 import datetime as dt
 import plotly.express as px
 from functions import (
-    timestamp_to_api_response
+    timestamp_to_api_response,
+    switch_active_model
 )
 
 fake = Faker()
 PROJECT_NAME = "Transaction Fraud Detection"
+MODEL_KEY = f"{PROJECT_NAME.replace(' ', '_').replace('-', '_').lower()}.py"
+FASTAPI_URL = "http://fastapi:8000"
+
+if 'activated_model' not in st.session_state or st.session_state.activated_model != MODEL_KEY:
+    # If no model is marked as active, or a different one is, try to activate this page's model.
+    # This also handles the initial load of the page.
+    switch_active_model(MODEL_KEY)
+    # You might want a small delay or a button to prevent rapid switching if users click around fast
+    # time.sleep(1) # Optional: brief pause
+
 
 tabs = st.tabs([
     "Incremental ML",

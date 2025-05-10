@@ -9,12 +9,23 @@ import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as pio
 from functions import (
-    timestamp_to_api_response
+    timestamp_to_api_response,
+    switch_active_model
 )
 
 pio.renderers.default = "notebook_connected"
 fake = Faker()
 PROJECT_NAME = "Estimated Time of Arrival"
+MODEL_KEY = f"{PROJECT_NAME.replace(' ', '_').replace('-', '_').lower()}.py"
+FASTAPI_URL = "http://fastapi:8000"
+
+if 'activated_model' not in st.session_state or st.session_state.activated_model != MODEL_KEY:
+    # If no model is marked as active, or a different one is, try to activate this page's model.
+    # This also handles the initial load of the page.
+    switch_active_model(MODEL_KEY)
+    # You might want a small delay or a button to prevent rapid switching if users click around fast
+    # time.sleep(1) # Optional: brief pause
+
 
 tabs = st.tabs([
     "Incremental ML",
@@ -136,8 +147,8 @@ with tabs[0]: # Incremental ML
         debug_traffic_factor = form_cols7[0].number_input(
             "Debug Traffic Factor", 
             value = sample["debug_traffic_factor"],
-            min_value = 0.8,
-            max_value = 1.4,
+            min_value = 0.8 - 0.5,
+            max_value = 1.4 + 0.5,
             step = 0.1
         )
         debug_weather_factor = form_cols7[1].number_input(
@@ -158,8 +169,8 @@ with tabs[0]: # Incremental ML
         debug_driver_factor = form_cols8[1].number_input(
             "Debug Driver Factor", 
             value = sample["debug_driver_factor"],
-            min_value = 1.0 - (5.0 - 4.5) * 0.05, #5.0: max driver rating
-            max_value = 1.0 - (3.5 - 4.5) * 0.05, #3.5: min driver rating
+            min_value = 1.0 - (5.0 - 4.5) * 0.05 - 0.1, #5.0: max driver rating
+            max_value = 1.0 - (3.5 - 4.5) * 0.05 + 0.1, #3.5: min driver rating
             step = 0.1
         )
         form_cols9 = st.columns(2)

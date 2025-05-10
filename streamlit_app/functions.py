@@ -1,7 +1,7 @@
 import streamlit as st
 import base64
 import datetime as dt
-import json
+import requests
 import pandas as pd
 import ast
 from collections import Counter, defaultdict
@@ -207,6 +207,24 @@ def create_location_heatmaps(location_data_per_cluster: dict, mapbox_access_toke
         )
         heatmap_figures[f"Cluster {cluster_id}"] = fig
     return heatmap_figures
+
+
+def switch_active_model(key_to_activate, FASTAPI_URL = "http://fastapi:8000"):
+    try:
+        response = requests.post(f"{FASTAPI_URL}/switch_model/{key_to_activate}")
+        response.raise_for_status()
+        st.toast(
+            f"Request to switch to model '{key_to_activate}' sent: {response.json().get('message')}", 
+            icon = "✅")
+        # Store in session state which model we *think* is active
+        st.session_state.activated_model = key_to_activate
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error switching model: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            st.error(f"FastAPI response: {e.response.text}")
+        # If switch failed, reflect that no model is reliably active from this page's perspective
+        if 'activated_model' in st.session_state and st.session_state.activated_model == key_to_activate:
+            del st.session_state.activated_model
 
 
 ###>>>---STREAMLIT FUNCTIONS---<<<###

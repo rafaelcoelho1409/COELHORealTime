@@ -5,8 +5,7 @@ from fastapi import (
 from contextlib import asynccontextmanager
 from pydantic import (
     BaseModel, 
-    validator, 
-    Field, 
+    Field,
     field_validator
 )
 import sys
@@ -18,8 +17,10 @@ from typing import (
 )
 import math
 from pprint import pprint
-import pickle
 import json
+import subprocess
+import os
+import numpy as np
 from functions import (
     process_sample,
     load_or_create_model,
@@ -28,11 +29,88 @@ from functions import (
     load_or_create_encoders,
 )
 
+
 PROJECT_NAMES = [
     "Transaction Fraud Detection", 
     "Estimated Time of Arrival",
     "E-Commerce Customer Interactions"
 ]
+MODEL_SCRIPTS = {
+    project_name: f"{project_name.replace(' ', '_').replace('-', '_').lower()}.py"
+    for project_name in PROJECT_NAMES
+}
+
+def stop_current_model():
+    """
+    Stops the currently running model process using Popen.terminate() (SIGTERM),
+    then Popen.kill() (SIGKILL) if necessary.
+    Manages state via the global healthcheck object.
+    Returns True if the process is confirmed stopped or was already stopped.
+    """
+    global healthcheck
+    if not healthcheck.current_training_process:
+        healthcheck.current_training_status = "No model was active to stop."
+        return True
+    active_model_name = healthcheck.current_model_name
+    process_to_stop = healthcheck.current_training_process # This is the Popen object
+    if not hasattr(process_to_stop, 'pid') or process_to_stop.pid is None:
+        print(f"Model '{active_model_name}' has invalid/stale process object. Cleaning up.")
+        healthcheck.current_training_status = f"Model '{active_model_name}' had invalid process object. State cleared."
+        healthcheck.current_training_process = None
+        healthcheck.current_model_name = None
+        return True
+    pid_to_stop = process_to_stop.pid
+    print(f"Attempting to stop model: '{active_model_name}' (PID: {pid_to_stop}) using Popen.terminate() (SIGTERM).")
+    healthcheck.current_training_status = f"Sending SIGTERM to model '{active_model_name}' (PID: {pid_to_stop}). Waiting for graceful shutdown (60s)..."
+    try:
+        process_to_stop.terminate() # Sends SIGTERM
+        process_to_stop.wait(timeout=60) # Wait for process to terminate
+        if process_to_stop.poll() is not None: # Check if process has terminated
+            print(f"Model '{active_model_name}' (PID: {pid_to_stop}) terminated gracefully after SIGTERM (exit code: {process_to_stop.returncode}).")
+            healthcheck.current_training_status = f"Model '{active_model_name}' stopped gracefully (SIGTERM)."
+        else:
+            # This case should ideally not be reached if wait() returned without TimeoutExpired
+            # and poll() is still None, but we handle it defensively.
+            print(f"Model '{active_model_name}' (PID: {pid_to_stop}) did not terminate after SIGTERM and wait(). Status unclear. Proceeding to SIGKILL.")
+            healthcheck.current_training_status = f"Model '{active_model_name}' SIGTERM sent, status unclear. Proceeding to SIGKILL."
+            # Fall through to SIGKILL logic below (implicitly, as poll() will be None)
+    except subprocess.TimeoutExpired:
+        print(f"Model '{active_model_name}' (PID: {pid_to_stop}) timed out (60s) after SIGTERM. Sending SIGKILL.")
+        healthcheck.current_training_status = f"Model '{active_model_name}' timed out after SIGTERM, will send SIGKILL."
+        # Fall through to SIGKILL logic
+    except Exception as e_terminate: # Catch other errors during terminate/wait
+        print(f"Error during SIGTERM/wait for model '{active_model_name}' (PID: {pid_to_stop}): {e_terminate}")
+        healthcheck.current_training_status = f"Error during SIGTERM/wait for '{active_model_name}': {e_terminate}. Proceeding to SIGKILL."
+        # Fall through to SIGKILL logic
+    # If process is still running (poll() is None after SIGTERM attempt or if an error occurred)
+    if process_to_stop.poll() is None:
+        try:
+            print(f"Sending SIGKILL to model '{active_model_name}' (PID: {pid_to_stop}).")
+            healthcheck.current_training_status = f"Sending SIGKILL to model '{active_model_name}' (PID: {pid_to_stop})."
+            process_to_stop.kill() # Sends SIGKILL
+            process_to_stop.wait(timeout=10) # Wait for SIGKILL to take effect
+
+            if process_to_stop.poll() is not None:
+                print(f"Model '{active_model_name}' (PID: {pid_to_stop}) terminated after SIGKILL (exit code: {process_to_stop.returncode}).")
+                healthcheck.current_training_status = f"Model '{active_model_name}' stopped via SIGKILL."
+            else:
+                print(f"ERROR: Model '{active_model_name}' (PID: {pid_to_stop}) did NOT terminate after SIGKILL and wait. Process may be unkillable.")
+                healthcheck.current_training_status = f"ERROR: Model '{active_model_name}' failed to stop even after SIGKILL."
+                # Do not clear process/model name if we failed to kill it, to reflect this state.
+                return False # Indicate stop failed
+        except Exception as e_kill:
+            print(f"Error during SIGKILL/wait for model '{active_model_name}' (PID: {pid_to_stop}): {e_kill}")
+            healthcheck.current_training_status = f"Error during SIGKILL for '{active_model_name}': {e_kill}"
+            # Do not clear process/model name if we failed to kill it.
+            return False # Indicate stop failed
+    elif process_to_stop.poll() is not None and not healthcheck.current_training_status.startswith(f"Model '{active_model_name}' stopped gracefully"):
+         # Process already stopped before SIGKILL attempt, and not by successful SIGTERM
+         print(f"Model '{active_model_name}' was already stopped before SIGKILL stage (exit code: {process_to_stop.returncode}).")
+         healthcheck.current_training_status = f"Model '{active_model_name}' confirmed stopped before SIGKILL stage."
+    # Final state cleanup if process is confirmed stopped or we've exhausted attempts and it's considered "done"
+    healthcheck.current_training_process = None
+    healthcheck.current_model_name = None
+    return True # Signifies completion of the stop sequence.
 
 
 # Initialize global variables as None or placeholder BEFORE startup
@@ -51,7 +129,15 @@ class Healthcheck(BaseModel):
     data_message: dict[str, str] | dict[str, None] = {x: None for x in PROJECT_NAMES} # Added data load message
     initial_data_sample_loaded: dict[str, bool] | dict[str, None] = {x: None for x in PROJECT_NAMES} # Added sample status
     initial_data_sample_message: dict[str, str] | dict[str, None] = {x: None for x in PROJECT_NAMES}
-
+    current_training_process: Optional[Any] = None
+    current_model_name: Optional[str] = None
+    current_training_status: Optional[str] = Field(
+        "Initializing",
+        description = "Describes the current state of the managed training process."
+    )
+    model_config = {
+        "arbitrary_types_allowed": True
+    }
 
 # Initialize healthcheck with default state
 healthcheck = Healthcheck(
@@ -289,6 +375,8 @@ async def lifespan(app: FastAPI):
     print("Application setup finished. Yielding control...")
     yield # <-- Application is now ready to serve requests
     # --- Shutdown Logic (Equivalent to @app.on_event("shutdown")) ---
+    print("FastAPI application shutting down. Stopping any active model...")
+    stop_current_model()
     print("Starting application shutdown (lifespan)...")
     print("Application shutdown finished.")
 
@@ -298,7 +386,7 @@ app = FastAPI(lifespan = lifespan)
 
 
 # IMPORTANT OBSERVATION: you can put the PUT only after the GET
-@app.get("/healthcheck")
+@app.get("/healthcheck", response_model = Healthcheck, response_model_exclude = {"current_training_process"})
 async def get_healthcheck():
     # You can add more detailed checks here if needed, e.g., if model is None
     if ("failed" in healthcheck.model_load.values()) or ("failed" in healthcheck.data_load.values()):
@@ -307,7 +395,7 @@ async def get_healthcheck():
             detail = "Service Unavailable: Core components failed to load.")
     return healthcheck
 
-@app.put("/healthcheck", response_model = Healthcheck)
+@app.put("/healthcheck", response_model = Healthcheck, response_model_exclude = {"current_training_process"})
 async def update_healthcheck(update_data: Healthcheck):
     global healthcheck # Declare that you intend to modify the global variable
     update_dict = update_data.model_dump(exclude_unset = True)
@@ -470,7 +558,8 @@ async def get_mlflow_metrics(request: MLflowMetricsRequest):
         experiment_ids = [experiment_id]
     )
     run_df = runs_df.iloc[0]
-    return run_df.to_dict()
+    run_df = run_df.replace({np.nan: None}).to_dict()
+    return run_df
 
 
 @app.get("/cluster_counts")
@@ -499,3 +588,69 @@ async def get_cluster_counts(request: ClusterFeatureCountsRequest):
         }
     except:
         return {}
+    
+
+@app.post("/switch_model/{model_key}")
+async def switch_model(model_key: str):
+    global healthcheck
+    if model_key == healthcheck.current_model_name:
+        return {"message": f"Model {model_key} is already running."}
+    # Stop any currently running model
+    if healthcheck.current_training_process:
+        print(f"Switching from {healthcheck.current_model_name} to {model_key}")
+        stop_current_model()
+    else:
+        print(f"No model running, attempting to start {model_key}")
+    if model_key == "none" or model_key not in MODEL_SCRIPTS.values():
+        if model_key == "none":
+            return {"message": "All models stopped."}
+        else:
+            raise HTTPException(
+                status_code = 404, 
+                detail = f"Model key '{model_key}' not found.")
+    script_to_run = model_key
+    command = ["python", script_to_run] # Use the venv python
+    try:
+        print(f"Starting model: {model_key} with script: {script_to_run}")
+        # Start the new training script
+        # Make sure logs from these scripts go somewhere, or capture stdout/stderr
+        # For simplicity, letting them log to their own files or stdout for now.
+        # If you redirect stdout/stderr, ensure non-blocking reads or use tempfiles.
+        log_file_path = f"/app/logs/{model_key}.log" # Ensure /app/logs exists
+        os.makedirs(
+            os.path.dirname(log_file_path), 
+            exist_ok = True)
+        with open(log_file_path, 'ab') as log_file: # Append mode, binary
+            # `start_new_session=True` or `preexec_fn=os.setsid` can be useful if you need to kill process groups
+            # For SIGTERM on the direct child, it's usually not strictly necessary but good practice.
+            process = subprocess.Popen(
+                command,
+                stdout = log_file,
+                stderr = subprocess.STDOUT, # Redirect stderr to stdout (goes to same log_file)
+                cwd = "/app" # Assuming scripts are in /app and paths are relative to it
+                          # or use absolute paths for scripts
+            )
+        healthcheck.current_training_process = process
+        healthcheck.current_model_name = model_key
+        print(f"Model {model_key} started with PID: {process.pid}. Logs at {log_file_path}")
+        return {"message": f"Switched to model: {model_key}"}
+    except Exception as e:
+        print(f"Failed to start model {model_key}: {e}")
+        healthcheck.current_training_process = None # Ensure state is clean
+        healthcheck.current_model_name = None
+        raise HTTPException(
+            status_code = 500, 
+            detail = f"Failed to start model {model_key}: {str(e)}")
+    
+
+@app.get("/current_model")
+async def get_current_model():
+    if healthcheck.current_model_name and healthcheck.current_training_process:
+        # Check if process is still alive
+        if healthcheck.current_training_process.poll() is None: # None means still running
+            return {"current_model": healthcheck.current_model_name, "status": "running", "pid": healthcheck.current_training_process.pid}
+        else: # Process has terminated
+            return_code = healthcheck.current_training_process.returncode
+            stop_current_model() # Clean up state
+            return {"current_model": healthcheck.current_model_name, "status": f"stopped (exit code: {return_code})", "pid": None }
+    return {"current_model": None, "status": "none running"}
