@@ -1,10 +1,12 @@
 from river import (
-    metrics
+    metrics,
+    drift
 )
 import pickle
 import os
 import pandas as pd
 import mlflow
+from pprint import pprint
 from functions import (
     process_sample,
     load_or_create_model,
@@ -13,10 +15,10 @@ from functions import (
     load_or_create_encoders,
 )
 
-DATA_PATH = "data/transaction_fraud_detection.parquet"
-MODEL_FOLDER = "models/transaction_fraud_detection"
-ENCODERS_PATH = "encoders/transaction_fraud_detection.pkl"
-PROJECT_NAME = "Transaction Fraud Detection"
+DATA_PATH = "data/sales_forecasting.parquet"
+MODEL_FOLDER = "models/sales_forecasting"
+ENCODERS_PATH = "encoders/sales_forecasting.pkl"
+PROJECT_NAME = "Sales Forecasting"
 
 os.makedirs(MODEL_FOLDER, exist_ok = True)
 os.makedirs("encoders", exist_ok = True)
@@ -40,78 +42,75 @@ def main():
     data_df = load_or_create_data(
         consumer,
         PROJECT_NAME)
-    binary_classification_metrics = [
-        'Accuracy',
-        'Precision',          # Typically for the positive class (Fraud)
-        'Recall',             # Typically for the positive class (Fraud)
-        'F1',                 # Typically for the positive class (Fraud)
-        'GeometricMean',
-        'ROCAUC',             # Requires probabilities
+    regression_metrics = [
+        'MAE',
+        'MAPE',
+        'MSE',
+        'R2',
+        'RMSE',
+        #'RMSLE',
+        'SMAPE',
     ]
-    binary_classification_metrics_dict = {
-        x: getattr(metrics, x)() for x in binary_classification_metrics
+    regression_metrics_dict = {
+        x: getattr(metrics, x)() for x in regression_metrics
     }
     BATCH_SIZE_OFFSET = 100
     with mlflow.start_run(run_name = model.__class__.__name__):
         try:
             for message in consumer:
-                transaction = message.value
+                sale = message.value
                 # Create a new DataFrame from the received data
-                new_row = pd.DataFrame([transaction])
+                new_row = pd.DataFrame([sale])
                 # Append the new row to the existing DataFrame
                 data_df = pd.concat([data_df, new_row], ignore_index = True)
-                # Process the transaction
+                # Process the sale
                 x = {
-                    'transaction_id':        transaction['transaction_id'],
-                    'user_id':               transaction['user_id'],
-                    'timestamp':             transaction['timestamp'],
-                    'amount':                transaction['amount'],
-                    'currency':              transaction['currency'],
-                    'merchant_id':           transaction['merchant_id'],
-                    'product_category':      transaction['product_category'],
-                    'transaction_type':      transaction['transaction_type'],
-                    'payment_method':        transaction['payment_method'],
-                    'location':              transaction['location'],
-                    'ip_address':            transaction['ip_address'],
-                    'device_info':           transaction['device_info'], # Nested structure for device details
-                    'user_agent':            transaction['user_agent'],
-                    'account_age_days':      transaction['account_age_days'],
-                    'cvv_provided':          transaction['cvv_provided'], # Boolean flag
-                    'billing_address_match': transaction['billing_address_match'], # Boolean flag
+                 'concept_drift_stage': sale['concept_drift_stage'],
+                 'day_of_week':         sale['day_of_week'],
+                 'event_id':            sale['event_id'],
+                 'is_holiday':          sale['is_holiday'],
+                 'is_promotion_active': sale['is_promotion_active'],    
+                 'month':               sale['month'],
+                 'product_id':          sale['product_id'],
+                 'promotion_id':        sale['promotion_id'],
+                 'store_id':            sale['store_id'],
+                 'timestamp':           sale['timestamp'],
+                 'total_sales_amount':  sale['total_sales_amount'],
+                 'unit_price':          sale['unit_price'],
                 }
                 x, encoders = process_sample(
                     x, 
                     encoders,
                     PROJECT_NAME)
-                y = transaction['is_fraud']
+                y = sale['quantity_sold']
                 # Update the model
-                model.learn_one(x, y)
-                prediction = model.predict_one(x)
+                model.learn_one(x = x, y = y)
+                prediction = model.forecast(horizon = 1, xs = [x])[0]
                 # Update metrics if provided
                 try:
-                    for metric in binary_classification_metrics:
-                        binary_classification_metrics_dict[metric].update(y, prediction)
+                    for metric in regression_metrics:
+                        regression_metrics_dict[metric].update(y, prediction)
                 except Exception as e:
                     print(f"Error updating metric {metric}: {str(e)}")
                 # Periodically log progress
                 if message.offset % BATCH_SIZE_OFFSET == 0:
                     #print(f"Processed {message.offset} messages")
-                    for metric in binary_classification_metrics:
+                    for metric in regression_metrics:
                         try:
-                            binary_classification_metrics_dict[metric].update(y, prediction)
+                            regression_metrics_dict[metric].update(y, prediction)
                         except Exception as e:
                             print(f"Error updating metric {metric}: {str(e)}")
-                        mlflow.log_metric(metric, binary_classification_metrics_dict[metric].get())
+                        mlflow.log_metric(metric, regression_metrics_dict[metric].get())
                         #print(f"{metric}: {binary_classification_metrics_dict[metric].get():.2%}")
                     with open(ENCODERS_PATH, 'wb') as f:
                         pickle.dump(encoders, f)
-                    #mlflow.log_artifact(ENCODERS_PATH)
+                    mlflow.log_artifact(ENCODERS_PATH)
                 if message.offset % (BATCH_SIZE_OFFSET * 10) == 0:
                     MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
                     with open(MODEL_VERSION, 'wb') as f:
                         pickle.dump(model, f)
                     data_df.to_parquet(DATA_PATH)
-        except Exception as e:
+        except:
             print(f"Error processing message: {str(e)}")
             print("Stopping consumer...")
         finally:

@@ -11,7 +11,8 @@ pages_dict = {
     #"Home": "applications/home.py",
     "Transaction Fraud Detection": "applications/transaction_fraud_detection.py",
     "Estimated Time of Arrival": "applications/estimated_time_of_arrival.py",
-    "E-Commerce Customer Interactions": "applications/e_commerce_customer_interactions.py"
+    "E-Commerce Customer Interactions": "applications/e_commerce_customer_interactions.py",
+    "Sales Forecasting": "applications/sales_forecasting.py"
 }
 pages = {
     "Home": st.Page("applications/home.py", title = "Home", icon = ":material/home:")} | {
@@ -26,7 +27,8 @@ pg = st.navigation({
     "Applications": [
         pages["Transaction Fraud Detection"],
         pages["Estimated Time of Arrival"],
-        pages["E-Commerce Customer Interactions"]
+        pages["E-Commerce Customer Interactions"],
+        pages["Sales Forecasting"]
     ],
 })
 

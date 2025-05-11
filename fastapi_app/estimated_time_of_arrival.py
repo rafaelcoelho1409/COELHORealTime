@@ -13,7 +13,7 @@ from functions import (
     load_or_create_encoders,
 )
 
-DATA_PATH = "data/estimated_time_of_arrival_data.parquet"
+DATA_PATH = "data/estimated_time_of_arrival.parquet"
 MODEL_FOLDER = "models/estimated_time_of_arrival"
 ENCODERS_PATH = "encoders/estimated_time_of_arrival.pkl"
 PROJECT_NAME = "Estimated Time of Arrival"

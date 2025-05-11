@@ -33,7 +33,8 @@ from functions import (
 PROJECT_NAMES = [
     "Transaction Fraud Detection", 
     "Estimated Time of Arrival",
-    "E-Commerce Customer Interactions"
+    "E-Commerce Customer Interactions",
+    "Sales Forecasting"
 ]
 MODEL_SCRIPTS = {
     project_name: f"{project_name.replace(' ', '_').replace('-', '_').lower()}.py"
@@ -278,6 +279,22 @@ class ECommerceCustomerInteractions(BaseModel):
         pass
 
 
+class SalesForecasting(BaseModel):
+    concept_drift_stage: Optional[int] = None
+    day_of_week: Optional[int] = None
+    event_id: Optional[str] = None
+    is_holiday: Optional[bool] = None
+    is_promotion_active: Optional[bool] = None
+    month: Optional[int] = None
+    product_id: Optional[str] = None
+    promotion_id: Optional[str] = None
+    quantity_sold: Optional[int] = None
+    store_id: Optional[str] = None
+    timestamp: Optional[str] = None
+    total_sales_amount: Optional[float] = None
+    unit_price: Optional[float] = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global \
@@ -516,6 +533,11 @@ async def predict(payload: dict):
             return {
                 "cluster": y_pred
             }
+        elif project_name == "Sales Forecasting":
+            y_pred = model.forecast(horizon = 1, xs = [processed_x]) # Use processed data
+            return {
+                "sales": y_pred
+            }
     except Exception as e:
         print(f"Error during prediction: {e}", file = sys.stderr)
         raise HTTPException(
@@ -609,7 +631,7 @@ async def switch_model(model_key: str):
                 status_code = 404, 
                 detail = f"Model key '{model_key}' not found.")
     script_to_run = model_key
-    command = ["python", script_to_run] # Use the venv python
+    command = ["python3", script_to_run] # Use the venv python
     try:
         print(f"Starting model: {model_key} with script: {script_to_run}")
         # Start the new training script

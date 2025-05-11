@@ -9,7 +9,12 @@ from river import (
     drift,
     forest,
     cluster,
-    preprocessing
+    preprocessing,
+    time_series,
+    linear_model,
+    optim,
+    bandit,
+    model_selection
 )
 from kafka import KafkaConsumer
 import json
@@ -136,6 +141,7 @@ class DictImputer(base.Transformer):
             if x_transformed.get(feature) is None:
                 x_transformed[feature] = self.fill_value
         return x_transformed
+
     
 
 def extract_device_info(x):
@@ -167,9 +173,10 @@ def extract_coordinates(x):
 
 def load_or_create_encoders(project_name):
     encoders_folders = {
-        "Transaction Fraud Detection": "encoders/transaction_fraud_detection_encoders.pkl",
+        "Transaction Fraud Detection": "encoders/transaction_fraud_detection.pkl",
         "Estimated Time of Arrival": "encoders/estimated_time_of_arrival.pkl",
-        "E-Commerce Customer Interactions": "encoders/e_commerce_customer_interactions.pkl"
+        "E-Commerce Customer Interactions": "encoders/e_commerce_customer_interactions.pkl",
+        "Sales Forecasting": "encoders/sales_forecasting.pkl"
     }
     encoder_path = encoders_folders[project_name]
     try:
@@ -186,6 +193,11 @@ def load_or_create_encoders(project_name):
                 "standard_scaler": preprocessing.StandardScaler(),
                 "feature_hasher": preprocessing.FeatureHasher()
             }
+        elif project_name in ["Sales Forecasting"]:
+            encoders = {
+                "one_hot_encoder": preprocessing.OneHotEncoder(),
+                "standard_scaler": preprocessing.StandardScaler(),
+            } #remove after developing the right model strategy
         print(f"Creating encoders: {e}", file = sys.stderr)
     except Exception as e:
         if project_name in ["Transaction Fraud Detection", "Estimated Time of Arrival"]:
@@ -197,6 +209,11 @@ def load_or_create_encoders(project_name):
                 "standard_scaler": preprocessing.StandardScaler(),
                 "feature_hasher": preprocessing.FeatureHasher()
             }
+        elif project_name in ["Sales Forecasting"]:
+            encoders = {
+                "one_hot_encoder": preprocessing.OneHotEncoder(),
+                "standard_scaler": preprocessing.StandardScaler(),
+            } #remove after developing the right model strategy
         print(f"Creating encoders: {e}", file = sys.stderr)
     return encoders
 
@@ -356,8 +373,7 @@ def process_sample(x, encoders, project_name):
             'day',
             'hour',
             'minute',
-            'second',
-            #'weekday'
+            'second'
         ]
         num_pipe = compose.Select(*numerical_features)
         num_pipe.learn_one(x_to_prep)
@@ -372,6 +388,69 @@ def process_sample(x, encoders, project_name):
         return x_scaled | x_hashed, {
             "standard_scaler": encoders["standard_scaler"], 
             "feature_hasher": encoders["feature_hasher"]
+        }
+    elif project_name == "Sales Forecasting":
+        pipe1 = compose.Select(
+            'concept_drift_stage',
+            'day_of_week',
+            'is_holiday',
+            'is_promotion_active',
+            'month',
+            #'total_sales_amount',
+            'unit_price'
+        )
+        pipe1.learn_one(x)
+        x1 = pipe1.transform_one(x)
+        pipe2a = compose.Select(
+            "timestamp",
+        )
+        pipe2a.learn_one(x)
+        x_pipe_2 = pipe2a.transform_one(x)
+        pipe2b = compose.FuncTransformer(
+            extract_timestamp_info,
+        )
+        pipe2b.learn_one(x_pipe_2)
+        x2 = pipe2b.transform_one(x_pipe_2)
+        pipe3a = compose.Select(
+            'product_id',
+            'promotion_id',
+            'store_id'
+        )
+        pipe3a.learn_one(x)
+        x3 = pipe3a.transform_one(x)
+        x_to_process = x1 | x2 | x3
+        numerical_features = [
+            'unit_price',
+            #'total_sales_amount',
+        ]
+        categorical_features = [
+            'is_promotion_active',
+            'is_holiday',
+            'day_of_week',
+            'concept_drift_stage',
+            'year',
+            'month',
+            'day',
+            #'hour',
+            #'minute',
+            #'second',
+            'product_id',
+            'promotion_id',
+            'store_id',
+        ]
+        pipe_num = compose.Select(*numerical_features)
+        pipe_num.learn_one(x_to_process)
+        x_num = pipe_num.transform_one(x_to_process)
+        pipe_cat = compose.Select(*categorical_features)
+        pipe_cat.learn_one(x_to_process)
+        x_cat = pipe_cat.transform_one(x_to_process)
+        encoders["standard_scaler"].learn_one(x_num)
+        x_num = encoders["standard_scaler"].transform_one(x_num)
+        encoders["one_hot_encoder"].learn_one(x_cat)
+        x_cat = encoders["one_hot_encoder"].transform_one(x_cat)
+        return x_num | x_cat, {
+            "one_hot_encoder": encoders["one_hot_encoder"],
+            "standard_scaler": encoders["standard_scaler"],
         }
 
 
@@ -417,6 +496,20 @@ def load_or_create_model(project_name, folder_path = None):
                 fading_factor = 0.01,
                 cleanup_interval = 2,
             )
+        elif project_name == "Sales Forecasting":
+            regressor_snarimax = linear_model.PARegressor(
+                    C = 0.01, 
+                    mode = 1)
+            model = time_series.SNARIMAX(
+                p = 2,          # Start with a slightly lower non-seasonal AR
+                d = 1,          # For trend
+                q = 1,          # Start with a slightly lower non-seasonal MA
+                m = 7,          # Weekly seasonality
+                sp = 1,         # Seasonal AR
+                sd = 0,         # No seasonal differencing initially
+                sq = 1,         # Seasonal MA
+                regressor = regressor_snarimax # The pipeline defined above
+            )
         print(f"Creating model: {project_name}", file = sys.stderr)
     return model
 
@@ -426,7 +519,8 @@ def create_consumer(project_name):
     consumer_name_dict = {
         "Transaction Fraud Detection": "transaction_fraud_detection",
         "Estimated Time of Arrival": "estimated_time_of_arrival",
-        "E-Commerce Customer Interactions": "e_commerce_customer_interactions"
+        "E-Commerce Customer Interactions": "e_commerce_customer_interactions",
+        "Sales Forecasting": "sales_forecasting"
     }
     KAFKA_TOPIC = consumer_name_dict[project_name]
     return KafkaConsumer(
@@ -441,9 +535,10 @@ def create_consumer(project_name):
 def load_or_create_data(consumer, project_name):
     """Load existing model or create a new one"""
     data_name_dict = {
-        "Transaction Fraud Detection": "transaction_fraud_detection_data.parquet",
-        "Estimated Time of Arrival": "estimated_time_of_arrival_data.parquet",
-        "E-Commerce Customer Interactions": "e_commerce_customer_interactions_data.parquet"
+        "Transaction Fraud Detection": "transaction_fraud_detection.parquet",
+        "Estimated Time of Arrival": "estimated_time_of_arrival.parquet",
+        "E-Commerce Customer Interactions": "e_commerce_customer_interactions.parquet",
+        "Sales Forecasting": "sales_forecasting.parquet"
     }
     DATA_PATH = f"data/{data_name_dict[project_name]}"
     try:

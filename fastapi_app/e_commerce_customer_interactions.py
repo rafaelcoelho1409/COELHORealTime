@@ -20,7 +20,7 @@ from functions import (
 )
 
 
-DATA_PATH = "data/e_commerce_customer_interactions_data.parquet"
+DATA_PATH = "data/e_commerce_customer_interactions.parquet"
 MODEL_FOLDER = "models/e_commerce_customer_interactions"
 ENCODERS_PATH = "encoders/e_commerce_customer_interactions.pkl"
 CLUSTER_COUNTS_PATH = "data/cluster_counts.json"
