@@ -8,3 +8,7 @@ kafka-python
 river
 mlflow
 starlette
+scikit-learn
+xgboost-cpu
+setuptools
+yellowbrick

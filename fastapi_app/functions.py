@@ -2,6 +2,10 @@ import pickle
 import os
 import sys
 from typing import Any, Dict, Hashable
+from kafka import KafkaConsumer
+import json
+import pandas as pd
+import datetime as dt
 from river import (
     base,
     compose, 
@@ -16,10 +20,13 @@ from river import (
     bandit,
     model_selection
 )
-from kafka import KafkaConsumer
-import json
-import pandas as pd
-import datetime as dt
+from sklearn.preprocessing import (
+    StandardScaler,
+    OneHotEncoder,
+)
+from sklearn.compose import ColumnTransformer
+from sklearn.model_selection import train_test_split
+from xgboost import XGBClassifier
 
 
 
@@ -151,6 +158,13 @@ def extract_device_info(x):
         'browser': x_['browser'],
     }
 
+def extract_device_info_sklearn(data):
+    data = data.copy()
+    data_to_join = pd.json_normalize(data["device_info"])
+    data = data.drop("device_info", axis = 1)
+    data = data.join(data_to_join)
+    return data
+
 def extract_timestamp_info(x):
     x_ = dt.datetime.strptime(
         x['timestamp'],
@@ -164,12 +178,33 @@ def extract_timestamp_info(x):
         'second': x_.second
     }
 
+def extract_timestamp_info_sklearn(data):
+    data = data.copy()
+    data["timestamp"] = pd.to_datetime(
+        data["timestamp"],
+        format = 'ISO8601')
+    data["year"] = data["timestamp"].dt.year
+    data["month"] = data["timestamp"].dt.month
+    data["day"] = data["timestamp"].dt.day
+    data["hour"] = data["timestamp"].dt.hour
+    data["minute"] = data["timestamp"].dt.minute
+    data["second"] = data["timestamp"].dt.second
+    data = data.drop("timestamp", axis = 1)
+    return data
+
 def extract_coordinates(x):
     x_ = x['location']
     return {
         'lat': x_['lat'],
         'lon': x_['lon'],
     }
+
+def extract_coordinates_sklearn(data):
+    data = data.copy()
+    data_to_join = pd.json_normalize(data["location"])
+    data = data.drop("location", axis = 1)
+    data = data.join(data_to_join)
+    return data
 
 def load_or_create_encoders(project_name):
     encoders_folders = {
@@ -538,7 +573,7 @@ def load_or_create_data(consumer, project_name):
         "Transaction Fraud Detection": "transaction_fraud_detection.parquet",
         "Estimated Time of Arrival": "estimated_time_of_arrival.parquet",
         "E-Commerce Customer Interactions": "e_commerce_customer_interactions.parquet",
-        "Sales Forecasting": "sales_forecasting.parquet"
+        #"Sales Forecasting": "sales_forecasting.parquet"
     }
     DATA_PATH = f"data/{data_name_dict[project_name]}"
     try:
@@ -551,3 +586,92 @@ def load_or_create_data(consumer, project_name):
         data_df = pd.DataFrame([transaction])
         print(f"Creating data: {project_name}", file = sys.stderr)  
     return data_df
+
+
+def process_batch_data(data, project_name):
+    data = data.copy()
+    if project_name == "Transaction Fraud Detection":
+        data = data.copy()
+        data = extract_device_info_sklearn(data)
+        data = extract_timestamp_info_sklearn(data)
+        numerical_features = [
+            "amount",
+            "account_age_days",
+            "cvv_provided",
+            "billing_address_match"
+        ]
+        binary_features = [
+            "cvv_provided",
+            "billing_address_match"
+        ]
+        categorical_features = [
+            "currency",
+            "merchant_id",
+            "payment_method",
+            "product_category",
+            "transaction_type",
+            "browser",
+            "os",
+            "year",
+            "month",
+            "day",
+            "hour",
+            "minute",
+            "second",
+        ]
+        numerical_transformer = StandardScaler()
+        categorical_transformer = OneHotEncoder(
+            handle_unknown = 'ignore',
+            sparse_output = False)
+        preprocessor = ColumnTransformer(
+            transformers = [
+                ("numerical", numerical_transformer, numerical_features),
+                ("binary", "passthrough", binary_features),
+                ("categorical", categorical_transformer, categorical_features),
+            ]
+        )
+        preprocessor.set_output(transform = "pandas") # Output pandas DataFrame
+        X = data.drop('is_fraud', axis = 1)
+        y = data['is_fraud']
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y,
+            test_size = 0.2,       # 20% for testing
+            stratify = y,           # Crucial for imbalanced data
+            random_state = 42
+        )
+        preprocessor.fit(X_train)
+        #Don't apply preprocessor directly on X (it characterizes data leakage)
+        X_train = preprocessor.transform(X_train)
+        X_test = preprocessor.transform(X_test)
+    return X_train, X_test, y_train, y_test
+
+
+def create_batch_model(project_name, **kwargs):
+    if project_name == "Transaction Fraud Detection":
+        neg_samples = sum(kwargs["y_train"] == 0)
+        pos_samples = sum(kwargs["y_train"] == 1)
+        if pos_samples > 0:
+            calculated_scale_pos_weight = neg_samples / pos_samples
+        else:
+            calculated_scale_pos_weight = 1 # Default or handle as error if no positive samples
+        model = XGBClassifier(
+            objective = 'binary:logistic',  # For binary classification
+            eval_metric = 'auc',            # Primary metric to monitor (aligns with River's ROCAUC)
+                                            # Consider 'aucpr' (PR AUC) as well, often better for severe imbalance.
+            enable_categorical = True,
+            use_label_encoder = False,      # Suppresses a warning with newer XGBoost versions
+            random_state = 42,              # For reproducibility
+            n_jobs = -1,                    # Use all available CPU cores
+            # --- Parameters to TUNE ---
+            n_estimators = 200,             # Start: 100-500. Tune with early stopping.
+            learning_rate = 0.05,           # Start: 0.01, 0.05, 0.1. Smaller values need more n_estimators.
+            max_depth = 5,                  # Start: 3-7. Deeper trees can overfit.
+            subsample = 0.8,                # Start: 0.6-0.9.
+            colsample_bytree = 0.8,         # Start: 0.6-0.9.
+            gamma = 0,                      # Start: 0-0.2. Higher values make the algorithm more conservative.
+            # reg_alpha=0,                # Consider tuning if many features (e.g., 0, 0.01, 0.1, 1)
+            # reg_lambda=1,               # Consider tuning (e.g., 0.1, 1, 10)
+            # --- CRITICAL for Imbalance ---
+            scale_pos_weight = calculated_scale_pos_weight # Use your calculated value here!
+        )
+    return model

@@ -7,3 +7,6 @@ kafka-python
 mlflow
 faker
 click
+xgboost-cpu
+setuptools
+yellowbrick

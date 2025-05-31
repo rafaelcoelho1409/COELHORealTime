@@ -13,3 +13,4 @@ ordinal_encoders/
 *.log
 .env
 *.json
+*.png

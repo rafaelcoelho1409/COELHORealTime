@@ -18,7 +18,7 @@ from functions import (
 
 fake = Faker()
 PROJECT_NAME = "E-Commerce Customer Interactions"
-MODEL_KEY = f"{PROJECT_NAME.replace(' ', '_').replace('-', '_').lower()}.py"
+MODEL_KEY = f"{PROJECT_NAME.replace(' ', '_').replace('-', '_').lower()}_river.py"
 FASTAPI_URL = "http://fastapi:8000"
 
 if 'activated_model' not in st.session_state or st.session_state.activated_model != MODEL_KEY:
