@@ -22,7 +22,7 @@ from functions import (
 
 DATA_PATH = "data/e_commerce_customer_interactions.parquet"
 MODEL_FOLDER = "models/e_commerce_customer_interactions"
-ENCODERS_PATH = "encoders/e_commerce_customer_interactions.pkl"
+ENCODERS_PATH = "encoders/river/e_commerce_customer_interactions.pkl"
 CLUSTER_COUNTS_PATH = "data/cluster_counts.json"
 CLUSTER_FEATURE_COUNTS_PATH = "data/cluster_feature_counts.json"
 PROJECT_NAME = "E-Commerce Customer Interactions"
@@ -63,7 +63,7 @@ except json.JSONDecodeError:
     print("Error decoding cluster feature counts JSON, creating new (JSONDecodeError).", file=sys.stderr)
 
 os.makedirs(MODEL_FOLDER, exist_ok = True)
-os.makedirs("encoders", exist_ok = True)
+os.makedirs("encoders/river", exist_ok = True)
 os.makedirs("data", exist_ok = True)
 
 
@@ -72,10 +72,12 @@ def main():
     mlflow.set_tracking_uri("http://mlflow:5000")
     mlflow.set_experiment(PROJECT_NAME)
     encoders = load_or_create_encoders(
-        PROJECT_NAME
+        PROJECT_NAME,
+        "river"
     )
     model = load_or_create_model(
         PROJECT_NAME,
+        "DBSTREAM",
         MODEL_FOLDER
     )
     # Create consumer

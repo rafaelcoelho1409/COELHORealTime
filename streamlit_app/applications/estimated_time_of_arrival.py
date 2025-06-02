@@ -197,7 +197,8 @@ with tabs[0]: # Incremental ML
     mlflow_metrics = requests.post(
         "http://fastapi:8000/mlflow_metrics",
         json = {
-            "project_name": PROJECT_NAME
+            "project_name": PROJECT_NAME,
+            "model_name": "ARFRegressor"
         }).json()
     metrics_cols = layout_grid_2.columns(4)
     metrics_cols_dict = {

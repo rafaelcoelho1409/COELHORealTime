@@ -15,11 +15,11 @@ from functions import (
 
 DATA_PATH = "data/estimated_time_of_arrival.parquet"
 MODEL_FOLDER = "models/estimated_time_of_arrival"
-ENCODERS_PATH = "encoders/estimated_time_of_arrival.pkl"
+ENCODERS_PATH = "encoders/river/estimated_time_of_arrival.pkl"
 PROJECT_NAME = "Estimated Time of Arrival"
 
 os.makedirs(MODEL_FOLDER, exist_ok = True)
-os.makedirs("encoders", exist_ok = True)
+os.makedirs("encoders/river", exist_ok = True)
 os.makedirs("data", exist_ok = True)
 
 def main():
@@ -27,10 +27,12 @@ def main():
     mlflow.set_tracking_uri("http://mlflow:5000")
     mlflow.set_experiment(PROJECT_NAME)
     encoders = load_or_create_encoders(
-        PROJECT_NAME
+        PROJECT_NAME,
+        "river"
     )
     model = load_or_create_model(
         PROJECT_NAME,
+        "ARFRegressor",
         MODEL_FOLDER
     )
     # Create consumer

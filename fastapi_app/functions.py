@@ -206,55 +206,74 @@ def extract_coordinates_sklearn(data):
     data = data.join(data_to_join)
     return data
 
-def load_or_create_encoders(project_name):
-    encoders_folders = {
-        "Transaction Fraud Detection": "encoders/transaction_fraud_detection.pkl",
-        "Estimated Time of Arrival": "encoders/estimated_time_of_arrival.pkl",
-        "E-Commerce Customer Interactions": "encoders/e_commerce_customer_interactions.pkl",
-        "Sales Forecasting": "encoders/sales_forecasting.pkl"
+def load_or_create_encoders(project_name, library):
+    encoders_folders_river = {
+        "Transaction Fraud Detection": "encoders/river/transaction_fraud_detection.pkl",
+        "Estimated Time of Arrival": "encoders/river/estimated_time_of_arrival.pkl",
+        "E-Commerce Customer Interactions": "encoders/river/e_commerce_customer_interactions.pkl",
+        #"Sales Forecasting": "encoders/river/sales_forecasting.pkl"
     }
-    encoder_path = encoders_folders[project_name]
-    try:
-        with open(encoder_path, 'rb') as f:
-            encoders = pickle.load(f)
-        print("Ordinal encoder loaded from disk.")
-    except FileNotFoundError as e:
-        if project_name in ["Transaction Fraud Detection", "Estimated Time of Arrival"]:
-            encoders = {
-                "ordinal_encoder": CustomOrdinalEncoder()
-            }
-        elif project_name in ["E-Commerce Customer Interactions"]:
-            encoders = {
-                "standard_scaler": preprocessing.StandardScaler(),
-                "feature_hasher": preprocessing.FeatureHasher()
-            }
-        elif project_name in ["Sales Forecasting"]:
-            encoders = {
-                "one_hot_encoder": preprocessing.OneHotEncoder(),
-                "standard_scaler": preprocessing.StandardScaler(),
-            } #remove after developing the right model strategy
-        print(f"Creating encoders: {e}", file = sys.stderr)
-    except Exception as e:
-        if project_name in ["Transaction Fraud Detection", "Estimated Time of Arrival"]:
-            encoders = {
-                "ordinal_encoder": CustomOrdinalEncoder()
-            }
-        elif project_name in ["E-Commerce Customer Interactions"]:
-            encoders = {
-                "standard_scaler": preprocessing.StandardScaler(),
-                "feature_hasher": preprocessing.FeatureHasher()
-            }
-        elif project_name in ["Sales Forecasting"]:
-            encoders = {
-                "one_hot_encoder": preprocessing.OneHotEncoder(),
-                "standard_scaler": preprocessing.StandardScaler(),
-            } #remove after developing the right model strategy
-        print(f"Creating encoders: {e}", file = sys.stderr)
-    return encoders
+    encoders_folders_sklearn = {
+        "Transaction Fraud Detection": "encoders/sklearn/transaction_fraud_detection.pkl",
+        "Estimated Time of Arrival": "encoders/sklearn/estimated_time_of_arrival.pkl",
+        "E-Commerce Customer Interactions": "encoders/sklearn/e_commerce_customer_interactions.pkl",
+        #"Sales Forecasting": "encoders/sklearn/sales_forecasting.pkl"
+    }
+    if library == "river":
+        encoder_path = encoders_folders_river[project_name]
+        try:
+            with open(encoder_path, 'rb') as f:
+                encoders = pickle.load(f)
+            print("Ordinal encoder loaded from disk.")
+        except FileNotFoundError as e:
+            if project_name in ["Transaction Fraud Detection", "Estimated Time of Arrival"]:
+                encoders = {
+                    "ordinal_encoder": CustomOrdinalEncoder()
+                }
+            elif project_name in ["E-Commerce Customer Interactions"]:
+                encoders = {
+                    "standard_scaler": preprocessing.StandardScaler(),
+                    "feature_hasher": preprocessing.FeatureHasher()
+                }
+            elif project_name in ["Sales Forecasting"]:
+                encoders = {
+                    "one_hot_encoder": preprocessing.OneHotEncoder(),
+                    "standard_scaler": preprocessing.StandardScaler(),
+                } #remove after developing the right model strategy
+            print(f"Creating encoders: {e}", file = sys.stderr)
+        except Exception as e:
+            if project_name in ["Transaction Fraud Detection", "Estimated Time of Arrival"]:
+                encoders = {
+                    "ordinal_encoder": CustomOrdinalEncoder()
+                }
+            elif project_name in ["E-Commerce Customer Interactions"]:
+                encoders = {
+                    "standard_scaler": preprocessing.StandardScaler(),
+                    "feature_hasher": preprocessing.FeatureHasher()
+                }
+            elif project_name in ["Sales Forecasting"]:
+                encoders = {
+                    "one_hot_encoder": preprocessing.OneHotEncoder(),
+                    "standard_scaler": preprocessing.StandardScaler(),
+                } #remove after developing the right model strategy
+            print(f"Creating encoders: {e}", file = sys.stderr)
+        return encoders
+    elif library == "sklearn":
+        #Sklearn encoders must be only loaded from disk
+        encoder_path = encoders_folders_sklearn[project_name]
+        try:
+            with open(encoder_path, 'rb') as f:
+                encoders = pickle.load(f)
+            print("Scikit-Learn encoders loaded from disk.")
+        except FileNotFoundError as e:
+            raise FileNotFoundError(f"Scikit-Learn encoders not found for project {project_name}.") from e
+        except Exception as e:
+            raise Exception(f"Error loading Scikit-Learn encoders for project {project_name}: {e}") from e
+        return encoders
 
 
 
-def process_sample(x, encoders, project_name):
+def process_sample(x, encoders, project_name, library = "river"):
     if project_name == "Transaction Fraud Detection":
         pipe1 = compose.Select(
             "amount",
@@ -295,11 +314,14 @@ def process_sample(x, encoders, project_name):
         pipe4b.learn_one(x_pipe_4)
         x_pipe_4 = pipe4b.transform_one(x_pipe_4)
         x_to_encode = x_pipe_2 | x_pipe_3 | x_pipe_4
-        encoders["ordinal_encoder"].learn_one(x_to_encode)
-        x2 = encoders["ordinal_encoder"].transform_one(x_to_encode)
-        return x1 | x2, {
-            "ordinal_encoder": encoders["ordinal_encoder"]
-        }
+        if library == "river":
+            encoders["ordinal_encoder"].learn_one(x_to_encode)
+            x2 = encoders["ordinal_encoder"].transform_one(x_to_encode)
+            return x1 | x2, {
+                "ordinal_encoder": encoders["ordinal_encoder"]
+            }
+        elif library == "sklearn":
+            return x1 | x_to_encode
     elif project_name == "Estimated Time of Arrival":
         pipe1 = compose.Select(
             'estimated_distance_km',
@@ -489,18 +511,16 @@ def process_sample(x, encoders, project_name):
         }
 
 
-def load_or_create_model(project_name, folder_path = None):
+def load_or_create_model(project_name, model_name, folder_path = None):
     """Load existing model or create a new one"""
-    #Take the most recent file
     try:
         model_files = os.listdir(folder_path)
         model_files = [
             os.path.join(folder_path, entry) 
             for entry 
             in model_files 
-            if os.path.isfile(os.path.join(folder_path, entry))]
-        #Get the most recent model
-        MODEL_PATH = max(model_files, key = os.path.getmtime)
+            if os.path.isfile(os.path.join(folder_path, entry)) and entry.endswith(".pkl")]
+        MODEL_PATH = [x for x in model_files if model_name in x][0]
         with open(MODEL_PATH, 'rb') as f:
             model = pickle.load(f)
         print("Model loaded from disk.")
@@ -590,6 +610,8 @@ def load_or_create_data(consumer, project_name):
 
 def process_batch_data(data, project_name):
     data = data.copy()
+    os.makedirs("encoders/sklearn", exist_ok = True)
+    filename = "encoders/sklearn/" + project_name.lower().replace(' ', '_').replace("-", "_") + ".pkl"
     if project_name == "Transaction Fraud Detection":
         data = data.copy()
         data = extract_device_info_sklearn(data)
@@ -640,10 +662,28 @@ def process_batch_data(data, project_name):
             random_state = 42
         )
         preprocessor.fit(X_train)
+        preprocessor_dict = {
+            "preprocessor": preprocessor
+        }
+        with open(filename, 'wb') as f:
+            pickle.dump(preprocessor_dict, f)
         #Don't apply preprocessor directly on X (it characterizes data leakage)
         X_train = preprocessor.transform(X_train)
         X_test = preprocessor.transform(X_test)
     return X_train, X_test, y_train, y_test
+
+
+def process_sklearn_sample(x, project_name):
+    filename = "encoders/sklearn/" + project_name.lower().replace(' ', '_').replace("-", "_") + ".pkl"
+    if project_name == "Transaction Fraud Detection":
+        x = pd.DataFrame(x.copy())
+        x = extract_device_info_sklearn(x)
+        x = extract_timestamp_info_sklearn(x)
+        with open(filename, 'rb') as f:
+            preprocessor_dict = pickle.load(f)
+        preprocessor = preprocessor_dict["preprocessor"]
+        x = preprocessor.transform(x)
+    return x
 
 
 def create_batch_model(project_name, **kwargs):

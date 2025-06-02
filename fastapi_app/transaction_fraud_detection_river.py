@@ -15,11 +15,11 @@ from functions import (
 
 DATA_PATH = "data/transaction_fraud_detection.parquet"
 MODEL_FOLDER = "models/transaction_fraud_detection"
-ENCODERS_PATH = "encoders/transaction_fraud_detection.pkl"
+ENCODERS_PATH = "encoders/river/transaction_fraud_detection.pkl"
 PROJECT_NAME = "Transaction Fraud Detection"
 
 os.makedirs(MODEL_FOLDER, exist_ok = True)
-os.makedirs("encoders", exist_ok = True)
+os.makedirs("encoders/river", exist_ok = True)
 os.makedirs("data", exist_ok = True)
 
 
@@ -28,10 +28,12 @@ def main():
     mlflow.set_tracking_uri("http://mlflow:5000")
     mlflow.set_experiment(PROJECT_NAME)
     encoders = load_or_create_encoders(
-        PROJECT_NAME
+        PROJECT_NAME,
+        "river"
     )
     model = load_or_create_model(
         PROJECT_NAME,
+        "ARFClassifier",
         MODEL_FOLDER
     )
     # Create consumer

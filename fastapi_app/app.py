@@ -2,6 +2,9 @@ from fastapi import (
     FastAPI,
     HTTPException
 )
+from fastapi.responses import (
+    FileResponse, 
+)
 from contextlib import asynccontextmanager
 from pydantic import (
     BaseModel, 
@@ -21,12 +24,16 @@ import json
 import subprocess
 import os
 import numpy as np
+import pandas as pd
 from functions import (
     process_sample,
+    process_sklearn_sample,
     load_or_create_model,
     load_or_create_data,
     create_consumer,
     load_or_create_encoders,
+    extract_device_info,
+    extract_timestamp_info
 )
 
 
@@ -43,6 +50,10 @@ MODEL_SCRIPTS = {
     f"{project_name} - Scikit Learn": f"{project_name.replace(' ', '_').replace('-', '_').lower()}_sklearn.py"
     for project_name in PROJECT_NAMES
 }
+ENCODER_LIBRARIES = [
+    "river",
+    "sklearn"
+]
 
 def stop_current_model():
     """
@@ -120,8 +131,8 @@ def stop_current_model():
 # Initialize global variables as None or placeholder BEFORE startup
 consumer_dict = {x: None for x in PROJECT_NAMES}
 data_dict = {x: None for x in PROJECT_NAMES}
-model_dict = {x: None for x in PROJECT_NAMES}
-encoders_dict = {x: None for x in PROJECT_NAMES}
+model_dict = {x: {} for x in PROJECT_NAMES}
+encoders_dict = {x: {} for x in PROJECT_NAMES}
 initial_sample_dict = {x: None for x in PROJECT_NAMES} # Also move this initialization
 
 
@@ -359,10 +370,18 @@ async def lifespan(app: FastAPI):
             print("Loading model...")
             model_folder_name = project_name.lower().replace(' ', '_').replace("-", "_")
             model_folder = f"models/{model_folder_name}"
-            model_dict[project_name] = load_or_create_model(
-                project_name,
-                model_folder
-            )
+            model_names = [
+                x.replace(".pkl", "") 
+                for x 
+                in os.listdir(model_folder) 
+                if x.endswith(".pkl")
+            ]
+            for model_name in model_names:
+                model_dict[project_name][model_name] = load_or_create_model(
+                    project_name,
+                    model_name,
+                    model_folder
+                )
             model_load_status[project_name] = "success"
             model_message_dict[project_name] = "Model loaded successfully"
             print("Model loaded successfully.")
@@ -378,9 +397,12 @@ async def lifespan(app: FastAPI):
     print("Loading encoders...")
     for project_name in PROJECT_NAMES:
         try:
-            encoders_dict[project_name] = load_or_create_encoders(
-                project_name
-            )
+            encoders_dict[project_name] = {}
+            for library in ENCODER_LIBRARIES:
+                encoders_dict[project_name][library] = load_or_create_encoders(
+                    project_name,
+                    library
+                )
             encoders_load_status[project_name] = "success"
             print("Encoder loaded successfully.")
         except Exception as e:
@@ -496,56 +518,93 @@ async def get_initial_sample(request: InitialSampleRequest):
 @app.post("/predict")
 async def predict(payload: dict):
     #IMPORTANT OBSERVATION: payload must be something in this format:
-    #{project_name: PROJECT_NAME} | {transaction: TransactionFraudDetection}
-    #{project_name: PROJECT_NAME} | {eta_event: EstimatedTimeOfArrival}
+    #{project_name: PROJECT_NAME, model_name: MODEL_NAME} | {transaction: TransactionFraudDetection}
+    #{project_name: PROJECT_NAME, model_name: MODEL_NAME} | {eta_event: EstimatedTimeOfArrival}
+    #{project_name: PROJECT_NAME, model_name: MODEL_NAME} | {customer: ECommerceCustomerInteractions}
     global encoders_dict, model_dict
-    if model_dict[payload["project_name"]] is None or encoders_dict[payload["project_name"]] is None:
+    x = payload
+    project_name = x["project_name"]
+    model_name = x["model_name"]
+    if model_dict[payload["project_name"]][payload["model_name"]] is None or encoders_dict[payload["project_name"]] is None:
         raise HTTPException(
             status_code = 503, 
             detail = "Model or encoders are not loaded.")
-    x = payload
-    project_name = x["project_name"]
     folder_name = project_name.lower().replace(' ', '_').replace("-", "_")
     del x["project_name"]
-    try:
-        model = load_or_create_model(
-            project_name,
-            f"models/{folder_name}")
-        encoders = load_or_create_encoders(
-            project_name
-        )
-        processed_x, _ = process_sample(
-            x, 
-            encoders,
-            project_name) # Discard returned encoders if they are meant to be global state
-        if project_name == "Transaction Fraud Detection":
-            y_pred_proba = model.predict_proba_one(processed_x) # Use processed data
-            fraud_probability = y_pred_proba.get(1, 0.0) # Use 0.0 as default
-            binary_prediction = 1 if fraud_probability >= 0.5 else 0
-            return {
-                "fraud_probability": fraud_probability,
-                "prediction": binary_prediction,
-            }
-        elif project_name == "Estimated Time of Arrival":
-            y_pred = model.predict_one(processed_x) # Use processed data
-            return {
-                "Estimated Time of Arrival": y_pred
-            }
-        elif project_name == "E-Commerce Customer Interactions":
-            y_pred = model.predict_one(processed_x) # Use processed data
-            return {
-                "cluster": y_pred
-            }
-        #elif project_name == "Sales Forecasting":
-        #    y_pred = model.forecast(horizon = 1, xs = [processed_x]) # Use processed data
-        #    return {
-        #        "sales": y_pred
-        #    }
-    except Exception as e:
-        print(f"Error during prediction: {e}", file = sys.stderr)
-        raise HTTPException(
-            status_code = 500, 
-            detail = f"Prediction failed: {e}")
+    del x["model_name"]
+    model = load_or_create_model(
+        project_name,
+        model_name,
+        f"models/{folder_name}")
+    if model_name in [
+        "ARFClassifier",
+        "ARFRegressor",
+        "DBSTREAM"
+    ]:
+        try:
+            encoders = load_or_create_encoders(
+                project_name,
+                "river"
+            )
+            processed_x, _ = process_sample(
+                x, 
+                encoders,
+                project_name) # Discard returned encoders if they are meant to be global state
+            if project_name == "Transaction Fraud Detection":
+                y_pred_proba = model.predict_proba_one(processed_x) # Use processed data
+                fraud_probability = y_pred_proba.get(1, 0.0) # Use 0.0 as default
+                binary_prediction = 1 if fraud_probability >= 0.5 else 0
+                return {
+                    "fraud_probability": fraud_probability,
+                    "prediction": binary_prediction,
+                }
+            elif project_name == "Estimated Time of Arrival":
+                y_pred = model.predict_one(processed_x) # Use processed data
+                return {
+                    "Estimated Time of Arrival": y_pred
+                }
+            elif project_name == "E-Commerce Customer Interactions":
+                y_pred = model.predict_one(processed_x) # Use processed data
+                return {
+                    "cluster": y_pred
+                }
+            #elif project_name == "Sales Forecasting":
+            #    y_pred = model.forecast(horizon = 1, xs = [processed_x]) # Use processed data
+            #    return {
+            #        "sales": y_pred
+            #    }
+        except Exception as e:
+            print(f"Error during prediction: {e}", file = sys.stderr)
+            raise HTTPException(
+                status_code = 500, 
+                detail = f"Prediction failed: {e}")
+    elif model_name in [
+        "XGBClassifier"
+    ]:
+        try:
+            encoders = load_or_create_encoders(
+                project_name,
+                "sklearn"
+            )
+            if project_name == "Transaction Fraud Detection":
+                processed_x = process_sample(x, ..., project_name, library = "sklearn")
+                preprocessor = encoders["preprocessor"]
+                processed_x = pd.DataFrame(
+                    {x: [y] for x, y in processed_x.items()})
+                processed_x = preprocessor.transform(processed_x)
+                y_pred_proba = model.predict_proba(processed_x).tolist()[0] # Use processed data
+                fraud_probability = y_pred_proba[1]
+                binary_prediction = 1 if fraud_probability >= 0.5 else 0
+                return {
+                    "fraud_probability": fraud_probability,
+                    "prediction": binary_prediction,
+                }
+        except Exception as e:
+            print(f"Error during prediction: {e}", file = sys.stderr)
+            raise HTTPException(
+                status_code = 500, 
+                detail = f"Prediction failed: {e}")
+        
         
 class OrdinalEncoderRequest(BaseModel):
     project_name: str
@@ -554,7 +613,8 @@ class OrdinalEncoderRequest(BaseModel):
 async def get_ordinal_encoder(request: OrdinalEncoderRequest):
     global encoders
     encoders = load_or_create_encoders(
-        request.project_name
+        request.project_name,
+        "river"
     )
     if None in encoders.values():
         raise HTTPException(
@@ -573,6 +633,7 @@ async def get_ordinal_encoder(request: OrdinalEncoderRequest):
 
 class MLflowMetricsRequest(BaseModel):
     project_name: str
+    model_name: str
 
 
 @app.post("/mlflow_metrics")
@@ -582,6 +643,8 @@ async def get_mlflow_metrics(request: MLflowMetricsRequest):
     runs_df = mlflow.search_runs(
         experiment_ids = [experiment_id]
     )
+    runs_df = runs_df[
+        runs_df["tags.mlflow.runName"] == request.model_name]
     run_df = runs_df.iloc[0]
     run_df = run_df.replace({np.nan: None}).to_dict()
     return run_df
@@ -679,3 +742,14 @@ async def get_current_model():
             stop_current_model() # Clean up state
             return {"current_model": healthcheck.current_model_name, "status": f"stopped (exit code: {return_code})", "pid": None }
     return {"current_model": None, "status": "none running"}
+
+
+@app.get("/yellowbrick_metrics/{project_name}/{metric_name}", response_class = FileResponse)
+async def get_yellowbrick_metric(project_name: str, metric_name: str):
+    STATIC_IMAGE_PATH = f"models/{project_name}/{metric_name}.png"
+    if not os.path.exists(STATIC_IMAGE_PATH):
+        return {"error": "Static image not found"}, 404
+    return FileResponse(
+        STATIC_IMAGE_PATH, 
+        media_type = "image/png")
+

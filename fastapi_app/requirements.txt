@@ -12,3 +12,4 @@ scikit-learn
 xgboost-cpu
 setuptools
 yellowbrick
+pillow
