@@ -389,7 +389,9 @@ elif tabs_ == "Batch ML":
         predict_button = st.form_submit_button(
             "Predict",
             use_container_width = True)
-    layout_grid_2.header("Classification Metrics")
+    layout_grid_2_tabs = layout_grid_2.tabs([
+        "Predictions", 
+        "Detailed Metrics"])
     mlflow_metrics = requests.post(
         "http://fastapi:8000/mlflow_metrics",
         json = {
@@ -402,74 +404,124 @@ elif tabs_ == "Batch ML":
         in mlflow_metrics.keys() 
         if x.startswith("metrics.")]
     group_size = 5 # Define how many metrics per row
-    metrics_cols = layout_grid_2.columns(group_size)
-    # Group metric names (base names)
-    metrics_cols_dict = {}
-    for i in range(0, len(metric_names), group_size):
-        chunk = metric_names[i:i + group_size]
-        group_key = i // group_size
-        metrics_cols_dict[group_key] = chunk
-    # Display metrics horizontally
-    for group_key in sorted(metrics_cols_dict.keys()):
-        metric_list_in_group = metrics_cols_dict[group_key]
-        if not metric_list_in_group: # Should not happen if base_metric_names is not empty
-            continue
-        for i, metric_base_name in enumerate(metric_list_in_group):
-            full_metric_name_in_mlflow = f"metrics.{metric_base_name}"
-            metric_value = mlflow_metrics.get(full_metric_name_in_mlflow)
-            if metric_value is not None:
-                display_value = f"{metric_value*100:.2f}%"
-                metrics_cols[i].metric(
-                    label = " ".join([x.capitalize() for x in metric_base_name.split("_")]),
-                    value = display_value
-                )
-            else:
-                pass
-    # Apply styling to all metric cards generated
-    style_metric_cards(
-        background_color = "#000000" # Example, adjust color as needed
-    )
-    layout_grid_2.divider()
-    if predict_button:
-        layout_grid_2.header("Prediction")
-        x = {
-            'transaction_id':        transaction_id,
-            'user_id':               user_id,
-            'timestamp':             timestamp + ".000000+00:00",
-            'amount':                amount,
-            'currency':              currency,
-            'merchant_id':           merchant_id,
-            'product_category':      product_category,
-            'transaction_type':      transaction_type,
-            'payment_method':        payment_method,
-            'location':              {'lat': lat, 'lon': lon},
-            'ip_address':            ip_address,
-            'device_info':           {'os': os, 'browser': browser}, # Nested structure for device details
-            'user_agent':            user_agent,
-            'account_age_days':      account_age_days,
-            'cvv_provided':          cvv_provided, # Boolean flag
-            'billing_address_match': billing_address_match, # Boolean flag
-        }
-        y_pred = requests.post(
-            "http://fastapi:8000/predict",
-            json = {
-                "project_name": PROJECT_NAME,
-                "model_name": "XGBClassifier"} | x).json()
-        fraud_prob_df = pd.DataFrame({
-            "Fraud": [y_pred["fraud_probability"]],
-            "Not Fraud": [1 - y_pred["fraud_probability"]]
-        })
-        fraud_prob_fig = px.pie(
-            fraud_prob_df,
-            values = fraud_prob_df.iloc[0],
-            names = fraud_prob_df.columns,
-            title = f"Fraud Probability: {y_pred['fraud_probability']:.2%} - {"Fraud" if y_pred['prediction'] == 1 else "Not Fraud"}",
-            color_discrete_sequence = ['#FF0000', '#0000FF'],
-            hole = 0.2
+    with layout_grid_2_tabs[0]:
+        st.header("Classification Metrics")
+        metrics_cols = st.columns(group_size)
+        # Group metric names (base names)
+        metrics_cols_dict = {}
+        for i in range(0, len(metric_names), group_size):
+            chunk = metric_names[i:i + group_size]
+            group_key = i // group_size
+            metrics_cols_dict[group_key] = chunk
+        # Display metrics horizontally
+        for group_key in sorted(metrics_cols_dict.keys()):
+            metric_list_in_group = metrics_cols_dict[group_key]
+            if not metric_list_in_group: # Should not happen if base_metric_names is not empty
+                continue
+            for i, metric_base_name in enumerate(metric_list_in_group):
+                full_metric_name_in_mlflow = f"metrics.{metric_base_name}"
+                metric_value = mlflow_metrics.get(full_metric_name_in_mlflow)
+                if metric_value is not None:
+                    display_value = f"{metric_value*100:.2f}%"
+                    metrics_cols[i].metric(
+                        label = " ".join([x.capitalize() for x in metric_base_name.split("_")]),
+                        value = display_value
+                    )
+                else:
+                    pass
+        # Apply styling to all metric cards generated
+        style_metric_cards(
+            background_color = "#000000" # Example, adjust color as needed
         )
-        fraud_prob_fig.update_traces(
-            textposition = 'inside', 
-            textinfo = 'percent+label')
-        layout_grid_2.plotly_chart(
-            fraud_prob_fig,
+        st.divider()
+        if predict_button:
+            st.header("Prediction")
+            x = {
+                'transaction_id':        transaction_id,
+                'user_id':               user_id,
+                'timestamp':             timestamp + ".000000+00:00",
+                'amount':                amount,
+                'currency':              currency,
+                'merchant_id':           merchant_id,
+                'product_category':      product_category,
+                'transaction_type':      transaction_type,
+                'payment_method':        payment_method,
+                'location':              {'lat': lat, 'lon': lon},
+                'ip_address':            ip_address,
+                'device_info':           {'os': os, 'browser': browser}, # Nested structure for device details
+                'user_agent':            user_agent,
+                'account_age_days':      account_age_days,
+                'cvv_provided':          cvv_provided, # Boolean flag
+                'billing_address_match': billing_address_match, # Boolean flag
+            }
+            y_pred = requests.post(
+                "http://fastapi:8000/predict",
+                json = {
+                    "project_name": PROJECT_NAME,
+                    "model_name": "XGBClassifier"} | x).json()
+            fraud_prob_df = pd.DataFrame({
+                "Fraud": [y_pred["fraud_probability"]],
+                "Not Fraud": [1 - y_pred["fraud_probability"]]
+            })
+            fraud_prob_fig = px.pie(
+                fraud_prob_df,
+                values = fraud_prob_df.iloc[0],
+                names = fraud_prob_df.columns,
+                title = f"Fraud Probability: {y_pred['fraud_probability']:.2%} - {"Fraud" if y_pred['prediction'] == 1 else "Not Fraud"}",
+                color_discrete_sequence = ['#FF0000', '#0000FF'],
+                #CORRECT COLOR LATER, NOT FRAUD IS DISPLAYED AS RED (NOT GOOD)
+                hole = 0.2
+            )
+            fraud_prob_fig.update_traces(
+                textposition = 'inside', 
+                textinfo = 'percent+label')
+            st.plotly_chart(
+                fraud_prob_fig,
+                use_container_width = True)
+    with layout_grid_2_tabs[1]:
+        st.header("Classification Metrics")
+        metrics_cols = st.columns(group_size)
+        # Group metric names (base names)
+        metrics_cols_dict = {}
+        for i in range(0, len(metric_names), group_size):
+            chunk = metric_names[i:i + group_size]
+            group_key = i // group_size
+            metrics_cols_dict[group_key] = chunk
+        # Display metrics horizontally
+        for group_key in sorted(metrics_cols_dict.keys()):
+            metric_list_in_group = metrics_cols_dict[group_key]
+            if not metric_list_in_group: # Should not happen if base_metric_names is not empty
+                continue
+            for i, metric_base_name in enumerate(metric_list_in_group):
+                full_metric_name_in_mlflow = f"metrics.{metric_base_name}"
+                metric_value = mlflow_metrics.get(full_metric_name_in_mlflow)
+                if metric_value is not None:
+                    display_value = f"{metric_value*100:.2f}%"
+                    metrics_cols[i].metric(
+                        label = " ".join([x.capitalize() for x in metric_base_name.split("_")]),
+                        value = display_value
+                    )
+                else:
+                    pass
+        # Apply styling to all metric cards generated
+        style_metric_cards(
+            background_color = "#000000" # Example, adjust color as needed
+        )
+        st.divider()
+        yellowbrick_metrics = [
+            "ClassificationReport",
+            "ConfusionMatrix",
+            "ROCAUC",
+            "PrecisionRecallCurve",
+            "ClassPredictionError"
+        ]
+        yellowbrick_metrics_option = st.selectbox(
+            "Select Yellowbrick Metric",
+            yellowbrick_metrics
+        )
+        yellowbrick_image = requests.get(
+            "http://fastapi:8000/yellowbrick_metrics/transaction_fraud_detection/" + yellowbrick_metrics_option,
+            stream = True)
+        st.image(
+            yellowbrick_image.content,
             use_container_width = True)
