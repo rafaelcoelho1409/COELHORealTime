@@ -6,7 +6,7 @@ import pandas as pd
 from faker import Faker
 import datetime as dt
 import plotly.express as px
-import uuid
+import re
 from functions import (
     timestamp_to_api_response,
     switch_active_model
@@ -508,20 +508,33 @@ elif tabs_ == "Batch ML":
             background_color = "#000000" # Example, adjust color as needed
         )
         st.divider()
-        yellowbrick_metrics = [
-            "ClassificationReport",
-            "ConfusionMatrix",
-            "ROCAUC",
-            "PrecisionRecallCurve",
-            "ClassPredictionError"
-        ]
-        yellowbrick_metrics_option = st.selectbox(
-            "Select Yellowbrick Metric",
-            yellowbrick_metrics
-        )
-        yellowbrick_image = requests.get(
-            "http://fastapi:8000/yellowbrick_metrics/transaction_fraud_detection/" + yellowbrick_metrics_option,
-            stream = True)
-        st.image(
-            yellowbrick_image.content,
-            use_container_width = True)
+        st.header("Detailed Metrics")
+        yb_tabs = st.tabs([
+            "Classification"
+        ])
+        with yb_tabs[0]:
+            yellowbrick_metrics_dict = {
+            x: re.sub(r'([a-z])([A-Z])', r'\1 \2', x)
+            for x in [
+                "ClassificationReport",
+                "ConfusionMatrix",
+                "ROCAUC",
+                "PrecisionRecallCurve",
+                "ClassPredictionError"
+            ]}
+            yellowbrick_metrics_dict = {
+                y: x 
+                for x, y in yellowbrick_metrics_dict.items()
+            }
+            yellowbrick_metrics_index_dict = {
+                x: i
+                for i, x in enumerate(yellowbrick_metrics_dict.keys())}
+            yb_tabs = st.tabs(yellowbrick_metrics_dict.keys())
+            for i in range(len(yellowbrick_metrics_dict.keys())):
+                with yb_tabs[i]:
+                    yb_image = requests.get(
+                        "http://fastapi:8000/yellowbrick/transaction_fraud_detection/classification/" + list(yellowbrick_metrics_dict.values())[i],
+                        stream = True)
+                    st.image(
+                        yb_image.content,
+                        use_container_width = True)

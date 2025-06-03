@@ -744,9 +744,9 @@ async def get_current_model():
     return {"current_model": None, "status": "none running"}
 
 
-@app.get("/yellowbrick_metrics/{project_name}/{metric_name}", response_class = FileResponse)
-async def get_yellowbrick_metric(project_name: str, metric_name: str):
-    STATIC_IMAGE_PATH = f"models/{project_name}/{metric_name}.png"
+@app.get("/yellowbrick/{project_name}/{metric_type}/{metric_name}", response_class = FileResponse)
+async def get_yellowbrick_metric(project_name: str, metric_type: str, metric_name: str):
+    STATIC_IMAGE_PATH = f"models/{project_name}/yellowbrick/{metric_type}/{metric_name}.png"
     if not os.path.exists(STATIC_IMAGE_PATH):
         return {"error": "Static image not found"}, 404
     return FileResponse(

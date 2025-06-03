@@ -9,17 +9,23 @@ from functions import (
     create_consumer,
     load_or_create_data,
     process_batch_data,
-    create_batch_model
+    create_batch_model,
+    yellowbrick_classification_kwargs,
+    yellowbrick_classification_visualizers,
+    yellowbrick_feature_analysis_kwargs,
+    yellowbrick_feature_analysis_visualizers
 )
 
 DATA_PATH = "data/transaction_fraud_detection.parquet"
 MODEL_FOLDER = "models/transaction_fraud_detection"
 ENCODERS_PATH = "encoders/sklearn/transaction_fraud_detection.pkl"
+YELLOWBRICK_PATH = f"{MODEL_FOLDER}/yellowbrick"
 PROJECT_NAME = "Transaction Fraud Detection"
 
 os.makedirs(MODEL_FOLDER, exist_ok = True)
 os.makedirs("encoders/sklearn", exist_ok = True)
 os.makedirs("data", exist_ok = True)
+os.makedirs(f"{YELLOWBRICK_PATH}/classification", exist_ok = True)
 
 
 def main():
@@ -35,6 +41,8 @@ def main():
     X_train, X_test, y_train, y_test = process_batch_data(
         data_df, 
         PROJECT_NAME)
+    X = pd.concat([X_train, X_test])
+    y = pd.concat([y_train, y_test])
     # Metrics typically using y_true, y_pred (predicted class labels)
     classification_metrics_ypred = [
         "accuracy_score", #(y_true, y_pred)
@@ -42,14 +50,12 @@ def main():
         "precision_score", #(y_true, y_pred, pos_label=1, average='binary') # Specify for binary
         "recall_score", #(y_true, y_pred, pos_label=1, average='binary')   # Specify for binary
         "f1_score", #(y_true, y_pred, pos_label=1, average='binary')       # Specify for binary
-        "fbeta_score", #(y_true, y_pred, beta=0.5, pos_label=1, average='binary') # Example with beta
+        #"fbeta_score", #(y_true, y_pred, beta=0.5, pos_label=1, average='binary') # Example with beta
         "matthews_corrcoef", #(y_true, y_pred)
         "cohen_kappa_score", #(y_true, y_pred)
         "jaccard_score", #(y_true, y_pred, pos_label=1, average='binary')  # Specify for binary
         "hinge_loss", #(y_true, y_pred_decision_function) # Needs decision_function output
         "zero_one_loss", #(y_true, y_pred)
-        # confusion_matrix(y_true, y_pred) -> returns the matrix array, not a single score directly
-        # classification_report(y_true, y_pred) -> returns a string report
     ]
     classification_metrics_ypred_dict = {
         x: getattr(metrics, x) for x in classification_metrics_ypred
@@ -69,61 +75,31 @@ def main():
         try:
             binary_classes = list(set(y_train.unique().tolist() + y_test.unique().tolist()))
             binary_classes.sort()
-            yellowbrick_kwargs = {
-                "ClassificationReport": {
-                    "estimator": create_batch_model(
-                        PROJECT_NAME,
-                        y_train = y_train),
-                    "classes": binary_classes,
-                    "support": True,
-                    "n_jobs": -1
-                },
-                "ConfusionMatrix": {
-                    "estimator": create_batch_model(
-                        PROJECT_NAME,
-                        y_train = y_train),
-                    "classes": binary_classes,
-                    "n_jobs": -1
-                },
-                "ROCAUC": {
-                    "estimator": create_batch_model(
-                        PROJECT_NAME,
-                        y_train = y_train),
-                    "classes": binary_classes,
-                    "n_jobs": -1
-                },
-                "PrecisionRecallCurve": {
-                    "estimator": create_batch_model(
-                        PROJECT_NAME,
-                        y_train = y_train),
-                    "n_jobs": -1
-                },
-                "ClassPredictionError": {
-                    "estimator": create_batch_model(
-                        PROJECT_NAME,
-                        y_train = y_train),
-                    "classes": binary_classes,
-                    "n_jobs": -1
-                },
-                #"DiscriminationThreshold": {
-                #    "estimator": create_batch_model(
-                #        PROJECT_NAME,
-                #        y_train = y_train),
-                #}
-            }
-            for visualizer_name in yellowbrick_kwargs.keys():
-                print(visualizer_name)
-                visualizer = getattr(classifier, visualizer_name)(**yellowbrick_kwargs[visualizer_name])
-                if visualizer_name in ["DiscriminationThreshold"]:
-                    X = pd.concat([X_train, X_test])
-                    y = pd.concat([y_train, y_test])
-                    visualizer.fit(X, y)
-                else:
-                    visualizer.fit(X_train, y_train)
-                    visualizer.score(X_test, y_test)
-                visualizer.show();
-                visualizer.fig.savefig(f"{MODEL_FOLDER}/{visualizer.__class__.__name__}.png")
-                plt.clf()
+            #>>>--- Classification Visualizers ---<<<#
+            yb_classification_kwargs = yellowbrick_classification_kwargs(
+                PROJECT_NAME,
+                y_train,
+                binary_classes
+            )
+            yellowbrick_classification_visualizers(
+                yb_classification_kwargs,
+                X_train,
+                X_test,
+                y_train,
+                y_test,
+                YELLOWBRICK_PATH
+            )
+            #>>>--- Feature Analysis ---<<<#
+            yb_feature_analysis_kwargs = yellowbrick_feature_analysis_kwargs(
+                binary_classes
+            )
+            yellowbrick_feature_analysis_visualizers(
+                yb_feature_analysis_kwargs,
+                X,
+                y,
+                YELLOWBRICK_PATH
+            )
+            #----------------------------------#
             model = create_batch_model(
                 PROJECT_NAME,
                 y_train = y_train)

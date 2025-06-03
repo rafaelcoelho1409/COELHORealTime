@@ -27,7 +27,11 @@ from sklearn.preprocessing import (
 from sklearn.compose import ColumnTransformer
 from sklearn.model_selection import train_test_split
 from xgboost import XGBClassifier
-
+from yellowbrick import (
+    classifier,
+    features
+)
+import matplotlib.pyplot as plt
 
 
 # Configuration
@@ -715,3 +719,132 @@ def create_batch_model(project_name, **kwargs):
             scale_pos_weight = calculated_scale_pos_weight # Use your calculated value here!
         )
     return model
+
+
+def yellowbrick_classification_kwargs(
+    PROJECT_NAME,
+    y_train,
+    binary_classes
+):
+    return {
+        "ClassificationReport": {
+            "estimator": create_batch_model(
+                PROJECT_NAME,
+                y_train = y_train),
+            "classes": binary_classes,
+            "support": True,
+            "n_jobs": -1
+        },
+        "ConfusionMatrix": {
+            "estimator": create_batch_model(
+                PROJECT_NAME,
+                y_train = y_train),
+            "classes": binary_classes,
+            "n_jobs": -1
+        },
+        "ROCAUC": {
+            "estimator": create_batch_model(
+                PROJECT_NAME,
+                y_train = y_train),
+            "classes": binary_classes,
+            "n_jobs": -1
+        },
+        "PrecisionRecallCurve": {
+            "estimator": create_batch_model(
+                PROJECT_NAME,
+                y_train = y_train),
+            "n_jobs": -1
+        },
+        "ClassPredictionError": {
+            "estimator": create_batch_model(
+                PROJECT_NAME,
+                y_train = y_train),
+            "classes": binary_classes,
+            "n_jobs": -1
+        },
+        #"DiscriminationThreshold": {
+        #    "estimator": create_batch_model(
+        #        PROJECT_NAME,
+        #        y_train = y_train),
+        #}
+    }
+
+
+def yellowbrick_classification_visualizers(
+    yb_classification_kwargs,
+    X_train,
+    X_test,
+    y_train,
+    y_test,
+    YELLOWBRICK_PATH
+):
+    for visualizer_name in yb_classification_kwargs.keys():
+        print(visualizer_name)
+        visualizer = getattr(classifier, visualizer_name)(**yb_classification_kwargs[visualizer_name])
+        if visualizer_name in ["DiscriminationThreshold"]:
+            X = pd.concat([X_train, X_test])
+            y = pd.concat([y_train, y_test])
+            visualizer.fit(X, y)
+        else:
+            visualizer.fit(X_train, y_train)
+            visualizer.score(X_test, y_test)
+        visualizer.show();
+        visualizer.fig.savefig(f"{YELLOWBRICK_PATH}/classification/{visualizer.__class__.__name__}.png")
+        plt.clf()
+
+
+def yellowbrick_feature_analysis_kwargs(
+    classes,
+    features = None
+):
+    return {
+        "RadViz": {
+            "classes": classes
+        },
+        "Rank1D": {
+            "algorithm": "shapiro"
+        },
+        "Rank2D": {
+            "algorithm": "pearson", #
+        },
+        #"ParallelCoordinates": {
+        #    "classes": classes,
+        #    "features": features,
+        #    "sample": 0.05,
+        #    "shuffle": True,
+        #    #"fast": True
+        #},
+        "PCA": {
+            "classes": classes,
+            "scale": True,
+            #"projection": 3,
+            #"proj_features": True
+        },
+        "Manifold": {
+            "classes": classes,
+            "manifold": "tsne"
+        },
+        #JointPlotVisualizer
+    }
+
+
+def yellowbrick_feature_analysis_visualizers(
+    yb_feature_analysis_kwargs,
+    X,
+    y,
+    YELLOWBRICK_PATH
+):
+    for visualizer_name in yb_feature_analysis_kwargs.keys():
+        print(visualizer_name)
+        visualizer = getattr(features, visualizer_name)(**yb_feature_analysis_kwargs[visualizer_name])
+        if visualizer_name in [
+            "ParallelCoordinates",
+            "PCA",
+            "Manifold"]:
+            visualizer.fit_transform(X, y)
+        else:
+            visualizer.fit(X, y)
+            visualizer.transform(X)
+        visualizer.show();
+        visualizer.fig.savefig(f"{YELLOWBRICK_PATH}/feature_analysis/{visualizer.__class__.__name__}.png")
+        plt.clf()
