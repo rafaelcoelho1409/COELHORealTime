@@ -13,7 +13,9 @@ from functions import (
     yellowbrick_classification_kwargs,
     yellowbrick_classification_visualizers,
     yellowbrick_feature_analysis_kwargs,
-    yellowbrick_feature_analysis_visualizers
+    yellowbrick_feature_analysis_visualizers,
+    yellowbrick_target_kwargs,
+    yellowbrick_target_visualizers
 )
 
 DATA_PATH = "data/transaction_fraud_detection.parquet"
@@ -25,7 +27,12 @@ PROJECT_NAME = "Transaction Fraud Detection"
 os.makedirs(MODEL_FOLDER, exist_ok = True)
 os.makedirs("encoders/sklearn", exist_ok = True)
 os.makedirs("data", exist_ok = True)
-os.makedirs(f"{YELLOWBRICK_PATH}/classification", exist_ok = True)
+for x in [
+    "classification",
+    "feature_analysis",
+    "target"
+]:
+    os.makedirs(f"{YELLOWBRICK_PATH}/{x}", exist_ok = True)
 
 
 def main():
@@ -75,31 +82,48 @@ def main():
         try:
             binary_classes = list(set(y_train.unique().tolist() + y_test.unique().tolist()))
             binary_classes.sort()
-            #>>>--- Classification Visualizers ---<<<#
-            yb_classification_kwargs = yellowbrick_classification_kwargs(
-                PROJECT_NAME,
-                y_train,
-                binary_classes
+            ##>>>--- Classification Visualizers ---<<<#
+            #yb_classification_kwargs = yellowbrick_classification_kwargs(
+            #    PROJECT_NAME,
+            #    y_train,
+            #    binary_classes
+            #)
+            #yellowbrick_classification_visualizers(
+            #    yb_classification_kwargs,
+            #    X_train,
+            #    X_test,
+            #    y_train,
+            #    y_test,
+            #    YELLOWBRICK_PATH
+            #)
+            ##>>>--- Feature Analysis ---<<<#
+            #yb_feature_analysis_kwargs = yellowbrick_feature_analysis_kwargs(
+            #    binary_classes
+            #)
+            #yellowbrick_feature_analysis_visualizers(
+            #    yb_feature_analysis_kwargs,
+            #    X,
+            #    y,
+            #    YELLOWBRICK_PATH
+            #)
+            ##>>>--- Target ---<<<#
+            labels = list(set(y_train.unique().tolist() + y_test.unique().tolist()))
+            features = X_train.columns.tolist()
+            yb_target_kwargs = yellowbrick_target_kwargs(
+                labels,
+                features
             )
-            yellowbrick_classification_visualizers(
-                yb_classification_kwargs,
-                X_train,
-                X_test,
-                y_train,
-                y_test,
-                YELLOWBRICK_PATH
-            )
-            #>>>--- Feature Analysis ---<<<#
-            yb_feature_analysis_kwargs = yellowbrick_feature_analysis_kwargs(
-                binary_classes
-            )
-            yellowbrick_feature_analysis_visualizers(
-                yb_feature_analysis_kwargs,
+            yellowbrick_target_visualizers(
+                yb_target_kwargs,
                 X,
                 y,
                 YELLOWBRICK_PATH
             )
+            #>>>--- Model Selection ---<<<#
+        except Exception as e:
+            print(f"Error creating visualizers: {str(e)}")
             #----------------------------------#
+        try:
             model = create_batch_model(
                 PROJECT_NAME,
                 y_train = y_train)

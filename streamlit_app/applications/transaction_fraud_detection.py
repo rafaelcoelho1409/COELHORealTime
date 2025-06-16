@@ -510,9 +510,11 @@ elif tabs_ == "Batch ML":
         st.divider()
         st.header("Detailed Metrics")
         yb_tabs = st.tabs([
-            "Classification"
+            "Classification",
+            "Feature Analysis",
+            "Target"
         ])
-        with yb_tabs[0]:
+        with yb_tabs[0]: #Classification
             yellowbrick_metrics_dict = {
             x: re.sub(r'([a-z])([A-Z])', r'\1 \2', x)
             for x in [
@@ -529,11 +531,36 @@ elif tabs_ == "Batch ML":
             yellowbrick_metrics_index_dict = {
                 x: i
                 for i, x in enumerate(yellowbrick_metrics_dict.keys())}
-            yb_tabs = st.tabs(yellowbrick_metrics_dict.keys())
+            yb_subtabs = st.tabs(yellowbrick_metrics_dict.keys())
             for i in range(len(yellowbrick_metrics_dict.keys())):
-                with yb_tabs[i]:
+                with yb_subtabs[i]:
                     yb_image = requests.get(
                         "http://fastapi:8000/yellowbrick/transaction_fraud_detection/classification/" + list(yellowbrick_metrics_dict.values())[i],
+                        stream = True)
+                    st.image(
+                        yb_image.content,
+                        use_container_width = True)
+        with yb_tabs[1]: #Feature Analysis
+            ...
+        with yb_tabs[2]: #Target
+            yellowbrick_metrics_dict = {
+                x: re.sub(r'([a-z])([A-Z])', r'\1 \2', x)
+                for x in [
+                    "BalancedBinningReference",
+                    "ClassBalance"
+            ]}
+            yellowbrick_metrics_dict = {
+                y: x 
+                for x, y in yellowbrick_metrics_dict.items()
+            }
+            yellowbrick_metrics_index_dict = {
+                x: i
+                for i, x in enumerate(yellowbrick_metrics_dict.keys())}
+            yb_subtabs = st.tabs(yellowbrick_metrics_dict.keys())
+            for i in range(len(yellowbrick_metrics_dict.keys())):
+                with yb_subtabs[i]:
+                    yb_image = requests.get(
+                        "http://fastapi:8000/yellowbrick/transaction_fraud_detection/target/" + list(yellowbrick_metrics_dict.values())[i],
                         stream = True)
                     st.image(
                         yb_image.content,

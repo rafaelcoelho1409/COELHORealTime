@@ -29,7 +29,8 @@ from sklearn.model_selection import train_test_split
 from xgboost import XGBClassifier
 from yellowbrick import (
     classifier,
-    features
+    features,
+    target
 )
 import matplotlib.pyplot as plt
 
@@ -799,30 +800,36 @@ def yellowbrick_feature_analysis_kwargs(
 ):
     return {
         "RadViz": {
-            "classes": classes
+            "classes": classes,
+            "n_jobs": -1
         },
         "Rank1D": {
-            "algorithm": "shapiro"
+            "algorithm": "shapiro",
+            "n_jobs": -1
         },
         "Rank2D": {
-            "algorithm": "pearson", #
+            "algorithm": "pearson",
+            "n_jobs": -1
         },
-        #"ParallelCoordinates": {
-        #    "classes": classes,
-        #    "features": features,
-        #    "sample": 0.05,
-        #    "shuffle": True,
-        #    #"fast": True
-        #},
+        "ParallelCoordinates": {
+            "classes": classes,
+            "features": features,
+            "sample": 0.05,
+            "shuffle": True,
+            #"fast": True,
+            "n_jobs": -1
+        },
         "PCA": {
             "classes": classes,
             "scale": True,
             #"projection": 3,
-            #"proj_features": True
+            #"proj_features": True,
+            "n_jobs": -1
         },
         "Manifold": {
             "classes": classes,
-            "manifold": "tsne"
+            "manifold": "tsne",
+            "n_jobs": -1
         },
         #JointPlotVisualizer
     }
@@ -848,3 +855,105 @@ def yellowbrick_feature_analysis_visualizers(
         visualizer.show();
         visualizer.fig.savefig(f"{YELLOWBRICK_PATH}/feature_analysis/{visualizer.__class__.__name__}.png")
         plt.clf()
+
+
+def yellowbrick_target_kwargs(
+    labels = None,
+    features = None
+):
+    return {
+        "BalancedBinningReference": {
+            "n_jobs": -1
+        },
+        "ClassBalance": {
+            "labels": labels,
+            "n_jobs": -1
+        },
+        #"FeatureCorrelation": {
+        #    "labels": features,
+        #    "n_jobs": -1
+        #}
+    }
+
+
+def yellowbrick_target_visualizers(
+    yb_target_kwargs,
+    X,
+    y,
+    YELLOWBRICK_PATH
+):
+    for visualizer_name in yb_target_kwargs.keys():
+        print(visualizer_name)
+        visualizer = getattr(target, visualizer_name)(**yb_target_kwargs[visualizer_name])
+        if visualizer_name in [
+            "BalancedBinningReference",
+            "ClassBalance"
+            ]:
+            visualizer.fit(y)
+        else:
+            visualizer.fit(X, y)
+        visualizer.show();
+        visualizer.fig.savefig(f"{YELLOWBRICK_PATH}/target/{visualizer.__class__.__name__}.png")
+        plt.clf()
+
+
+def yellowbrick_model_selection_kwargs(
+    PROJECT_NAME,
+    y_train,
+    param_name = None,
+    param_range = None,
+    logx = None,
+    cv = None,
+    scoring = None,
+    train_sizes = None
+):
+    return {
+        "ValidationCurve": {
+            "estimator": create_batch_model(
+                PROJECT_NAME,
+                y_train = y_train),
+            "param_name": param_name,
+            "param_range": param_range,
+            "logx": logx,
+            "cv": cv,
+            "scoring": scoring,
+            "n_jobs": -1
+        },
+        "LearningCurve": {
+            "estimator": create_batch_model(
+                PROJECT_NAME,
+                y_train = y_train),
+            "cv": cv,
+            "scoring": scoring,
+            "train_sizes": train_sizes,
+            "n_jobs": -1
+        },
+        "CVScores": {
+            "estimator": create_batch_model(
+                PROJECT_NAME,
+                y_train = y_train),
+            "cv": cv,
+            "scoring": scoring,
+            "n_jobs": -1
+        },
+        "FeatureImportances": {
+            "estimator": create_batch_model(
+                PROJECT_NAME,
+                y_train = y_train),
+            "n_jobs": -1
+        },
+        "RFECV": {
+            "estimator": create_batch_model(
+                PROJECT_NAME,
+                y_train = y_train),
+            #"cv": cv,
+            #"scoring": scoring,
+            "n_jobs": -1
+        },
+        "DroppingCurve": {
+            "estimator": create_batch_model(
+                PROJECT_NAME,
+                y_train = y_train),
+            "n_jobs": -1
+        }
+    }
