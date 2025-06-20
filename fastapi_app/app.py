@@ -4,6 +4,7 @@ from fastapi import (
 )
 from fastapi.responses import (
     FileResponse, 
+    StreamingResponse
 )
 from contextlib import asynccontextmanager
 from pydantic import (
@@ -25,7 +26,10 @@ import subprocess
 import os
 import numpy as np
 import pandas as pd
+import io
+import matplotlib.pyplot as plt
 from functions import (
+    ModelDataManager,
     process_sample,
     process_sklearn_sample,
     load_or_create_model,
@@ -33,7 +37,16 @@ from functions import (
     create_consumer,
     load_or_create_encoders,
     extract_device_info,
-    extract_timestamp_info
+    extract_timestamp_info,
+    process_batch_data,
+    yellowbrick_classification_kwargs,
+    yellowbrick_classification_visualizers,
+    yellowbrick_feature_analysis_kwargs,
+    yellowbrick_feature_analysis_visualizers,
+    yellowbrick_target_kwargs,
+    yellowbrick_target_visualizers,
+    yellowbrick_model_selection_kwargs,
+    yellowbrick_model_selection_visualizers
 )
 
 
@@ -54,6 +67,7 @@ ENCODER_LIBRARIES = [
     "river",
     "sklearn"
 ]
+
 
 def stop_current_model():
     """
@@ -134,6 +148,7 @@ data_dict = {x: None for x in PROJECT_NAMES}
 model_dict = {x: {} for x in PROJECT_NAMES}
 encoders_dict = {x: {} for x in PROJECT_NAMES}
 initial_sample_dict = {x: None for x in PROJECT_NAMES} # Also move this initialization
+data_manager = ModelDataManager()
 
 
 class Healthcheck(BaseModel):
@@ -678,33 +693,33 @@ async def get_cluster_counts(request: ClusterFeatureCountsRequest):
         return {}
     
 
-@app.post("/switch_model/{model_key}")
-async def switch_model(model_key: str):
+@app.post("/switch_model")
+async def switch_model(payload: dict):
     global healthcheck
-    if model_key == healthcheck.current_model_name:
-        return {"message": f"Model {model_key} is already running."}
+    if payload["model_key"] == healthcheck.current_model_name:
+        return {"message": f"Model {payload["model_key"]} is already running."}
     # Stop any currently running model
     if healthcheck.current_training_process:
-        print(f"Switching from {healthcheck.current_model_name} to {model_key}")
+        print(f"Switching from {healthcheck.current_model_name} to {payload["model_key"]}")
         stop_current_model()
     else:
-        print(f"No model running, attempting to start {model_key}")
-    if model_key == "none" or model_key not in MODEL_SCRIPTS.values():
-        if model_key == "none":
+        print(f"No model running, attempting to start {payload["model_key"]}")
+    if payload["model_key"] == "none" or payload["model_key"] not in MODEL_SCRIPTS.values():
+        if payload["model_key"] == "none":
             return {"message": "All models stopped."}
         else:
             raise HTTPException(
                 status_code = 404, 
-                detail = f"Model key '{model_key}' not found.")
-    script_to_run = model_key
+                detail = f"Model key '{payload["model_key"]}' not found.")
+    script_to_run = payload["model_key"]
     command = ["python3", script_to_run] # Use the venv python
     try:
-        print(f"Starting model: {model_key} with script: {script_to_run}")
+        print(f"Starting model: {payload["model_key"]} with script: {script_to_run}")
         # Start the new training script
         # Make sure logs from these scripts go somewhere, or capture stdout/stderr
         # For simplicity, letting them log to their own files or stdout for now.
         # If you redirect stdout/stderr, ensure non-blocking reads or use tempfiles.
-        log_file_path = f"/app/logs/{model_key}.log" # Ensure /app/logs exists
+        log_file_path = f"/app/logs/{payload["model_key"]}.log" # Ensure /app/logs exists
         os.makedirs(
             os.path.dirname(log_file_path), 
             exist_ok = True)
@@ -719,16 +734,18 @@ async def switch_model(model_key: str):
                           # or use absolute paths for scripts
             )
         healthcheck.current_training_process = process
-        healthcheck.current_model_name = model_key
-        print(f"Model {model_key} started with PID: {process.pid}. Logs at {log_file_path}")
-        return {"message": f"Switched to model: {model_key}"}
+        healthcheck.current_model_name = payload["model_key"]
+        print(f"Model {payload["model_key"]} started with PID: {process.pid}. Logs at {log_file_path}")
+        if payload["model_key"].endswith("sklearn.py"):
+            data_manager.load_data(payload["project_name"])
+        return {"message": f"Switched to model: {payload["model_key"]}"}
     except Exception as e:
-        print(f"Failed to start model {model_key}: {e}")
+        print(f"Failed to start model {payload["model_key"]}: {e}")
         healthcheck.current_training_process = None # Ensure state is clean
         healthcheck.current_model_name = None
         raise HTTPException(
             status_code = 500, 
-            detail = f"Failed to start model {model_key}: {str(e)}")
+            detail = f"Failed to start model {payload["model_key"]}: {str(e)}")
     
 
 @app.get("/current_model")
@@ -744,12 +761,74 @@ async def get_current_model():
     return {"current_model": None, "status": "none running"}
 
 
-@app.get("/yellowbrick/{project_name}/{metric_type}/{metric_name}", response_class = FileResponse)
-async def get_yellowbrick_metric(project_name: str, metric_type: str, metric_name: str):
-    STATIC_IMAGE_PATH = f"models/{project_name}/yellowbrick/{metric_type}/{metric_name}.png"
-    if not os.path.exists(STATIC_IMAGE_PATH):
-        return {"error": "Static image not found"}, 404
-    return FileResponse(
-        STATIC_IMAGE_PATH, 
-        media_type = "image/png")
+@app.post("/yellowbrick_metric", response_class = FileResponse)
+async def yellowbrick_metric(payload: dict):
+    PROJECT_NAME = payload["project_name"]
+    METRIC_TYPE = payload["metric_type"]
+    METRIC_NAME = payload["metric_name"]
+    # Ensure data is loaded for the requested project
+    data_manager.load_data(PROJECT_NAME)
+    if PROJECT_NAME == "Transaction Fraud Detection":
+        classes = list(set(data_manager.y_train.unique().tolist() + data_manager.y_test.unique().tolist()))
+        classes.sort()
+        fig_buf = io.BytesIO()
+        if METRIC_TYPE == "Classification":
+            yb_kwargs = yellowbrick_classification_kwargs(
+                PROJECT_NAME,
+                METRIC_NAME,
+                data_manager.y_train,
+                classes
+            )
+            yb_vis = yellowbrick_classification_visualizers(
+                yb_kwargs,
+                data_manager.X_train,
+                data_manager.X_test,
+                data_manager.y_train,
+                data_manager.y_test,
+            )
+            yb_vis.fig.savefig(fig_buf, format = "png")
+        elif METRIC_TYPE == "Feature Analysis":
+            yb_kwargs = yellowbrick_feature_analysis_kwargs(
+                PROJECT_NAME,
+                METRIC_NAME,
+                classes
+            )
+            yb_vis = yellowbrick_feature_analysis_visualizers(
+                yb_kwargs,
+                data_manager.X,
+                data_manager.y,
+            )
+            yb_vis.fig.savefig(fig_buf, format = "png")
+        elif METRIC_TYPE == "Target":
+            labels = list(set(data_manager.y_train.unique().tolist() + data_manager.y_test.unique().tolist()))
+            features = data_manager.X_train.columns.tolist()
+            yb_kwargs = yellowbrick_target_kwargs(
+                PROJECT_NAME,
+                METRIC_NAME,
+                labels,
+                features
+            )
+            yb_vis = yellowbrick_target_visualizers(
+                yb_kwargs,
+                data_manager.X,
+                data_manager.y,
+            )
+            yb_vis.fig.savefig(fig_buf, format = "png")
+        elif METRIC_TYPE == "Model Selection":
+            yb_kwargs = yellowbrick_model_selection_kwargs(
+                PROJECT_NAME,
+                METRIC_NAME,
+                data_manager.y_train
+            )
+            yb_vis = yellowbrick_model_selection_visualizers(
+                yb_kwargs,
+                data_manager.X,
+                data_manager.y,
+            )
+            yb_vis.fig.savefig(fig_buf, format = "png")
+        fig_buf.seek(0)
+        plt.clf()
+        return StreamingResponse(
+            fig_buf, 
+            media_type = "image/png")
 

@@ -73,6 +73,10 @@ services:
         condition: service_healthy
     networks:
       - my_network
+    deploy:
+      resources:
+        limits:
+          memory: 8G
 
   # Streamlit Service
   streamlit:

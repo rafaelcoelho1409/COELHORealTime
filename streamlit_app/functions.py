@@ -39,6 +39,35 @@ def timestamp_to_api_response(timestamp_date, timestamp_time):
     timestamp = timestamp_target.strftime(target_format)
     return timestamp
 
+
+def switch_active_model(
+    key_to_activate, 
+    project_name,
+    FASTAPI_URL = "http://fastapi:8000"
+    ):
+    try:
+        response = requests.post(
+            f"{FASTAPI_URL}/switch_model",
+            json = {
+                "model_key": key_to_activate,
+                "project_name": project_name
+                })
+        response.raise_for_status()
+        st.toast(
+            f"Request to switch to model '{key_to_activate}' sent: {response.json().get('message')}", 
+            icon = "✅")
+        # Store in session state which model we *think* is active
+        st.session_state.activated_model = key_to_activate
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error switching model: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            st.error(f"FastAPI response: {e.response.text}")
+        # If switch failed, reflect that no model is reliably active from this page's perspective
+        if 'activated_model' in st.session_state and st.session_state.activated_model == key_to_activate:
+            del st.session_state.activated_model
+
+
+###>>>---CACHE FUNCTIONS---<<<###
 @st.cache_resource
 def convert_cluster_feature_dict_to_dataframe(data_dict: dict, feature_name: str = "Feature Values") -> pd.DataFrame:
     """
@@ -209,25 +238,24 @@ def create_location_heatmaps(location_data_per_cluster: dict, mapbox_access_toke
     return heatmap_figures
 
 
-def switch_active_model(key_to_activate, FASTAPI_URL = "http://fastapi:8000"):
-    try:
-        response = requests.post(f"{FASTAPI_URL}/switch_model/{key_to_activate}")
-        response.raise_for_status()
-        st.toast(
-            f"Request to switch to model '{key_to_activate}' sent: {response.json().get('message')}", 
-            icon = "✅")
-        # Store in session state which model we *think* is active
-        st.session_state.activated_model = key_to_activate
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error switching model: {e}")
-        if hasattr(e, 'response') and e.response is not None:
-            st.error(f"FastAPI response: {e.response.text}")
-        # If switch failed, reflect that no model is reliably active from this page's perspective
-        if 'activated_model' in st.session_state and st.session_state.activated_model == key_to_activate:
-            del st.session_state.activated_model
-
-
-###>>>---STREAMLIT FUNCTIONS---<<<###
-
-
-###>>>---CACHE FUNCTION---<<<###
+@st.cache_resource
+def display_yellowbrick_metric(
+    project_name,
+    metric_type,
+    metric_name
+):
+    if metric_name is None:
+        st.write("No metric selected.")
+    else:
+        with st.spinner("Loading Yellowbrick Metric..."):
+            yb_image = requests.post(
+                "http://fastapi:8000/yellowbrick_metric",
+                json = {
+                    "project_name": project_name,
+                    "metric_type": metric_type,
+                    "metric_name": metric_name
+                },
+                stream = True)
+            st.image(
+                yb_image.content,
+                use_container_width = True)

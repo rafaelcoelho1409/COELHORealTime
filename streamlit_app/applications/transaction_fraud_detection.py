@@ -9,7 +9,8 @@ import plotly.express as px
 import re
 from functions import (
     timestamp_to_api_response,
-    switch_active_model
+    switch_active_model,
+    display_yellowbrick_metric
 )
 
 fake = Faker()
@@ -35,7 +36,7 @@ if tabs_ == "Incremental ML":
     if 'activated_model' not in st.session_state or st.session_state.activated_model != MODEL_KEY:
         # If no model is marked as active, or a different one is, try to activate this page's model.
         # This also handles the initial load of the page.
-        switch_active_model(MODEL_KEY)
+        switch_active_model(MODEL_KEY, PROJECT_NAME)
         # You might want a small delay or a button to prevent rapid switching if users click around fast
         # time.sleep(1) # Optional: brief pause
     layout_grid = grid([0.3, 0.7])
@@ -248,7 +249,7 @@ elif tabs_ == "Batch ML":
     if 'activated_model' not in st.session_state or st.session_state.activated_model != MODEL_KEY:
         # If no model is marked as active, or a different one is, try to activate this page's model.
         # This also handles the initial load of the page.
-        switch_active_model(MODEL_KEY)
+        switch_active_model(MODEL_KEY, PROJECT_NAME)
         # You might want a small delay or a button to prevent rapid switching if users click around fast
         # time.sleep(1) # Optional: brief pause
     layout_grid = grid([0.3, 0.7])
@@ -509,59 +510,45 @@ elif tabs_ == "Batch ML":
         )
         st.divider()
         st.header("Detailed Metrics")
-        yb_tabs = st.tabs([
-            "Classification",
-            "Feature Analysis",
-            "Target"
-        ])
-        with yb_tabs[0]: #Classification
-            yellowbrick_metrics_dict = {
-            x: re.sub(r'([a-z])([A-Z])', r'\1 \2', x)
-            for x in [
+        detailed_metrics_dict = {
+            "Classification": [
+                None,
                 "ClassificationReport",
                 "ConfusionMatrix",
                 "ROCAUC",
                 "PrecisionRecallCurve",
                 "ClassPredictionError"
-            ]}
-            yellowbrick_metrics_dict = {
-                y: x 
-                for x, y in yellowbrick_metrics_dict.items()
-            }
-            yellowbrick_metrics_index_dict = {
-                x: i
-                for i, x in enumerate(yellowbrick_metrics_dict.keys())}
-            yb_subtabs = st.tabs(yellowbrick_metrics_dict.keys())
-            for i in range(len(yellowbrick_metrics_dict.keys())):
-                with yb_subtabs[i]:
-                    yb_image = requests.get(
-                        "http://fastapi:8000/yellowbrick/transaction_fraud_detection/classification/" + list(yellowbrick_metrics_dict.values())[i],
-                        stream = True)
-                    st.image(
-                        yb_image.content,
-                        use_container_width = True)
-        with yb_tabs[1]: #Feature Analysis
-            ...
-        with yb_tabs[2]: #Target
-            yellowbrick_metrics_dict = {
-                x: re.sub(r'([a-z])([A-Z])', r'\1 \2', x)
-                for x in [
-                    "BalancedBinningReference",
-                    "ClassBalance"
-            ]}
-            yellowbrick_metrics_dict = {
-                y: x 
-                for x, y in yellowbrick_metrics_dict.items()
-            }
-            yellowbrick_metrics_index_dict = {
-                x: i
-                for i, x in enumerate(yellowbrick_metrics_dict.keys())}
-            yb_subtabs = st.tabs(yellowbrick_metrics_dict.keys())
-            for i in range(len(yellowbrick_metrics_dict.keys())):
-                with yb_subtabs[i]:
-                    yb_image = requests.get(
-                        "http://fastapi:8000/yellowbrick/transaction_fraud_detection/target/" + list(yellowbrick_metrics_dict.values())[i],
-                        stream = True)
-                    st.image(
-                        yb_image.content,
-                        use_container_width = True)
+            ],
+            "Feature Analysis": [
+                None,
+            ],
+            "Target": [
+                None,
+                "BalancedBinningReference",
+                "ClassBalance"
+            ],
+            "Model Selection": [
+                None,
+                "ValidationCurve",
+                "LearningCurve",
+                "CVScores",
+                "FeatureImportances",
+                "DroppingCurve"
+            ]
+        }
+        detailed_metrics_cols = st.columns(2)
+        metric_type = detailed_metrics_cols[0].selectbox(
+            "Metric Type",
+            detailed_metrics_dict.keys(),
+            index = 0
+        )
+        metric_name = detailed_metrics_cols[1].selectbox(
+            "Metric Name",
+            detailed_metrics_dict[metric_type],
+            index = 0
+        )
+        display_yellowbrick_metric(
+            project_name = PROJECT_NAME,
+            metric_type = metric_type,
+            metric_name = metric_name
+        )

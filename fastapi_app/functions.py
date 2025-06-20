@@ -5,6 +5,7 @@ from typing import Any, Dict, Hashable
 from kafka import KafkaConsumer
 import json
 import pandas as pd
+import numpy as np
 import datetime as dt
 from river import (
     base,
@@ -25,12 +26,16 @@ from sklearn.preprocessing import (
     OneHotEncoder,
 )
 from sklearn.compose import ColumnTransformer
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import (
+    train_test_split,
+    StratifiedKFold
+)
 from xgboost import XGBClassifier
 from yellowbrick import (
     classifier,
     features,
-    target
+    target,
+    model_selection
 )
 import matplotlib.pyplot as plt
 
@@ -724,50 +729,49 @@ def create_batch_model(project_name, **kwargs):
 
 def yellowbrick_classification_kwargs(
     PROJECT_NAME,
+    METRIC_NAME,
     y_train,
     binary_classes
 ):
-    return {
+    kwargs = {
         "ClassificationReport": {
             "estimator": create_batch_model(
                 PROJECT_NAME,
                 y_train = y_train),
             "classes": binary_classes,
             "support": True,
-            "n_jobs": -1
         },
         "ConfusionMatrix": {
             "estimator": create_batch_model(
                 PROJECT_NAME,
                 y_train = y_train),
             "classes": binary_classes,
-            "n_jobs": -1
         },
         "ROCAUC": {
             "estimator": create_batch_model(
                 PROJECT_NAME,
                 y_train = y_train),
             "classes": binary_classes,
-            "n_jobs": -1
         },
         "PrecisionRecallCurve": {
             "estimator": create_batch_model(
                 PROJECT_NAME,
                 y_train = y_train),
-            "n_jobs": -1
         },
         "ClassPredictionError": {
             "estimator": create_batch_model(
                 PROJECT_NAME,
                 y_train = y_train),
             "classes": binary_classes,
-            "n_jobs": -1
         },
         #"DiscriminationThreshold": {
         #    "estimator": create_batch_model(
         #        PROJECT_NAME,
         #        y_train = y_train),
         #}
+    }
+    return {
+        METRIC_NAME: kwargs[METRIC_NAME]
     }
 
 
@@ -777,7 +781,6 @@ def yellowbrick_classification_visualizers(
     X_test,
     y_train,
     y_test,
-    YELLOWBRICK_PATH
 ):
     for visualizer_name in yb_classification_kwargs.keys():
         print(visualizer_name)
@@ -790,48 +793,48 @@ def yellowbrick_classification_visualizers(
             visualizer.fit(X_train, y_train)
             visualizer.score(X_test, y_test)
         visualizer.show();
-        visualizer.fig.savefig(f"{YELLOWBRICK_PATH}/classification/{visualizer.__class__.__name__}.png")
-        plt.clf()
+        return visualizer
 
 
 def yellowbrick_feature_analysis_kwargs(
+    PROJECT_NAME,
+    METRIC_NAME,
     classes,
     features = None
 ):
-    return {
-        "RadViz": {
-            "classes": classes,
-            "n_jobs": -1
-        },
-        "Rank1D": {
-            "algorithm": "shapiro",
-            "n_jobs": -1
-        },
-        "Rank2D": {
-            "algorithm": "pearson",
-            "n_jobs": -1
-        },
+    kwargs = {
+        #"RadViz": {
+        #    "classes": classes,
+        #},
+        #"Rank1D": {
+        #    "algorithm": "shapiro",
+        #},
+        #"Rank2D": {
+        #    "algorithm": "pearson",
+        #},
         "ParallelCoordinates": {
             "classes": classes,
             "features": features,
             "sample": 0.05,
             "shuffle": True,
             #"fast": True,
-            "n_jobs": -1
+            "n_jobs": 1,
         },
         "PCA": {
             "classes": classes,
             "scale": True,
             #"projection": 3,
             #"proj_features": True,
-            "n_jobs": -1
+            "n_jobs": 1,
         },
-        "Manifold": {
-            "classes": classes,
-            "manifold": "tsne",
-            "n_jobs": -1
-        },
+        #"Manifold": {
+        #    "classes": classes,
+        #    "manifold": "tsne",
+        #},
         #JointPlotVisualizer
+    }
+    return {
+        METRIC_NAME: kwargs[METRIC_NAME]
     }
 
 
@@ -839,7 +842,6 @@ def yellowbrick_feature_analysis_visualizers(
     yb_feature_analysis_kwargs,
     X,
     y,
-    YELLOWBRICK_PATH
 ):
     for visualizer_name in yb_feature_analysis_kwargs.keys():
         print(visualizer_name)
@@ -853,26 +855,27 @@ def yellowbrick_feature_analysis_visualizers(
             visualizer.fit(X, y)
             visualizer.transform(X)
         visualizer.show();
-        visualizer.fig.savefig(f"{YELLOWBRICK_PATH}/feature_analysis/{visualizer.__class__.__name__}.png")
-        plt.clf()
+        return visualizer
 
 
 def yellowbrick_target_kwargs(
+    PROJECT_NAME,
+    METRIC_NAME,
     labels = None,
     features = None
 ):
-    return {
+    kwargs = {
         "BalancedBinningReference": {
-            "n_jobs": -1
         },
         "ClassBalance": {
             "labels": labels,
-            "n_jobs": -1
         },
         #"FeatureCorrelation": {
         #    "labels": features,
-        #    "n_jobs": -1
         #}
+    }
+    return {
+        METRIC_NAME: kwargs[METRIC_NAME]
     }
 
 
@@ -880,7 +883,6 @@ def yellowbrick_target_visualizers(
     yb_target_kwargs,
     X,
     y,
-    YELLOWBRICK_PATH
 ):
     for visualizer_name in yb_target_kwargs.keys():
         print(visualizer_name)
@@ -893,67 +895,130 @@ def yellowbrick_target_visualizers(
         else:
             visualizer.fit(X, y)
         visualizer.show();
-        visualizer.fig.savefig(f"{YELLOWBRICK_PATH}/target/{visualizer.__class__.__name__}.png")
-        plt.clf()
+        return visualizer
 
 
 def yellowbrick_model_selection_kwargs(
     PROJECT_NAME,
-    y_train,
-    param_name = None,
-    param_range = None,
-    logx = None,
-    cv = None,
-    scoring = None,
-    train_sizes = None
-):
-    return {
+    METRIC_NAME,
+    y_train
+    ):
+    kwargs = {
         "ValidationCurve": {
             "estimator": create_batch_model(
                 PROJECT_NAME,
                 y_train = y_train),
-            "param_name": param_name,
-            "param_range": param_range,
-            "logx": logx,
-            "cv": cv,
-            "scoring": scoring,
-            "n_jobs": -1
+            "param_name": "gamma",
+            "param_range": np.logspace(-6, -1, 10),
+            "logx": True,
+            "cv": StratifiedKFold(
+                n_splits = 5,
+                shuffle = True, 
+                random_state = 42
+            ),
+            "scoring": "average_precision",
+            "n_jobs": 1,
         },
         "LearningCurve": {
             "estimator": create_batch_model(
                 PROJECT_NAME,
                 y_train = y_train),
-            "cv": cv,
-            "scoring": scoring,
-            "train_sizes": train_sizes,
-            "n_jobs": -1
+            "cv": StratifiedKFold(
+                n_splits = 5,
+                shuffle = True, 
+                random_state = 42
+            ),
+            "scoring": "average_precision",
+            "train_sizes": np.linspace(0.3, 1.0, 8),
+            "n_jobs": 1,
         },
         "CVScores": {
             "estimator": create_batch_model(
                 PROJECT_NAME,
                 y_train = y_train),
-            "cv": cv,
-            "scoring": scoring,
-            "n_jobs": -1
+            "cv": StratifiedKFold(
+                n_splits = 5,
+                shuffle = True, 
+                random_state = 42
+            ),
+            "scoring": "average_precision",
+            "n_jobs": 1,
         },
         "FeatureImportances": {
             "estimator": create_batch_model(
                 PROJECT_NAME,
                 y_train = y_train),
-            "n_jobs": -1
+            "n_jobs": 1,
         },
-        "RFECV": {
-            "estimator": create_batch_model(
-                PROJECT_NAME,
-                y_train = y_train),
-            #"cv": cv,
-            #"scoring": scoring,
-            "n_jobs": -1
-        },
+        #"RFECV": {
+        #    "estimator": create_batch_model(
+        #        PROJECT_NAME,
+        #        y_train = y_train),
+        #    "cv": StratifiedKFold(
+        #        n_splits = 5,
+        #        shuffle = True, 
+        #        random_state = 42
+        #    ),
+        #    "scoring": "average_precision",
+        #    "n_jobs": 1,
+        #}, #Take too long to process, don't use
         "DroppingCurve": {
             "estimator": create_batch_model(
                 PROJECT_NAME,
                 y_train = y_train),
-            "n_jobs": -1
+            "n_jobs": 1,
         }
     }
+    return {
+        METRIC_NAME: kwargs[METRIC_NAME]
+    }
+
+
+def yellowbrick_model_selection_visualizers(
+    yb_model_selection_kwargs,
+    X,
+    y,
+):
+    for visualizer_name in yb_model_selection_kwargs.keys():
+        print(visualizer_name)
+        visualizer = getattr(model_selection, visualizer_name)(**yb_model_selection_kwargs[visualizer_name])
+        if visualizer_name in ["ValidationCurve", "RFECV"]:
+            X_stratified, _, y_stratified, _ = train_test_split(
+                X, y,
+                train_size = 50000,
+                shuffle = True,
+                stratify = y,
+                random_state = 42
+            )
+            visualizer.fit(X_stratified, y_stratified)
+        else:
+            visualizer.fit(X, y)
+        visualizer.show();
+        return visualizer
+
+
+class ModelDataManager:
+    def __init__(self):
+        self.X_train: pd.DataFrame | None = None
+        self.X_test: pd.DataFrame | None = None
+        self.y_train: pd.Series | None = None
+        self.y_test: pd.Series | None = None
+        self.X: pd.DataFrame | None = None
+        self.y: pd.Series | None = None
+        self.project_name: str | None = None
+    def load_data(self, project_name: str):
+        # If data for the correct project is already loaded, do nothing.
+        if self.project_name == project_name and self.y_train is not None:
+            print(f"Data for {project_name} is already loaded.")
+            return
+        print(f"Loading data for project: {project_name}")
+        # Your data loading logic from switch_model goes here
+        consumer = create_consumer(project_name)
+        data_df = load_or_create_data(consumer, project_name)
+        self.X_train, self.X_test, self.y_train, self.y_test = process_batch_data(
+            data_df, project_name
+        )
+        self.X = pd.concat([self.X_train, self.X_test])
+        self.y = pd.concat([self.y_train, self.y_test])
+        self.project_name = project_name
+        print("Data loaded successfully.")
