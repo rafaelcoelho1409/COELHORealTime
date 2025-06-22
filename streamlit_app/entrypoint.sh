@@ -9,4 +9,4 @@ source .venv/bin/activate
 uv pip install -r requirements.txt
 
 # Start applications in the background *within the activated environment*
-streamlit run app.py
+streamlit run app.py --server.address 0.0.0.0 --server.port 8501
