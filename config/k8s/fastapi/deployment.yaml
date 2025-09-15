@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coelho-realtime-fastapi-deployment
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: coelho-realtime-fastapi-deployment
+  template:
+    metadata:
+      labels:
+        app: coelho-realtime-fastapi-deployment
+    spec:
+      containers:
+      - name: coelho-realtime-fastapi-container
+        image: fastapi_app:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+        volumeMounts:
+        - name: fastapi-app
+          mountPath: /app
+        resources:
+          limits:
+            memory: "4Gi"
+            cpu: "1000m"
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+      volumes:
+      - name: fastapi-app
+        persistentVolumeClaim:
+          claimName: coelho-realtime-fastapi-pvc
+      dnsPolicy: ClusterFirst
+      dnsConfig:
+        nameservers:
+          - 8.8.8.8
+          - 1.1.1.1

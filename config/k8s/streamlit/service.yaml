@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: coelho-realtime-streamlit-service
+  labels:
+    app: coelho-realtime-streamlit-deployment
+  namespace: default
+spec:
+  selector:
+    app: coelho-realtime-streamlit-deployment
+  ports:
+    - name: http
+      port: 8501
+      targetPort: 8501
+      protocol: TCP
+  type: ClusterIP

@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: coelho-realtime-fastapi-service
+  labels:
+    app: coelho-realtime-fastapi-deployment
+  namespace: default
+spec:
+  selector:
+    app: coelho-realtime-fastapi-deployment
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+  type: ClusterIP
