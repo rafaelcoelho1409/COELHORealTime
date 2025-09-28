@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coelho-realtime-mlflow-deployment
+  namespace: coelho
+  labels:
+    app: coelho-realtime-mlflow-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: coelho-realtime-mlflow-deployment
+  template:
+    metadata:
+      labels:
+        app: coelho-realtime-mlflow-deployment
+    spec:
+      containers:
+      - name: coelho-realtime-mlflow-container
+        image: coelho-realtime-mlflow
+        imagePullPolicy: IfNotPresent #Always
+        ports:
+        - containerPort: 5000
+        #volumeMounts:
+        #- name: mlflow-app
+        #  mountPath: /mlflow-data
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "125m"
+          limits:
+            memory: "512Mi"
+            cpu: "250m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 30
+          failureThreshold: 5
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 30
+          failureThreshold: 5
+      #volumes:
+      #- name: mlflow-app
+      #  persistentVolumeClaim:
+      #    claimName: coelho-realtime-mlflow-pvc

@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coelho-realtime-fastapi-configmap
+  namespace: coelho
+data:
+  FASTAPI_HOST: "coelho-realtime-fastapi-service"
+  KAFKA_HOST: "coelho-realtime-kafka-service"
+  MLFLOW_HOST: "coelho-realtime-mlflow-service"
+  STREAMLIT_HOST: "coelho-realtime-streamlit-service"
