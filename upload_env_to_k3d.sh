@@ -6,7 +6,7 @@
 # Default values
 ENV_FILE="${1:-.env}"
 NAMESPACE="${2:-coelho}"
-SECRET_NAME="${3:-coelho-realtime-secrets}"
+SECRET_NAME="${3:-coelho-realtime-secret}"
 
 echo "Converting $ENV_FILE to Kubernetes secret..."
 echo "Namespace: $NAMESPACE"

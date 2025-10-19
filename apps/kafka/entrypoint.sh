@@ -33,5 +33,4 @@ python3 e_commerce_customer_interactions.py \
 #  --initial-delay-s 0.1 &
 
 
-
 wait

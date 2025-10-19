@@ -20,6 +20,10 @@ from functions import (
     yellowbrick_model_selection_visualizers
 )
 
+
+MLFLOW_HOST = os.environ["MLFLOW_HOST"]
+
+
 DATA_PATH = "data/transaction_fraud_detection.parquet"
 MODEL_FOLDER = "models/transaction_fraud_detection"
 ENCODERS_PATH = "encoders/sklearn/transaction_fraud_detection.pkl"
@@ -40,7 +44,7 @@ for x in [
 
 def main():
     # Initialize model and metrics
-    mlflow.set_tracking_uri("http://mlflow:5000")
+    mlflow.set_tracking_uri(f"http://{MLFLOW_HOST}:5000")
     mlflow.set_experiment(PROJECT_NAME)
     # Create consumer
     consumer = create_consumer(PROJECT_NAME)

@@ -9,6 +9,9 @@ import plotly.graph_objects as go
 import os
 
 
+FASTAPI_HOST = os.environ["FASTAPI_HOST"]
+
+
 ###>>>---LOCAL FUNCTIONS---<<<###
 def image_border_radius(image_path, border_radius, width, height, page_object = None, is_html = False):
     if is_html == False:
@@ -43,7 +46,7 @@ def timestamp_to_api_response(timestamp_date, timestamp_time):
 def switch_active_model(
     key_to_activate, 
     project_name,
-    FASTAPI_URL = "http://fastapi:8000"
+    FASTAPI_URL = f"http://{FASTAPI_HOST}:8000"
     ):
     try:
         response = requests.post(
@@ -249,7 +252,7 @@ def display_yellowbrick_metric(
     else:
         with st.spinner("Loading Yellowbrick Metric..."):
             yb_image = requests.post(
-                "http://fastapi:8000/yellowbrick_metric",
+                f"http://{FASTAPI_HOST}:8000/yellowbrick_metric",
                 json = {
                     "project_name": project_name,
                     "metric_type": metric_type,

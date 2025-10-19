@@ -21,19 +21,22 @@ spec:
         imagePullPolicy: IfNotPresent #Always
         ports:
         - containerPort: 5000
+        envFrom:
+          - configMapRef:
+              name: coelho-realtime-mlflow-configmap
         #volumeMounts:
         #- name: mlflow-app
         #  mountPath: /mlflow-data
         resources:
           requests:
-            memory: "256Mi"
-            cpu: "125m"
-          limits:
             memory: "512Mi"
             cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
         livenessProbe:
           httpGet:
-            path: /
+            path: /health
             port: 5000
           initialDelaySeconds: 30
           periodSeconds: 15
@@ -41,7 +44,7 @@ spec:
           failureThreshold: 5
         readinessProbe:
           httpGet:
-            path: /
+            path: /health
             port: 5000
           initialDelaySeconds: 30
           periodSeconds: 15

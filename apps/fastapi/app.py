@@ -50,6 +50,9 @@ from functions import (
 )
 
 
+MLFLOW_HOST = os.environ["MLFLOW_HOST"]
+
+
 PROJECT_NAMES = [
     "Transaction Fraud Detection", 
     "Estimated Time of Arrival",
@@ -426,7 +429,7 @@ async def lifespan(app: FastAPI):
     healthcheck.encoders_load = encoders_load_status
     try:
         print("Loading MLflow...")
-        mlflow.set_tracking_uri("http://mlflow:5000")
+        mlflow.set_tracking_uri(f"http://{MLFLOW_HOST}:5000")
     except Exception as e:
         print(f"Error loading MLflow: {e}", file = sys.stderr)
     print("Application setup finished. Yielding control...")

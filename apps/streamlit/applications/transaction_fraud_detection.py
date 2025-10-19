@@ -7,15 +7,20 @@ from faker import Faker
 import datetime as dt
 import plotly.express as px
 import re
+import os
 from functions import (
     timestamp_to_api_response,
     switch_active_model,
     display_yellowbrick_metric
 )
 
+
+FASTAPI_HOST = os.environ["FASTAPI_HOST"]
+
+
 fake = Faker()
 PROJECT_NAME = "Transaction Fraud Detection"
-FASTAPI_URL = "http://fastapi:8000"
+FASTAPI_URL = f"http://{FASTAPI_HOST}:8000"
 
 
 tabs_ = st.segmented_control(
@@ -43,7 +48,7 @@ if tabs_ == "Incremental ML":
     layout_grid_1 = layout_grid.container()
     layout_grid_2 = layout_grid.container()
     sample = requests.post(
-        "http://fastapi:8000/initial_sample",
+        f"http://{FASTAPI_HOST}:8000/initial_sample",
         json = {
             "project_name": PROJECT_NAME
         }).json()
@@ -77,7 +82,7 @@ if tabs_ == "Incremental ML":
             timestamp_date, 
             timestamp_time)
         currency_options = requests.post(
-            "http://fastapi:8000/unique_values",
+            f"http://{FASTAPI_HOST}:8000/unique_values",
             json = {
                 "column_name": "currency",
                 "project_name": PROJECT_NAME
@@ -88,7 +93,7 @@ if tabs_ == "Incremental ML":
             index = currency_options.index(sample["currency"]))
         form_cols3 = st.columns(2)
         merchant_id_options = requests.post(
-            "http://fastapi:8000/unique_values",
+            f"http://{FASTAPI_HOST}:8000/unique_values",
             json = {
                 "column_name": "merchant_id",
                 "project_name": PROJECT_NAME
@@ -98,7 +103,7 @@ if tabs_ == "Incremental ML":
             merchant_id_options, 
             index = merchant_id_options.index(sample["merchant_id"]))
         product_category_options = requests.post(
-            "http://fastapi:8000/unique_values",
+            f"http://{FASTAPI_HOST}:8000/unique_values",
             json = {
                 "column_name": "product_category",
                 "project_name": PROJECT_NAME
@@ -109,7 +114,7 @@ if tabs_ == "Incremental ML":
             index = product_category_options.index(sample["product_category"]))
         form_cols4 = st.columns(2)
         transaction_type_options = requests.post(
-            "http://fastapi:8000/unique_values",
+            f"http://{FASTAPI_HOST}:8000/unique_values",
             json = {
                 "column_name": "transaction_type",
                 "project_name": PROJECT_NAME
@@ -119,7 +124,7 @@ if tabs_ == "Incremental ML":
             transaction_type_options, 
             index = transaction_type_options.index(sample["transaction_type"]))
         payment_method_options = requests.post(
-            "http://fastapi:8000/unique_values",
+            f"http://{FASTAPI_HOST}:8000/unique_values",
             json = {
                 "column_name": "payment_method",
                 "project_name": PROJECT_NAME
@@ -143,7 +148,7 @@ if tabs_ == "Incremental ML":
             step = 0.0001)
         form_cols6 = st.columns(2)
         device_info_options = requests.post(
-            "http://fastapi:8000/unique_values",
+            f"http://{FASTAPI_HOST}:8000/unique_values",
             json = {
                 "column_name": "device_info",
                 "project_name": PROJECT_NAME
@@ -179,7 +184,7 @@ if tabs_ == "Incremental ML":
             use_container_width = True)
     layout_grid_2.header("Classification Metrics")
     mlflow_metrics = requests.post(
-        "http://fastapi:8000/mlflow_metrics",
+        f"http://{FASTAPI_HOST}:8000/mlflow_metrics",
         json = {
             "project_name": PROJECT_NAME,
             "model_name": "ARFClassifier"
@@ -220,7 +225,7 @@ if tabs_ == "Incremental ML":
             'billing_address_match': billing_address_match, # Boolean flag
         }
         y_pred = requests.post(
-            "http://fastapi:8000/predict",
+            f"http://{FASTAPI_HOST}:8000/predict",
             json = {
                 "project_name": PROJECT_NAME,
                 "model_name": "ARFClassifier"} | x).json()
@@ -256,7 +261,7 @@ elif tabs_ == "Batch ML":
     layout_grid_1 = layout_grid.container()
     layout_grid_2 = layout_grid.container()
     sample = requests.post(
-        "http://fastapi:8000/initial_sample",
+        f"http://{FASTAPI_HOST}:8000/initial_sample",
         json = {
             "project_name": PROJECT_NAME
         }).json()
@@ -290,7 +295,7 @@ elif tabs_ == "Batch ML":
             timestamp_date, 
             timestamp_time)
         currency_options = requests.post(
-            "http://fastapi:8000/unique_values",
+            f"http://{FASTAPI_HOST}:8000/unique_values",
             json = {
                 "column_name": "currency",
                 "project_name": PROJECT_NAME
@@ -301,7 +306,7 @@ elif tabs_ == "Batch ML":
             index = currency_options.index(sample["currency"]))
         form_cols3 = st.columns(2)
         merchant_id_options = requests.post(
-            "http://fastapi:8000/unique_values",
+            f"http://{FASTAPI_HOST}:8000/unique_values",
             json = {
                 "column_name": "merchant_id",
                 "project_name": PROJECT_NAME
@@ -311,7 +316,7 @@ elif tabs_ == "Batch ML":
             merchant_id_options, 
             index = merchant_id_options.index(sample["merchant_id"]))
         product_category_options = requests.post(
-            "http://fastapi:8000/unique_values",
+            f"http://{FASTAPI_HOST}:8000/unique_values",
             json = {
                 "column_name": "product_category",
                 "project_name": PROJECT_NAME
@@ -322,7 +327,7 @@ elif tabs_ == "Batch ML":
             index = product_category_options.index(sample["product_category"]))
         form_cols4 = st.columns(2)
         transaction_type_options = requests.post(
-            "http://fastapi:8000/unique_values",
+            f"http://{FASTAPI_HOST}:8000/unique_values",
             json = {
                 "column_name": "transaction_type",
                 "project_name": PROJECT_NAME
@@ -332,7 +337,7 @@ elif tabs_ == "Batch ML":
             transaction_type_options, 
             index = transaction_type_options.index(sample["transaction_type"]))
         payment_method_options = requests.post(
-            "http://fastapi:8000/unique_values",
+            f"http://{FASTAPI_HOST}:8000/unique_values",
             json = {
                 "column_name": "payment_method",
                 "project_name": PROJECT_NAME
@@ -356,7 +361,7 @@ elif tabs_ == "Batch ML":
             step = 0.0001)
         form_cols6 = st.columns(2)
         device_info_options = requests.post(
-            "http://fastapi:8000/unique_values",
+            f"http://{FASTAPI_HOST}:8000/unique_values",
             json = {
                 "column_name": "device_info",
                 "project_name": PROJECT_NAME
@@ -394,7 +399,7 @@ elif tabs_ == "Batch ML":
         "Predictions", 
         "Detailed Metrics"])
     mlflow_metrics = requests.post(
-        "http://fastapi:8000/mlflow_metrics",
+        f"http://{FASTAPI_HOST}:8000/mlflow_metrics",
         json = {
             "project_name": PROJECT_NAME,
             "model_name": "XGBClassifier"
@@ -456,7 +461,7 @@ elif tabs_ == "Batch ML":
                 'billing_address_match': billing_address_match, # Boolean flag
             }
             y_pred = requests.post(
-                "http://fastapi:8000/predict",
+                f"http://{FASTAPI_HOST}:8000/predict",
                 json = {
                     "project_name": PROJECT_NAME,
                     "model_name": "XGBClassifier"} | x).json()

@@ -33,10 +33,10 @@ spec:
           resources:
             requests:
               memory: "512Mi"
-              cpu: "200m"
+              cpu: "300m"
             limits:
-              memory: "1Gi"
-              cpu: "500m"
+              memory: "1536Mi"
+              cpu: "750m"
           #env:
           #- name: AWS_ACCESS_KEY_ID_STS
           #  valueFrom:

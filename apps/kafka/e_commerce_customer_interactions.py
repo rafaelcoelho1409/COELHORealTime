@@ -6,12 +6,18 @@ from kafka import KafkaProducer
 from faker import Faker
 import datetime
 import click
+import os
 from pprint import pprint
+
+
+KAFKA_HOST = os.environ["KAFKA_HOST"]
+
+
 # Use US English locale for fake data
 fake = Faker('en_US')
 
 KAFKA_TOPIC = 'e_commerce_customer_interactions' # Topic name remains the same
-KAFKA_BROKERS = 'kafka:9092' # Assuming same Kafka setup
+KAFKA_BROKERS = f'{KAFKA_HOST}:9092'
 
 # --- Constants ---
 EVENT_TYPES = ['page_view', 'add_to_cart', 'purchase', 'search', 'leave_review']
@@ -211,10 +217,10 @@ def run_producer(event_rate_per_minute):
             interaction_event = generate_customer_event(event_rate_per_minute)
             if interaction_event:
                 producer.send(KAFKA_TOPIC, value=interaction_event)
-                # Limit console output frequency for readability
-                if random.random() < 0.05: # Print roughly 1 in 100 events
-                    print("###--- E-Commerce Customer Interactions ---###")
-                    pprint(interaction_event)
+                ## Limit console output frequency for readability
+                #if random.random() < 0.05: # Print roughly 1 in 100 events
+                #    print("###--- E-Commerce Customer Interactions ---###")
+                #    pprint(interaction_event)
             # Adjust sleep time slightly to simulate variability and approximate target rate
             sleep_time = max(0.001, random.gauss(base_sleep_time, base_sleep_time * 0.3))
             time.sleep(sleep_time)

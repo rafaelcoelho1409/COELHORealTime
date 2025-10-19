@@ -13,6 +13,10 @@ from functions import (
     load_or_create_encoders,
 )
 
+
+MLFLOW_HOST = os.environ["MLFLOW_HOST"]
+
+
 DATA_PATH = "data/transaction_fraud_detection.parquet"
 MODEL_FOLDER = "models/transaction_fraud_detection"
 ENCODERS_PATH = "encoders/river/transaction_fraud_detection.pkl"
@@ -25,7 +29,7 @@ os.makedirs("data", exist_ok = True)
 
 def main():
     # Initialize model and metrics
-    mlflow.set_tracking_uri("http://mlflow:5000")
+    mlflow.set_tracking_uri(f"http://{MLFLOW_HOST}:5000")
     mlflow.set_experiment(PROJECT_NAME)
     encoders = load_or_create_encoders(
         PROJECT_NAME,

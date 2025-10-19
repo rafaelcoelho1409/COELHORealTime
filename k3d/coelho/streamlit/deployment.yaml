@@ -19,6 +19,9 @@ spec:
         imagePullPolicy: IfNotPresent #Always
         ports:
         - containerPort: 8501
+        envFrom:
+          - configMapRef:
+              name: coelho-realtime-fastapi-configmap
         #volumeMounts:
         #- name: streamlit-app
         #  mountPath: /streamlit-data

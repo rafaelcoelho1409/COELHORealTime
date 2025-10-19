@@ -40,8 +40,11 @@ from yellowbrick import (
 import matplotlib.pyplot as plt
 
 
+KAFKA_HOST = os.environ["KAFKA_HOST"]
+
+
 # Configuration
-KAFKA_BROKERS = 'kafka:29092'  # Adjust as needed
+KAFKA_BROKERS = f'{KAFKA_HOST}:29092'  # Adjust as needed
 
 ###---Functions----####
 #Data processing functions

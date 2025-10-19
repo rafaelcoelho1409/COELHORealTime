@@ -7,11 +7,16 @@ from faker import Faker
 import datetime
 import click
 from pprint import pprint
+import os
+
+
+KAFKA_HOST = os.environ["KAFKA_HOST"]
+
 
 fake = Faker()
 
 KAFKA_TOPIC = 'transaction_fraud_detection'
-KAFKA_BROKERS = 'kafka:9092' # Use the internal Docker DNS name
+KAFKA_BROKERS = f'{KAFKA_HOST}:9092'
 
 # --- Constants ---
 # Realistic choices for categorical features
@@ -200,10 +205,10 @@ def run_producer(
                 high_value_fraud_probability
             )
             producer.send(KAFKA_TOPIC, value = transaction)
-            # Limit console output frequency for readability
-            if random.random() < 0.05:
-                print("###--- Transaction Fraud Detection ---###")
-                pprint(transaction)
+            ## Limit console output frequency for readability
+            #if random.random() < 0.05:
+            #    print("###--- Transaction Fraud Detection ---###")
+            #    pprint(transaction)
             # Simulate varying transaction rate
             time.sleep(random.uniform(0.05, 0.5))
     except KeyboardInterrupt:

@@ -8,12 +8,17 @@ import datetime
 import click
 from pprint import pprint
 import math
+import os
+
+
+KAFKA_HOST = os.environ["KAFKA_HOST"]
+
 
 fake = Faker()
 
 # --- Configuration ---
 KAFKA_TOPIC = 'sales_forecasting'
-KAFKA_BROKERS = 'kafka:9092' # Use the internal Docker DNS name
+KAFKA_BROKERS = f'{KAFKA_HOST}:9092'
 
 # --- Constants for Data Generation ---
 PRODUCT_IDS = [f'SKU_{str(i).zfill(5)}' for i in range(1, 21)] # 20 unique products
@@ -203,10 +208,10 @@ def run_producer(time_scale_factor, max_events, initial_delay_s):
             producer.send(KAFKA_TOPIC, value=event)
             events_sent += 1
 
-            # --- Output ---
-            if events_sent % 100 == 0: # Log every 100 events
-                print("###--- Sales Forecasting ---###")
-                pprint(event)
+            ## --- Output ---
+            #if events_sent % 100 == 0: # Log every 100 events
+            #    print("###--- Sales Forecasting ---###")
+            #    pprint(event)
 
             # --- Time Progression ---
             # Simulate processing for a store; multiple transactions can happen closely

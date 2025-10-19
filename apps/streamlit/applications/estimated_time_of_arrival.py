@@ -8,16 +8,21 @@ import datetime as dt
 import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as pio
+import os
 from functions import (
     timestamp_to_api_response,
     switch_active_model
 )
 
+
+FASTAPI_HOST = os.environ["FASTAPI_HOST"]
+
+
 pio.renderers.default = "notebook_connected"
 fake = Faker()
 PROJECT_NAME = "Estimated Time of Arrival"
 MODEL_KEY = f"{PROJECT_NAME.replace(' ', '_').replace('-', '_').lower()}_river.py"
-FASTAPI_URL = "http://fastapi:8000"
+FASTAPI_URL = f"http://{FASTAPI_HOST}:8000"
 
 if 'activated_model' not in st.session_state or st.session_state.activated_model != MODEL_KEY:
     # If no model is marked as active, or a different one is, try to activate this page's model.
@@ -38,14 +43,14 @@ with tabs[0]: # Incremental ML
     layout_grid_1 = layout_grid.container()
     layout_grid_2 = layout_grid.container()
     sample = requests.post(
-        "http://fastapi:8000/initial_sample",
+        f"http://{FASTAPI_HOST}:8000/initial_sample",
         json = {
             "project_name": PROJECT_NAME
         }).json()
     with layout_grid_1.form("Predict"):
         form_cols1 = st.columns(2)
         driver_id_options = requests.post(
-            "http://fastapi:8000/unique_values",
+            f"http://{FASTAPI_HOST}:8000/unique_values",
             json = {
                 "column_name": "driver_id",
                 "project_name": PROJECT_NAME
@@ -55,7 +60,7 @@ with tabs[0]: # Incremental ML
             driver_id_options, 
             index = driver_id_options.index(sample["driver_id"]))
         vehicle_id_options = requests.post(
-            "http://fastapi:8000/unique_values",
+            f"http://{FASTAPI_HOST}:8000/unique_values",
             json = {
                 "column_name": "vehicle_id",
                 "project_name": PROJECT_NAME
@@ -110,7 +115,7 @@ with tabs[0]: # Incremental ML
             step = 0.0001)
         forms_cols5 = st.columns(2)
         weather_options = requests.post(
-            "http://fastapi:8000/unique_values",
+            f"http://{FASTAPI_HOST}:8000/unique_values",
             json = {
                 "column_name": "weather",
                 "project_name": PROJECT_NAME
@@ -120,7 +125,7 @@ with tabs[0]: # Incremental ML
             weather_options, 
             index = weather_options.index(sample["weather"]))
         vehicle_type_options = requests.post(
-            "http://fastapi:8000/unique_values",
+            f"http://{FASTAPI_HOST}:8000/unique_values",
             json = {
                 "column_name": "vehicle_type",
                 "project_name": PROJECT_NAME
@@ -195,7 +200,7 @@ with tabs[0]: # Incremental ML
             use_container_width = True)
     layout_grid_2.header("Regression Metrics")
     mlflow_metrics = requests.post(
-        "http://fastapi:8000/mlflow_metrics",
+        f"http://{FASTAPI_HOST}:8000/mlflow_metrics",
         json = {
             "project_name": PROJECT_NAME,
             "model_name": "ARFRegressor"
@@ -308,7 +313,7 @@ with tabs[0]: # Incremental ML
             f"Estimated Distance: {sample['estimated_distance_km']:.2f} km")
         map_and_pred_grid[1].header("ETA - Prediction")
         y_pred = requests.post(
-            "http://fastapi:8000/predict",
+            f"http://{FASTAPI_HOST}:8000/predict",
             json = {"project_name": PROJECT_NAME} | x).json()[
                 "Estimated Time of Arrival"
             ]

@@ -59,7 +59,8 @@ build:
             dest: /app
   local:
     push: false  # Don't push to registry for local development
-    useBuildkit: true
+    useBuildkit: false
+    #useBuildkit: true
     useDockerCLI: true
 
 # MANIFESTS at top level (v4beta13 structure)

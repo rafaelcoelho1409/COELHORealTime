@@ -7,12 +7,17 @@ from faker import Faker
 import datetime
 import click
 import math # Needed for Haversine distance
+import os
 from pprint import pprint
+
+
+KAFKA_HOST = os.environ["KAFKA_HOST"]
+
 
 fake = Faker('en_US') # Using Brazilian Portuguese locale for more relevant fake data
 
 KAFKA_TOPIC = 'estimated_time_of_arrival' # Changed topic name
-KAFKA_BROKERS = 'kafka:9092' # Assuming same Kafka setup
+KAFKA_BROKERS = f'{KAFKA_HOST}:9092'
 
 # --- Constants ---
 VEHICLE_TYPES = ['Sedan', 'SUV', 'Hatchback', 'Motorcycle', 'Van']
@@ -188,11 +193,11 @@ def run_producer(
                 incident_probability
             )
             producer.send(KAFKA_TOPIC, value = eta_event)
-            # Limit console output frequency for readability
-            if random.random() < 0.05:
-                # Print only key info to keep console cleaner
-                print("###--- Estimated Time of Arrival ---###")
-                pprint(eta_event)
+            ## Limit console output frequency for readability
+            #if random.random() < 0.05:
+            #    # Print only key info to keep console cleaner
+            #    print("###--- Estimated Time of Arrival ---###")
+            #    pprint(eta_event)
             # Simulate varying request rate (e.g., new ride request every 0.1 to 1 second)
             time.sleep(random.uniform(0.1, 1.0))
     except KeyboardInterrupt:

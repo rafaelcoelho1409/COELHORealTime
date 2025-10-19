@@ -8,6 +8,7 @@ import datetime as dt
 import plotly.express as px
 import plotly.graph_objects as go
 import uuid
+import os
 from functions import (
     timestamp_to_api_response,
     convert_cluster_feature_dict_to_dataframe,
@@ -16,10 +17,14 @@ from functions import (
     switch_active_model
 )
 
+
+FASTAPI_HOST = os.environ["FASTAPI_HOST"]
+
+
 fake = Faker()
 PROJECT_NAME = "E-Commerce Customer Interactions"
 MODEL_KEY = f"{PROJECT_NAME.replace(' ', '_').replace('-', '_').lower()}_river.py"
-FASTAPI_URL = "http://fastapi:8000"
+FASTAPI_URL = f"http://{FASTAPI_HOST}:8000"
 
 if 'activated_model' not in st.session_state or st.session_state.activated_model != MODEL_KEY:
     # If no model is marked as active, or a different one is, try to activate this page's model.
@@ -40,14 +45,14 @@ with tabs[0]: # Incremental ML
     layout_grid_1 = layout_grid.container()
     layout_grid_2 = layout_grid.container()
     sample = requests.post(
-        "http://fastapi:8000/initial_sample",
+        f"http://{FASTAPI_HOST}:8000/initial_sample",
         json = {
             "project_name": PROJECT_NAME
         }).json()
     with layout_grid_1.form("Predict"):
         form_cols1 = st.columns(3)
         device_info_options = requests.post(
-            "http://fastapi:8000/unique_values",
+            f"http://{FASTAPI_HOST}:8000/unique_values",
             json = {
                 "column_name": "device_info",
                 "project_name": PROJECT_NAME
@@ -83,7 +88,7 @@ with tabs[0]: # Incremental ML
             step = 0.001)
         form_cols3 = st.columns(2)
         event_type_options = requests.post(
-            "http://fastapi:8000/unique_values",
+            f"http://{FASTAPI_HOST}:8000/unique_values",
             json = {
                 "column_name": "event_type",
                 "project_name": PROJECT_NAME
@@ -100,7 +105,7 @@ with tabs[0]: # Incremental ML
         )
         form_cols4 = st.columns(2)
         product_category_options = requests.post(
-            "http://fastapi:8000/unique_values",
+            f"http://{FASTAPI_HOST}:8000/unique_values",
             json = {
                 "column_name": "product_category",
                 "project_name": PROJECT_NAME
@@ -110,7 +115,7 @@ with tabs[0]: # Incremental ML
             product_category_options, 
             index = product_category_options.index(str(sample["product_category"])))
         product_id_options = requests.post(
-            "http://fastapi:8000/unique_values",
+            f"http://{FASTAPI_HOST}:8000/unique_values",
             json = {
                 "column_name": "product_id",
                 "project_name": PROJECT_NAME
@@ -121,7 +126,7 @@ with tabs[0]: # Incremental ML
             index = product_id_options.index(str(sample["product_id"])))
         form_cols5 = st.columns(2)
         referrer_url_options = requests.post(
-            "http://fastapi:8000/unique_values",
+            f"http://{FASTAPI_HOST}:8000/unique_values",
             json = {
                 "column_name": "referrer_url",
                 "project_name": PROJECT_NAME
@@ -132,7 +137,7 @@ with tabs[0]: # Incremental ML
             index = referrer_url_options.index(str(sample["referrer_url"]))
             )
         session_event_sequence_options = requests.post(
-            "http://fastapi:8000/unique_values",
+            f"http://{FASTAPI_HOST}:8000/unique_values",
             json = {
                 "column_name": "session_event_sequence",
                 "project_name": PROJECT_NAME
@@ -147,7 +152,7 @@ with tabs[0]: # Incremental ML
         )
         form_cols6 = st.columns(2)
         quantity_options = requests.post(
-            "http://fastapi:8000/unique_values",
+            f"http://{FASTAPI_HOST}:8000/unique_values",
             json = {
                 "column_name": "quantity",
                 "project_name": PROJECT_NAME
@@ -161,7 +166,7 @@ with tabs[0]: # Incremental ML
             step = 1
         )
         time_on_page_seconds_options = requests.post(
-            "http://fastapi:8000/unique_values",
+            f"http://{FASTAPI_HOST}:8000/unique_values",
             json = {
                 "column_name": "time_on_page_seconds",
                 "project_name": PROJECT_NAME
@@ -206,7 +211,7 @@ with tabs[0]: # Incremental ML
             "Predict",
             use_container_width = True)
     cluster_counts = requests.get(
-        "http://fastapi:8000/cluster_counts").json()
+        f"http://{FASTAPI_HOST}:8000/cluster_counts").json()
     device_info_columns = [
             'device_type',
             'browser',
@@ -261,7 +266,7 @@ with tabs[0]: # Incremental ML
         layout_grid_2_cols_2 = st.columns(2)
         if predict_button:
             y_pred = requests.post(
-                "http://fastapi:8000/predict",
+                f"http://{FASTAPI_HOST}:8000/predict",
                 json = {"project_name": PROJECT_NAME} | x).json()[
                     "cluster"
                 ]
@@ -301,7 +306,7 @@ with tabs[0]: # Incremental ML
             )
             st.session_state["feature_per_cluster2"] = feature_per_cluster2
             cluster_feature_counts2 = requests.post(
-                "http://fastapi:8000/cluster_feature_counts",
+                f"http://{FASTAPI_HOST}:8000/cluster_feature_counts",
                 json = {
                     "column_name": "device_info" if feature_per_cluster2 in device_info_columns else feature_per_cluster2,
                 }
@@ -349,7 +354,7 @@ with tabs[0]: # Incremental ML
             feature_per_cluster_options,
             key = str(uuid.uuid4()))
         cluster_feature_counts = requests.post(
-            "http://fastapi:8000/cluster_feature_counts",
+            f"http://{FASTAPI_HOST}:8000/cluster_feature_counts",
             json = {
                 "column_name": "device_info" if feature_per_cluster in device_info_columns else feature_per_cluster,
             }
@@ -380,7 +385,7 @@ with tabs[0]: # Incremental ML
                     else 0
             )
             sample_location_data = requests.post(
-                "http://fastapi:8000/cluster_feature_counts",
+                f"http://{FASTAPI_HOST}:8000/cluster_feature_counts",
                 json = {
                     "column_name": "location",
                 }
