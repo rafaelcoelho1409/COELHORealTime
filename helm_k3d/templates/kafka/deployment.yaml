@@ -1,0 +1,16 @@
+{{- $appName := "kafka" -}}
+{{- $appConfig := index $.Values $appName }}
+
+apiVersion: apps/v1
+{{- include "coelho-realtime.DeploymentSettings" (dict "appName" $appName) | nindent 0 }}
+spec:
+  replicas: {{ $appConfig.replicas }}
+{{- include "coelho-realtime.DeploymentSpecSettings" (dict "appName" $appName "root" .) | nindent 2 }}
+{{- include "coelho-realtime.DeploymentResources" (dict "appName" $appName "root" .) | nindent 10}}
+          volumeMounts:
+          - name: kafka-data
+            mountPath: /opt/bitnami/kafka/data
+      volumes:
+      - name: kafka-data
+        persistentVolumeClaim:
+          claimName: coelho-realtime-kafka-pvc

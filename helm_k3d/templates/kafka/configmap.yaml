@@ -1,9 +1,7 @@
 apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: coelho-realtime-kafka-configmap
-  namespace: coelho
+{{- include "coelho-realtime.ConfigMapSettings" (dict "appName" "kafka") | nindent 0}}
 data:
+  # Kafka-specific configuration
   ALLOW_PLAINTEXT_LISTENER: "yes"
   KAFKA_CFG_ADVERTISED_LISTENERS: "CLIENT_INTERNAL://coelho-realtime-kafka-service:29092,CLIENT_EXTERNAL://localhost:9092"
   KAFKA_CFG_NODE_ID: "1"
@@ -15,7 +13,6 @@ data:
   KAFKA_CFG_INTER_BROKER_LISTENER_NAME: "CLIENT_INTERNAL"
   # Don't forget to remove the CLIENT_EXTERNAL listener in production
   # Correct PLAINTEXT settings when in production (security vulnerability)
-  FASTAPI_HOST: "coelho-realtime-fastapi-service"
-  KAFKA_HOST: "coelho-realtime-kafka-service"
-  MLFLOW_HOST: "coelho-realtime-mlflow-service"
-  STREAMLIT_HOST: "coelho-realtime-streamlit-service"
+
+  # Common service hosts
+  {{- include "coelho-realtime.commonEnvVars" . | nindent 2 }}

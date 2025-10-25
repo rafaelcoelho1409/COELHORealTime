@@ -1,0 +1,4 @@
+apiVersion: v1
+{{- include "coelho-realtime.ConfigMapSettings" (dict "appName" "fastapi") | nindent 0}}
+data:
+  {{- include "coelho-realtime.commonEnvVars" . | nindent 2 }}

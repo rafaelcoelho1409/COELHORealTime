@@ -1,0 +1,5 @@
+{{- $appName := "streamlit" -}}
+
+apiVersion: v1
+{{- include "coelho-realtime.ServiceSettings" (dict "appName" $appName) | nindent 0 }}
+{{- toYaml (index .Values $appName "portsSettings") | nindent 2}}

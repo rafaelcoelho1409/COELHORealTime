@@ -65,21 +65,18 @@ build:
 
 # MANIFESTS at top level (v4beta13 structure)
 manifests:
-  helm:
-    releases:
-      - name: coelho-realtime
-        chartPath: ./helm_k3d
-        namespace: coelho
-        createNamespace: true
-        setValueTemplates:
-          # Skaffold will automatically replace these with built image tags
-          fastapi.image: "{{.IMAGE_NAME_coelho_realtime_fastapi}}:{{.IMAGE_TAG_coelho_realtime_fastapi}}"
-          kafka.image: "{{.IMAGE_NAME_coelho_realtime_kafka}}:{{.IMAGE_TAG_coelho_realtime_kafka}}"
-          mlflow.image: "{{.IMAGE_NAME_coelho_realtime_mlflow}}:{{.IMAGE_TAG_coelho_realtime_mlflow}}"
-          streamlit.image: "{{.IMAGE_NAME_coelho_realtime_streamlit}}:{{.IMAGE_TAG_coelho_realtime_streamlit}}"
+  rawYaml:
+    - k3d/coelho/fastapi/*.yaml
+    - k3d/coelho/kafka/*.yaml
+    - k3d/coelho/mlflow/*.yaml
+    - k3d/coelho/streamlit/*.yaml
+    #- k3d/coelho/grafana/*.yaml
+    #- k3d/coelho/prometheus/*.yaml
 
 deploy:
-  helm: {}
+  kubectl:
+    flags:
+      global: ["--namespace=coelho"]
 
 portForward:
   - resourceType: service
@@ -162,16 +159,14 @@ profiles:
               - "**/*.json"
     # Profile-specific manifests override (if needed)
     manifests:
-      helm:
-        releases:
-          - name: coelho-realtime
-            chartPath: ./helm_k3d
-            namespace: coelho
-            createNamespace: true
-            setValueTemplates:
-              fastapi.image: "{{.IMAGE_NAME_coelho_realtime_fastapi}}:{{.IMAGE_TAG_coelho_realtime_fastapi}}"
-              kafka.image: "{{.IMAGE_NAME_coelho_realtime_kafka}}:{{.IMAGE_TAG_coelho_realtime_kafka}}"
-              mlflow.image: "{{.IMAGE_NAME_coelho_realtime_mlflow}}:{{.IMAGE_TAG_coelho_realtime_mlflow}}"
-              streamlit.image: "{{.IMAGE_NAME_coelho_realtime_streamlit}}:{{.IMAGE_TAG_coelho_realtime_streamlit}}"
+      rawYaml:
+        - k3d/coelho/fastapi/*.yaml
+        - k3d/coelho/kafka/*.yaml
+        - k3d/coelho/mlflow/*.yaml
+        - k3d/coelho/streamlit/*.yaml
+        #- k3d/coelho/grafana/*.yaml
+        #- k3d/coelho/prometheus/*.yaml
     deploy:
-      helm: {}
+      kubectl:
+        flags:
+          global: ["--namespace=coelho"]

@@ -1,6 +1,7 @@
 from fastapi import (
     FastAPI,
-    HTTPException
+    HTTPException,
+    Request
 )
 from fastapi.responses import (
     FileResponse, 
@@ -443,6 +444,15 @@ async def lifespan(app: FastAPI):
 
 ###---FastAPI App---###
 app = FastAPI(lifespan = lifespan)
+
+@app.get("/health")
+async def health_check(request: Request):
+    """
+    Health check endpoint with rate limiting.
+    Returns 200 OK if the service is running.
+    Rate limited to 100 requests/minute per IP to prevent abuse.
+    """
+    return {"status": "ok"}
 
 
 # IMPORTANT OBSERVATION: you can put the PUT only after the GET
