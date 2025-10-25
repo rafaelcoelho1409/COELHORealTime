@@ -16,7 +16,7 @@ fastapi:
         port: 8000
         targetPort: 8000
         protocol: TCP
-    service: LoadBalancer #ClusterIP
+    type: LoadBalancer #ClusterIP
   livenessProbeSettings:
     livenessProbe:
       httpGet:
@@ -52,9 +52,23 @@ kafka:
         port: 9093
         targetPort: 9093
         protocol: TCP
-    service: LoadBalancer #ClusterIP
-  storageSize: 5Gi
+    type: LoadBalancer #ClusterIP
+  storageSize: 2Gi
   storageClassName: local-path
+  livenessProbeSettings:
+    livenessProbe:
+      tcpSocket:
+        port: 29092
+      initialDelaySeconds: 90
+      periodSeconds: 30
+      failureThreshold: 5
+  readinessProbeSettings:
+    readinessProbe:
+      tcpSocket:
+        port: 29092
+      initialDelaySeconds: 60
+      periodSeconds: 10
+      failureThreshold: 6
 
 
 mlflow:
@@ -74,7 +88,7 @@ mlflow:
         port: 5000
         targetPort: 5000
         protocol: TCP
-    service: LoadBalancer #ClusterIP
+    type: LoadBalancer #ClusterIP
   livenessProbeSettings:
     livenessProbe:
       httpGet:
@@ -111,4 +125,20 @@ streamlit:
         port: 8501
         targetPort: 8501
         protocol: TCP
-    service: LoadBalancer #ClusterIP
+    type: LoadBalancer #ClusterIP
+  livenessProbeSettings:
+    livenessProbe:
+      httpGet:
+        path: /_stcore/health
+        port: 8501
+      initialDelaySeconds: 30
+      periodSeconds: 15
+      failureThreshold: 3
+  readinessProbeSettings:
+    readinessProbe:
+      httpGet:
+        path: /_stcore/health
+        port: 8501
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      failureThreshold: 3

@@ -16,7 +16,7 @@ ConfigMap settings
 kind: ConfigMap
 metadata:
   name: coelho-realtime-{{ .appName }}-configmap
-  namespace: coelho
+  namespace: {{ .root.Release.Namespace }}
 {{- end -}}
 
 
@@ -27,9 +27,13 @@ Deployment settings
 kind: Deployment
 metadata:
   name: coelho-realtime-{{ .appName }}-deployment
-  namespace: coelho
+  namespace: {{ .root.Release.Namespace }}
   labels:
-    app: coelho-realtime-{{ .appName }}-deployment
+    app.kubernetes.io/name: {{ .root.Chart.Name }}
+    app.kubernetes.io/instance: {{ .root.Release.Name }}
+    app.kubernetes.io/version: {{ .root.Chart.AppVersion }}
+    app.kubernetes.io/component: {{ .appName }}
+    app.kubernetes.io/managed-by: {{ .root.Release.Service }}
 {{- end -}}
 
 
@@ -40,7 +44,7 @@ Service settings
 kind: Service
 metadata:
   name: coelho-realtime-{{ .appName }}-service
-  namespace: coelho
+  namespace: {{ .root.Release.Namespace }}
   labels:
     app: coelho-realtime-{{ .appName }}-deployment
 spec:
@@ -56,7 +60,7 @@ PVC settings
 kind: PersistentVolumeClaim
 metadata:
   name: coelho-realtime-{{ .appName }}-pvc
-  namespace: coelho
+  namespace: {{ .root.Release.Namespace }}
 spec:
   accessModes:
     - ReadWriteOnce
@@ -79,10 +83,20 @@ template:
     labels:
       app: coelho-realtime-{{ .appName }}-deployment
   spec:
+    #securityContext:
+    #  runAsNonRoot: true
+    #  runAsUser: 1000
+    #  fsGroup: 1000
     containers:
       - name: coelho-realtime-{{ .appName }}-container
         image: {{ index .root.Values .appName "image" }}
         imagePullPolicy: {{ index .root.Values .appName "imagePullPolicy" }}
+        #securityContext:
+        #  allowPrivilegeEscalation: false
+        #  capabilities:
+        #    drop:
+        #      - ALL
+        #  readOnlyRootFilesystem: false
         envFrom:
           - configMapRef:
               name: coelho-realtime-{{ .appName }}-configmap

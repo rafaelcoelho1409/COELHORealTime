@@ -2,7 +2,7 @@
 {{- $appConfig := index $.Values $appName }}
 
 apiVersion: apps/v1
-{{- include "coelho-realtime.DeploymentSettings" (dict "appName" $appName) | nindent 0 }}
+{{- include "coelho-realtime.DeploymentSettings" (dict "appName" $appName "root" .) | nindent 0 }}
 spec:
   replicas: {{ $appConfig.replicas }}
 {{- include "coelho-realtime.DeploymentSpecSettings" (dict "appName" $appName "root" .) | nindent 2 }}
