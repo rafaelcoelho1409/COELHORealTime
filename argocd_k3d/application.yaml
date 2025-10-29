@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: coelho-realtime
+  namespace: argocd  # Where ArgoCD is installed
+spec:
+  project: default
+  source:
+    repoURL: http://172.20.0.2/public-projects/COELHORealTime.git
+    targetRevision: master  # Your current branch (from git status)
+    path: helm_k3d
+    helm:
+      valueFiles:
+        - values.yaml
+  destination:
+    # This deploys to the ArgoCD cluster itself
+    # To deploy to a different cluster (like k3d-coelho), you need to register that cluster first
+    server: https://kubernetes.default.svc
+    namespace: coelho
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

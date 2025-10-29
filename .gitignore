@@ -14,3 +14,4 @@ ordinal_encoders/
 .env
 *.json
 *.png
+.claude/
