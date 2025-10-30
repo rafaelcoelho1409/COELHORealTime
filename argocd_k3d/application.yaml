@@ -6,7 +6,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: http://172.20.0.2/public-projects/COELHORealTime.git
+    repoURL: http://localhost:8090/public-projects/COELHORealTime.git
     targetRevision: master  # Your current branch (from git status)
     path: helm_k3d
     helm:
