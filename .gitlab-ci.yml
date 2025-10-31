@@ -19,12 +19,17 @@ build:
     GIT_STRATEGY: none
   before_script:
     # Manual git clone with correct URL
-    - apk add --no-cache git docker-cli
+    - apk add --no-cache git docker-cli curl
     - git clone http://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab-webservice-default.gitlab.svc.cluster.local:8181/public-projects/COELHORealTime.git ${CI_PROJECT_DIR}
     - cd ${CI_PROJECT_DIR}
     - git checkout ${CI_COMMIT_SHA}
     # Wait for Docker daemon to be ready
     - until docker info >/dev/null 2>&1; do echo "Waiting for Docker daemon..."; sleep 1; done
+    # Test connectivity to registry and auth endpoint
+    - echo "Testing connectivity to registry..."
+    - curl -v http://${REGISTRY}/v2/ || echo "Registry connection test completed"
+    - echo "Testing connectivity to GitLab webservice..."
+    - curl -v http://gitlab-webservice-default.gitlab.svc.cluster.local:8181/jwt/auth || echo "Webservice connection test completed"
     # Try to login to registry (optional for insecure registry)
     - docker login ${REGISTRY} -u ${CI_REGISTRY_USER} -p ${CI_REGISTRY_PASSWORD} 2>/dev/null || echo "Proceeding without registry authentication (insecure registry mode)"
   script:
