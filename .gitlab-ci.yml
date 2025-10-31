@@ -3,8 +3,8 @@ stages:
   - update-manifest
 
 variables:
-  # GitLab Container Registry - using ClusterIP for direct connectivity from dind
-  REGISTRY: 10.43.145.222:5000
+  # Use internal service DNS for registry
+  REGISTRY: gitlab-registry.gitlab.svc.cluster.local:5000
 
 # Build and push Docker images to GitLab Registry
 build:
@@ -12,7 +12,7 @@ build:
   image: docker:latest
   services:
     - name: docker:dind
-      command: ["--tls=false", "--insecure-registry=10.43.145.222:5000"]
+      command: ["--tls=false", "--insecure-registry=gitlab-registry.gitlab.svc.cluster.local:5000"]
   variables:
     DOCKER_HOST: "tcp://docker:2375"
     DOCKER_TLS_CERTDIR: ""
@@ -28,8 +28,8 @@ build:
     # Test connectivity to registry and auth endpoint
     - echo "Testing connectivity to registry..."
     - curl -v http://${REGISTRY}/v2/ || echo "Registry connection test completed"
-    - echo "Testing connectivity to GitLab JWT auth endpoint (port 8080)..."
-    - curl -v http://gitlab-webservice-default.gitlab.svc.cluster.local:8080/jwt/auth || echo "JWT auth connection test completed"
+    - echo "Testing connectivity to GitLab JWT auth endpoint (port 8181)..."
+    - curl -v http://gitlab-webservice-default.gitlab.svc.cluster.local:8181/jwt/auth || echo "JWT auth connection test completed"
     # Try to login to registry (optional for insecure registry)
     - docker login ${REGISTRY} -u ${CI_REGISTRY_USER} -p ${CI_REGISTRY_PASSWORD} 2>/dev/null || echo "Proceeding without registry authentication (insecure registry mode)"
   script:
