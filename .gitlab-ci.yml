@@ -28,8 +28,8 @@ build:
     # Test connectivity to registry and auth endpoint
     - echo "Testing connectivity to registry..."
     - curl -v http://${REGISTRY}/v2/ || echo "Registry connection test completed"
-    - echo "Testing connectivity to GitLab webservice..."
-    - curl -v http://gitlab-webservice-default.gitlab.svc.cluster.local:8181/jwt/auth || echo "Webservice connection test completed"
+    - echo "Testing connectivity to GitLab JWT auth endpoint (port 8080)..."
+    - curl -v http://gitlab-webservice-default.gitlab.svc.cluster.local:8080/jwt/auth || echo "JWT auth connection test completed"
     # Try to login to registry (optional for insecure registry)
     - docker login ${REGISTRY} -u ${CI_REGISTRY_USER} -p ${CI_REGISTRY_PASSWORD} 2>/dev/null || echo "Proceeding without registry authentication (insecure registry mode)"
   script:
