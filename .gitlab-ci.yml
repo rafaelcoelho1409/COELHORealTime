@@ -1,0 +1,76 @@
+stages:
+  - build
+  - update-manifest
+
+variables:
+  # GitLab Container Registry
+  REGISTRY: gitlab-registry.gitlab.svc.cluster.local:5000
+  # Docker-in-Docker configuration (disable TLS for local dev)
+  DOCKER_TLS_CERTDIR: ""
+  DOCKER_HOST: tcp://docker:2375
+
+# Build and push Docker images to GitLab Registry
+build:
+  stage: build
+  image: docker:latest
+  services:
+    - name: docker:dind
+      command: ["--insecure-registry=gitlab-registry.gitlab.svc.cluster.local:5000"]
+  variables:
+    DOCKER_TLS_CERTDIR: ""
+  before_script:
+    # Wait for Docker daemon to be ready
+    - until docker info >/dev/null 2>&1; do echo "Waiting for Docker daemon..."; sleep 1; done
+    # Login to GitLab Container Registry
+    - echo "Logging into registry..."
+    - docker login ${REGISTRY} -u ${CI_REGISTRY_USER} -p ${CI_REGISTRY_PASSWORD} || echo "Login failed, trying without credentials..."
+  script:
+    # Build and push FastAPI
+    - echo "Building FastAPI image..."
+    - docker build -t ${REGISTRY}/coelho-realtime-fastapi:${CI_COMMIT_SHA} -t ${REGISTRY}/coelho-realtime-fastapi:latest ./apps/fastapi -f ./apps/fastapi/Dockerfile.fastapi
+    - docker push ${REGISTRY}/coelho-realtime-fastapi:${CI_COMMIT_SHA}
+    - docker push ${REGISTRY}/coelho-realtime-fastapi:latest
+    # Build and push Kafka
+    - echo "Building Kafka image..."
+    - docker build -t ${REGISTRY}/coelho-realtime-kafka:${CI_COMMIT_SHA} -t ${REGISTRY}/coelho-realtime-kafka:latest ./apps/kafka -f ./apps/kafka/Dockerfile.kafka
+    - docker push ${REGISTRY}/coelho-realtime-kafka:${CI_COMMIT_SHA}
+    - docker push ${REGISTRY}/coelho-realtime-kafka:latest
+    # Build and push MLflow
+    - echo "Building MLflow image..."
+    - docker build -t ${REGISTRY}/coelho-realtime-mlflow:${CI_COMMIT_SHA} -t ${REGISTRY}/coelho-realtime-mlflow:latest ./apps/mlflow -f ./apps/mlflow/Dockerfile.mlflow
+    - docker push ${REGISTRY}/coelho-realtime-mlflow:${CI_COMMIT_SHA}
+    - docker push ${REGISTRY}/coelho-realtime-mlflow:latest
+    # Build and push Streamlit
+    - echo "Building Streamlit image..."
+    - docker build -t ${REGISTRY}/coelho-realtime-streamlit:${CI_COMMIT_SHA} -t ${REGISTRY}/coelho-realtime-streamlit:latest ./apps/streamlit -f ./apps/streamlit/Dockerfile.streamlit
+    - docker push ${REGISTRY}/coelho-realtime-streamlit:${CI_COMMIT_SHA}
+    - docker push ${REGISTRY}/coelho-realtime-streamlit:latest
+  only:
+    - master
+
+# Update Helm values.yaml with new image tags (GitOps approach)
+update-manifest:
+  stage: update-manifest
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache git sed
+    - git config user.email "gitlab-ci@coelho.local"
+    - git config user.name "GitLab CI Bot"
+    # Use CI_JOB_TOKEN for authentication
+    - git remote set-url origin "http://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab-webservice-default.gitlab.svc.cluster.local:8181/public-projects/COELHORealTime.git"
+  script:
+    - echo "Updating Helm values.yaml with new image tags..."
+    # Update image tags in values.yaml (just the base name, registry will be added by Helm template)
+    - sed -i "s|image: coelho-realtime-fastapi.*|image: coelho-realtime-fastapi:${CI_COMMIT_SHA}|g" helm_k3d/values.yaml
+    - sed -i "s|image: coelho-realtime-kafka.*|image: coelho-realtime-kafka:${CI_COMMIT_SHA}|g" helm_k3d/values.yaml
+    - sed -i "s|image: coelho-realtime-mlflow.*|image: coelho-realtime-mlflow:${CI_COMMIT_SHA}|g" helm_k3d/values.yaml
+    - sed -i "s|image: coelho-realtime-streamlit.*|image: coelho-realtime-streamlit:${CI_COMMIT_SHA}|g" helm_k3d/values.yaml
+    # Show changes
+    - echo "Changes to be committed:"
+    - git diff helm_k3d/values.yaml
+    # Commit and push changes with [skip ci] to prevent infinite loop
+    - git add helm_k3d/values.yaml
+    - git commit -m "ci: update image tags to ${CI_COMMIT_SHA} [skip ci]" || echo "No changes to commit"
+    - git push origin HEAD:${CI_COMMIT_REF_NAME}
+  only:
+    - master

@@ -1,4 +1,15 @@
-# Image configurations - will be overridden by Skaffold
+# Environment configuration
+# 'local' = Skaffold local development (no registry prefix)
+# 'production' = ArgoCD with GitLab Registry
+environment: local
+
+# Registry configuration (only used when environment: production)
+registry:
+  url: gitlab-registry.gitlab.svc.cluster.local:5000
+  # ImagePullSecret name (created by scripts/setup/02-create-registry-secret.sh)
+  imagePullSecret: gitlab-registry-secret
+
+# Image configurations
 fastapi:
   image: coelho-realtime-fastapi
   imagePullPolicy: IfNotPresent

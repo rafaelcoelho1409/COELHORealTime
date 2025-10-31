@@ -98,6 +98,12 @@ stages:
 
 variables:
   REGISTRY: registry.gitlab.com/your-namespace/coelho-realtime
+### 4. Terraform in Depth
+
+- [ ] Terraform vs. CloudFormation vs. Helm
+- [ ] Terraform modules and reuse
+- [ ] Terraform state and locking
+- [ ] Terraform best practices and gotchas
 
 build:
   stage: build

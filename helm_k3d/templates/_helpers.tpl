@@ -1,4 +1,22 @@
 {{/*
+Generate image name based on environment
+Usage: {{ include "coelho-realtime.imageName" (dict "appName" "fastapi" "root" .) }}
+*/}}
+{{- define "coelho-realtime.imageName" -}}
+{{- $image := index .root.Values .appName "image" -}}
+{{- if eq .root.Values.environment "production" -}}
+  {{- if not (hasPrefix .root.Values.registry.url $image) -}}
+    {{- printf "%s/%s" .root.Values.registry.url $image -}}
+  {{- else -}}
+    {{- $image -}}
+  {{- end -}}
+{{- else -}}
+  {{- $image -}}
+{{- end -}}
+{{- end -}}
+
+
+{{/*
 Common environment variables for all services
 */}}
 {{- define "coelho-realtime.commonEnvVars" -}}
@@ -83,13 +101,17 @@ template:
     labels:
       app: coelho-realtime-{{ .appName }}-deployment
   spec:
+    {{- if eq .root.Values.environment "production" }}
+    imagePullSecrets:
+      - name: {{ .root.Values.registry.imagePullSecret }}
+    {{- end }}
     #securityContext:
     #  runAsNonRoot: true
     #  runAsUser: 1000
     #  fsGroup: 1000
     containers:
       - name: coelho-realtime-{{ .appName }}-container
-        image: {{ index .root.Values .appName "image" }}
+        image: {{ include "coelho-realtime.imageName" (dict "appName" .appName "root" .root) }}
         imagePullPolicy: {{ index .root.Values .appName "imagePullPolicy" }}
         #securityContext:
         #  allowPrivilegeEscalation: false

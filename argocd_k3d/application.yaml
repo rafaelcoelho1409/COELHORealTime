@@ -6,17 +6,21 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: http://localhost:8090/public-projects/COELHORealTime.git
+    # repoURL: http://localhost:8090/public-projects/COELHORealTime.git
+    repoURL: http://gitlab-webservice-default.gitlab.svc.cluster.local:8181/public-projects/COELHORealTime.git
     targetRevision: master  # Your current branch (from git status)
     path: helm_k3d
     helm:
       valueFiles:
         - values.yaml
+      parameters:
+        - name: environment
+          value: production
   destination:
     # This deploys to the ArgoCD cluster itself
     # To deploy to a different cluster (like k3d-coelho), you need to register that cluster first
     server: https://kubernetes.default.svc
-    namespace: coelho
+    namespace: coelho-realtime
   syncPolicy:
     automated:
       prune: true
