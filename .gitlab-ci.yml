@@ -80,7 +80,7 @@ update-manifest:
     - git add helm_k3d/values.yaml
     - git commit -m "ci update image tags to ${CI_COMMIT_SHA} [skip ci]" || echo "No changes to commit"
     # Debug: Check which token is being used
-    - 'if [ -n "$CI_PUSH_TOKEN" ]; then echo "Using CI_PUSH_TOKEN"; else echo "Using CI_JOB_TOKEN (CI_PUSH_TOKEN not set)"; fi'
+    - 'if [ -n "$CI_PUSH_TOKEN" ]; then echo "Using CI_PUSH_TOKEN" && echo $CI_PUSH_TOKEN; else echo "Using CI_JOB_TOKEN (CI_PUSH_TOKEN not set)"; fi'
     - git push http://gitlab-ci-token:${CI_PUSH_TOKEN:-${CI_JOB_TOKEN}}@gitlab-webservice-default.gitlab.svc.cluster.local:8181/public-projects/COELHORealTime.git HEAD:${CI_COMMIT_REF_NAME}
   only:
     - master
