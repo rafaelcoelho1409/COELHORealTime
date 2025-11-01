@@ -101,7 +101,7 @@ mlflow:
     ports:
       - name: http
         port: 5001
-        targetPort: 5001
+        targetPort: 5000
         nodePort: 30002
         protocol: TCP
     type: LoadBalancer #ClusterIP
@@ -109,7 +109,7 @@ mlflow:
     livenessProbe:
       httpGet:
         path: /health
-        port: 5001
+        port: 5000
       initialDelaySeconds: 30
       periodSeconds: 15
       timeoutSeconds: 30
@@ -118,7 +118,7 @@ mlflow:
     readinessProbe:
       httpGet:
         path: /health
-        port: 5001
+        port: 5000
       initialDelaySeconds: 30
       periodSeconds: 15
       timeoutSeconds: 30
