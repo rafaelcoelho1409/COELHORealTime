@@ -10,8 +10,10 @@ registry:
   imagePullSecret: gitlab-registry-secret
 
 # Image configurations
+# Note: Skaffold overrides these with local builds during 'skaffold dev'
+# ArgoCD Image Updater updates these tags when new images are pushed to registry
 fastapi:
-  image: coelho-realtime-fastapi
+  image: coelho-realtime-fastapi:latest
   imagePullPolicy: IfNotPresent
   replicas: 1
   resources:
@@ -39,7 +41,7 @@ fastapi:
 
 
 kafka:
-  image: coelho-realtime-kafka
+  image: coelho-realtime-kafka:latest
   imagePullPolicy: IfNotPresent
   replicas: 1
   resources:
@@ -83,7 +85,7 @@ kafka:
 
 
 mlflow:
-  image: coelho-realtime-mlflow
+  image: coelho-realtime-mlflow:latest
   imagePullPolicy: IfNotPresent
   replicas: 1
   resources:
@@ -120,7 +122,7 @@ mlflow:
       failureThreshold: 5
 
 streamlit:
-  image: coelho-realtime-streamlit
+  image: coelho-realtime-streamlit:latest
   imagePullPolicy: IfNotPresent
   replicas: 1
   resources:
