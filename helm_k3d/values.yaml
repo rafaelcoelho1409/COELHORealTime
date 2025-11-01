@@ -1,13 +1,13 @@
 # Environment configuration
 # 'local' = Skaffold local development (no registry prefix)
-# 'production' = ArgoCD with GitLab Registry
+# 'production' = ArgoCD with Docker Registry
 environment: local
 
 # Registry configuration (only used when environment: production)
 registry:
-  url: gitlab-registry.gitlab.svc.cluster.local:5000
-  # ImagePullSecret name (created by scripts/setup/02-create-registry-secret.sh)
-  imagePullSecret: gitlab-registry-secret
+  url: docker-registry.docker-registry.svc.cluster.local:5000
+  # ImagePullSecret not needed for insecure Docker Registry
+  imagePullSecret: ""
 
 # Image configurations
 # Note: Skaffold overrides these with local builds during 'skaffold dev'

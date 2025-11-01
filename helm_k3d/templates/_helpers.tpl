@@ -101,7 +101,7 @@ template:
     labels:
       app: coelho-realtime-{{ .appName }}-deployment
   spec:
-    {{- if eq .root.Values.environment "production" }}
+    {{- if and (eq .root.Values.environment "production") (.root.Values.registry.imagePullSecret) }}
     imagePullSecrets:
       - name: {{ .root.Values.registry.imagePullSecret }}
     {{- end }}
