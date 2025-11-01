@@ -16,7 +16,13 @@ build:
   variables:
     DOCKER_HOST: "tcp://docker:2375"
     DOCKER_TLS_CERTDIR: ""
+    GIT_STRATEGY: none
   before_script:
+    # Manual git clone (required because GitLab external_url is localhost, not the k8s service URL)
+    - apk add --no-cache git
+    - git clone http://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab-webservice-default.gitlab.svc.cluster.local:8181/public-projects/COELHORealTime.git ${CI_PROJECT_DIR}
+    - cd ${CI_PROJECT_DIR}
+    - git checkout ${CI_COMMIT_SHA}
     # Wait for Docker daemon to be ready
     - until docker info >/dev/null 2>&1; do echo "Waiting for Docker daemon..."; sleep 1; done
     # Test connectivity to Docker Registry
@@ -50,8 +56,14 @@ build:
 update-manifest:
   stage: update-manifest
   image: alpine:latest
+  variables:
+    GIT_STRATEGY: none
   before_script:
+    # Manual git clone (required because GitLab external_url is localhost, not the k8s service URL)
     - apk add --no-cache git
+    - git clone http://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab-webservice-default.gitlab.svc.cluster.local:8181/public-projects/COELHORealTime.git ${CI_PROJECT_DIR}
+    - cd ${CI_PROJECT_DIR}
+    - git checkout ${CI_COMMIT_REF_NAME}
     - git config user.email "gitlab-ci@coelho.local"
     - git config user.name "GitLab CI Bot"
   script:
@@ -67,6 +79,6 @@ update-manifest:
     # Commit and push changes with [skip ci] to prevent infinite loop
     - git add helm_k3d/values.yaml
     - git commit -m "ci update image tags to ${CI_COMMIT_SHA} [skip ci]" || echo "No changes to commit"
-    - git push origin HEAD:${CI_COMMIT_REF_NAME}
+    - git push http://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab-webservice-default.gitlab.svc.cluster.local:8181/public-projects/COELHORealTime.git HEAD:${CI_COMMIT_REF_NAME}
   only:
     - master
