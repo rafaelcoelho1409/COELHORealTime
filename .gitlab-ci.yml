@@ -82,4 +82,3 @@ update-manifest:
     - git push http://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab-webservice-default.gitlab.svc.cluster.local:8181/public-projects/COELHORealTime.git HEAD:${CI_COMMIT_REF_NAME}
   only:
     - master
-
