@@ -6,5 +6,9 @@
 4. run "python3 upload_env_to_gitlab.py" to upload secrets to CI/CD variables (to avoid exposing them publicly)
 5. Go to Settings > Repository > Protected branches, add the "master" branch (or the current branch you are working on) and set "Allowed to merge" and "Allowed to push and merge" options to "Developers + Maintainers". It makes GitLab Runner access all internal variables correctly
 
+# Enabling CI/CD steps on GitLab
+- Settings > Repository > Protected Branches
+- Allowed to push > Developers + Maintainers
+
 ## Important observations
 - Centralize all secrets into a .env file on the project root folder in order to upload them to GitLab by using upload_env_to_gitlab.py file. After this, distribute the necessary secrets into each Kubernetes deployments

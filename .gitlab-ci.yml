@@ -68,11 +68,11 @@ update-manifest:
     - git config user.name "GitLab CI Bot"
   script:
     - echo "Updating Helm values.yaml with new image tags..."
-    # Update image tags in values.yaml (just the base name, registry will be added by Helm template)
-    - sed -i "s|image coelho-realtime-fastapi.*|image coelho-realtime-fastapi:${CI_COMMIT_SHA}|g" helm_k3d/values.yaml
-    - sed -i "s|image coelho-realtime-kafka.*|image coelho-realtime-kafka:${CI_COMMIT_SHA}|g" helm_k3d/values.yaml
-    - sed -i "s|image coelho-realtime-mlflow.*|image coelho-realtime-mlflow:${CI_COMMIT_SHA}|g" helm_k3d/values.yaml
-    - sed -i "s|image coelho-realtime-streamlit.*|image coelho-realtime-streamlit:${CI_COMMIT_SHA}|g" helm_k3d/values.yaml
+    # Update image tags in values.yaml (format: "  image: name:tag")
+    - sed -i "s|image: coelho-realtime-fastapi.*|image: coelho-realtime-fastapi:${CI_COMMIT_SHA}|g" helm_k3d/values.yaml
+    - sed -i "s|image: coelho-realtime-kafka.*|image: coelho-realtime-kafka:${CI_COMMIT_SHA}|g" helm_k3d/values.yaml
+    - sed -i "s|image: coelho-realtime-mlflow.*|image: coelho-realtime-mlflow:${CI_COMMIT_SHA}|g" helm_k3d/values.yaml
+    - sed -i "s|image: coelho-realtime-streamlit.*|image: coelho-realtime-streamlit:${CI_COMMIT_SHA}|g" helm_k3d/values.yaml
     # Show changes
     - echo "Changes to be committed:"
     - git diff helm_k3d/values.yaml
