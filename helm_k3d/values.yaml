@@ -1,12 +1,12 @@
 # Environment configuration
 # 'local' = Skaffold local development (no registry prefix)
-# 'production' = ArgoCD with Docker Registry
+# 'production' = ArgoCD with k3d built-in registry
 environment: local
 
 # Registry configuration (only used when environment: production)
 registry:
-  url: docker-registry.docker-registry.svc.cluster.local:5000
-  # ImagePullSecret not needed for insecure Docker Registry
+  url: master-registry:5000
+  # ImagePullSecret not needed for k3d insecure registry
   imagePullSecret: ""
 
 # Image configurations

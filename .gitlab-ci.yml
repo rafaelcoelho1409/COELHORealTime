@@ -2,8 +2,8 @@ stages:
   - build
 
 variables:
-  # Use Docker Registry internal service DNS
-  REGISTRY: docker-registry.docker-registry.svc.cluster.local:5000
+  # Use k3d built-in registry (already configured and trusted by all nodes)
+  REGISTRY: master-registry:5000
 
 # Build and push Docker images to Docker Registry
 build:
@@ -11,7 +11,7 @@ build:
   image: docker:latest
   services:
     - name: docker:dind
-      command: ["--tls=false", "--insecure-registry=docker-registry.docker-registry.svc.cluster.local:5000"]
+      command: ["--tls=false", "--insecure-registry=master-registry:5000"]
   variables:
     DOCKER_HOST: "tcp://docker:2375"
     DOCKER_TLS_CERTDIR: ""
