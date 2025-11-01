@@ -28,6 +28,7 @@ fastapi:
       - name: http
         port: 8000
         targetPort: 8000
+        nodePort: 30000
         protocol: TCP
     type: LoadBalancer #ClusterIP
   livenessProbeSettings:
@@ -56,6 +57,7 @@ kafka:
       - name: external
         port: 9092
         targetPort: 9092
+        nodePort: 30001
         protocol: TCP
       - name: internal
         port: 29092
@@ -98,15 +100,16 @@ mlflow:
   portsSettings:
     ports:
       - name: http
-        port: 5000
-        targetPort: 5000
+        port: 5001
+        targetPort: 5001
+        nodePort: 30002
         protocol: TCP
     type: LoadBalancer #ClusterIP
   livenessProbeSettings:
     livenessProbe:
       httpGet:
         path: /health
-        port: 5000
+        port: 5001
       initialDelaySeconds: 30
       periodSeconds: 15
       timeoutSeconds: 30
@@ -115,7 +118,7 @@ mlflow:
     readinessProbe:
       httpGet:
         path: /health
-        port: 5000
+        port: 5001
       initialDelaySeconds: 30
       periodSeconds: 15
       timeoutSeconds: 30
@@ -137,6 +140,7 @@ streamlit:
       - name: http
         port: 8501
         targetPort: 8501
+        nodePort: 30003
         protocol: TCP
     type: LoadBalancer #ClusterIP
   livenessProbeSettings:

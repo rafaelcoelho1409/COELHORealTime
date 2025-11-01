@@ -91,8 +91,8 @@ portForward:
   - resourceType: service
     resourceName: coelho-realtime-mlflow-service
     namespace: coelho
-    port: 5000
-    localPort: 5000
+    port: 5001
+    localPort: 5001
     address: 0.0.0.0
   - resourceType: service
     resourceName: coelho-realtime-streamlit-service
