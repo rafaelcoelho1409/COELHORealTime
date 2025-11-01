@@ -79,6 +79,6 @@ update-manifest:
     # Commit and push changes with [skip ci] to prevent infinite loop
     - git add helm_k3d/values.yaml
     - git commit -m "ci update image tags to ${CI_COMMIT_SHA} [skip ci]" || echo "No changes to commit"
-    - git push http://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab-webservice-default.gitlab.svc.cluster.local:8181/public-projects/COELHORealTime.git HEAD:${CI_COMMIT_REF_NAME}
+    - git push http://gitlab-ci-token:${CI_PUSH_TOKEN:-${CI_JOB_TOKEN}}@gitlab-webservice-default.gitlab.svc.cluster.local:8181/public-projects/COELHORealTime.git HEAD:${CI_COMMIT_REF_NAME}
   only:
     - master
