@@ -3,6 +3,8 @@ kind: Application
 metadata:
   name: coelho-realtime
   namespace: argocd  # Where ArgoCD is installed
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
   annotations:
     # ArgoCD Image Updater Configuration
     # Automatically updates image tags when new images are pushed to k3d registry
