@@ -1,0 +1,14 @@
+mirrors:
+  "localhost:5000":
+    endpoint:
+      - "http://coelho-realtime-registry:5000"
+  "coelho-realtime-registry:5000":
+    endpoint:
+      - "http://coelho-realtime-registry:5000"
+configs:
+  "localhost:5000":
+    tls:
+      insecure_skip_verify: true
+  "coelho-realtime-registry:5000":
+    tls:
+      insecure_skip_verify: true

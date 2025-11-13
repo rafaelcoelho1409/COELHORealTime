@@ -54,6 +54,6 @@ build:
 # Note: Image tag updates are now handled automatically by ArgoCD Image Updater
 # When new images are pushed to Docker Registry, Image Updater will:
 #   1. Detect new :latest tags in the registry
-#   2. Update helm_k3d/values.yaml with new image tags
+#   2. Update k3d/helm/values.yaml with new image tags
 #   3. Commit changes back to Git
 #   4. ArgoCD auto-syncs and deploys new images

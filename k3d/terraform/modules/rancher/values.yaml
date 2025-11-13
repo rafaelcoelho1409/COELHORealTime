@@ -1,0 +1,30 @@
+# Rancher Helm Chart Values
+# Configured for k3d master cluster with NodePort service
+# Access via localhost:7080 (works with Tailscale SSH tunneling)
+
+# Hostname - use localhost for NodePort access
+hostname: localhost
+
+# Number of Rancher server replicas
+replicas: 1
+
+# Bootstrap password (change on first login)
+bootstrapPassword: admin
+
+# TLS configuration - external (no cert-manager)
+tls: external
+
+# Ingress - DISABLED (using NodePort instead)
+ingress:
+  enabled: false
+
+# Service configuration - NodePort with specific ports
+service:
+  type: NodePort
+  annotations: {}
+
+# Additional configuration to set specific NodePort values
+# These need to be patched after installation since Rancher chart doesn't expose them directly
+rancherImage: rancher/rancher
+rancherImageTag: v2.9.3
+rancherImagePullPolicy: IfNotPresent

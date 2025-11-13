@@ -28,7 +28,7 @@ spec:
     # repoURL: http://localhost:8090/public-projects/COELHORealTime.git
     repoURL: http://gitlab-webservice-default.gitlab.svc.cluster.local:8181/public-projects/COELHORealTime.git
     targetRevision: master  # Your current branch (from git status)
-    path: helm_k3d
+    path: k3d/helm
     helm:
       valueFiles:
         - values.yaml

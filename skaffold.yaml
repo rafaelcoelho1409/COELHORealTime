@@ -58,7 +58,7 @@ build:
           - src: "**/*.json"
             dest: /app
   local:
-    push: false  # Don't push to registry for local development
+    push: true  # Push to localhost:5000, K3d registry mirrors handle the rest
     useBuildkit: false
     #useBuildkit: true
     useDockerCLI: true
@@ -68,7 +68,7 @@ manifests:
   helm:
     releases:
       - name: coelho-realtime
-        chartPath: ./helm_k3d
+        chartPath: ./k3d/helm
         namespace: coelho
         createNamespace: true
         setValueTemplates:
@@ -165,7 +165,7 @@ profiles:
       helm:
         releases:
           - name: coelho-realtime
-            chartPath: ./helm_k3d
+            chartPath: ./k3d/helm
             namespace: coelho
             createNamespace: true
             setValueTemplates:
