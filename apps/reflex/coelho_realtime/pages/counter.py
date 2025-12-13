@@ -15,7 +15,7 @@ def counter() -> rx.Component:
             size = "7"),
         rx.hstack(
             rx.button(
-                "Decrement",
+                "Less",
                 color_scheme = "ruby",
                 on_click = CounterState.decrement,
             ),
@@ -24,7 +24,7 @@ def counter() -> rx.Component:
                 font_size = "2em"
             ),
             rx.button(
-                "Increment",
+                "Plus",
                 color_scheme = "grass",
                 on_click = CounterState.increment,
             ),

@@ -35,7 +35,7 @@ fastapi:
     livenessProbe:
       httpGet:
         path: /health
-        port: 8000
+        port: 8001
       initialDelaySeconds: 60  # Wait 1 minute for startup
       periodSeconds: 30      # Check every 30 seconds
       failureThreshold: 3    # Restart after 3 failures (90 seconds of unresponsiveness)
