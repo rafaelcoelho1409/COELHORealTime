@@ -1,12 +1,10 @@
 import reflex as rx
+from ..resources import coelho_realtime_navbar
+from ..state import State
+
 
 def index() -> rx.Component:
-    return rx.container(
-        rx.heading(
-            "Transaction Fraud Detection", 
-            size = "7"),
-        rx.link(
-            "Back to Home", 
-            href = "/"),
-        padding = "2em",
+    return rx.vstack(
+        coelho_realtime_navbar(),
+        align_items = "center"
     )

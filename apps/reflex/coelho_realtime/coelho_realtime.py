@@ -1,7 +1,10 @@
 import reflex as rx
 from .pages import (
     home, 
-    transaction_fraud_detection, 
+    transaction_fraud_detection,
+    estimated_time_of_arrival,
+    e_commerce_customer_interactions,
+    #sales_forecasting,
     counter
 )
 
@@ -17,6 +20,21 @@ app.add_page(
     route = "/transaction-fraud-detection",
     title = "Transaction Fraud Detection - COELHO RealTime"
 )
+app.add_page(
+    estimated_time_of_arrival.index,
+    route = "/estimated-time-of-arrival",
+    title = "Estimated Time of Arrival - COELHO RealTime"
+)
+app.add_page(
+    e_commerce_customer_interactions.index,
+    route = "/e-commerce-customer-interactions",
+    title = "E-Commerce Customer Interactions - COELHO RealTime"
+)
+#app.add_page(
+#    sales_forecasting.index,
+#    route = "/sales-forecasting",
+#    title = "Sales Forecasting - COELHO RealTime"
+#)
 app.add_page(
     counter.counter, 
     route = "/counter", 

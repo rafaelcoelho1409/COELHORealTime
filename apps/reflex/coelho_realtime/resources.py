@@ -1,4 +1,5 @@
 import reflex as rx
+from .state import State
 
 def navbar_link(text: str, url: str) -> rx.Component:
     return rx.link(
@@ -6,7 +7,9 @@ def navbar_link(text: str, url: str) -> rx.Component:
             text, 
             size = "4", 
             weight = "medium"), 
-            href = url)
+            href = url,
+            on_click = State.change_page_name(text),
+        )
 
 
 def coelho_realtime_navbar() -> rx.Component:
@@ -21,6 +24,14 @@ def coelho_realtime_navbar() -> rx.Component:
                 ),
                 rx.heading(
                     "COELHO RealTime",
+                    size = "7",
+                    weight = "bold"
+                ),
+                rx.separator(
+                    orientation = "vertical",
+                    size = "3"),
+                rx.heading(
+                    State.page_name,
                     size = "7",
                     weight = "bold"
                 ),
