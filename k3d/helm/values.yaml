@@ -15,7 +15,7 @@ registry:
 fastapi:
   image: coelho-realtime-fastapi:latest
   imagePullPolicy: IfNotPresent
-  replicas: 1
+  replicas: 0  # Disabled for Reflex-only development
   resources:
     requests:
       memory: "512Mi"
@@ -44,7 +44,7 @@ fastapi:
 kafka:
   image: coelho-realtime-kafka:latest
   imagePullPolicy: IfNotPresent
-  replicas: 1
+  replicas: 0  # Disabled for Reflex-only development
   resources:
     requests:
       memory: "1Gi"
@@ -86,48 +86,10 @@ kafka:
       failureThreshold: 6
 
 
-mlflow:
-  image: coelho-realtime-mlflow:latest
-  imagePullPolicy: IfNotPresent
-  replicas: 1
-  resources:
-    requests:
-      memory: "512Mi"
-      cpu: "250m"
-    limits:
-      memory: "1Gi"
-      cpu: "500m"
-  portsSettings:
-    ports:
-      - name: http
-        port: 5001
-        targetPort: 5000
-        nodePort: 30002
-        protocol: TCP
-    type: LoadBalancer #ClusterIP
-  livenessProbeSettings:
-    livenessProbe:
-      httpGet:
-        path: /health
-        port: 5000
-      initialDelaySeconds: 30
-      periodSeconds: 15
-      timeoutSeconds: 30
-      failureThreshold: 5
-  readinessProbeSettings:
-    readinessProbe:
-      httpGet:
-        path: /health
-        port: 5000
-      initialDelaySeconds: 30
-      periodSeconds: 15
-      timeoutSeconds: 30
-      failureThreshold: 5
-
 streamlit:
   image: coelho-realtime-streamlit:latest
   imagePullPolicy: IfNotPresent
-  replicas: 1
+  replicas: 0  # Disabled for Reflex-only development
   resources:
     requests:
       memory: "256Mi"
@@ -159,3 +121,89 @@ streamlit:
       initialDelaySeconds: 10
       periodSeconds: 10
       failureThreshold: 3
+
+# MLflow subchart configuration
+mlflow:
+  enabled: false  # Disabled for Reflex-only development
+  service:
+    type: ClusterIP
+    port: 5000
+    containerPort: 5000
+  backendStore:
+    defaultSqlitePath: ":memory:"
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+
+
+reflex:
+  image: coelho-realtime-reflex:latest
+  imagePullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+  portsSettings:
+    ports:
+      - name: frontend
+        port: 3000
+        targetPort: 3000
+        nodePort: 30004
+        protocol: TCP
+      - name: backend
+        port: 8000
+        targetPort: 8000
+        nodePort: 30005
+        protocol: TCP
+    type: LoadBalancer
+  livenessProbeSettings:
+    livenessProbe:
+      tcpSocket:
+        port: 3000
+      initialDelaySeconds: 120
+      periodSeconds: 20
+      failureThreshold: 5
+  readinessProbeSettings:
+    readinessProbe:
+      tcpSocket:
+        port: 3000
+      initialDelaySeconds: 90
+      periodSeconds: 10
+      failureThreshold: 6
+
+# Redis configuration (Bitnami Redis chart)
+# Used by Reflex for state management in production
+redis:
+  enabled: true
+  architecture: standalone  # Use 'replication' for high availability
+  auth:
+    enabled: false  # Disable authentication for simplicity in local k3d
+  master:
+    persistence:
+      enabled: true
+      size: 2Gi
+      storageClass: local-path
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "250m"
+  # Redis configuration for Reflex optimization
+  commonConfiguration: |-
+    # Enable AOF persistence for better durability
+    appendonly yes
+    # Disable RDB snapshots (we use AOF)
+    save ""
+    # Set max memory and eviction policy
+    maxmemory 256mb
+    maxmemory-policy allkeys-lru

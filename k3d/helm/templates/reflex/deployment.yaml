@@ -1,4 +1,4 @@
-{{- $appName := "mlflow" -}}
+{{- $appName := "reflex" -}}
 {{- $appConfig := index $.Values $appName }}
 
 apiVersion: apps/v1

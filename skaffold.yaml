@@ -5,50 +5,52 @@ metadata:
 
 build:
   artifacts:
-    # FastAPI service
-    - image: coelho-realtime-fastapi
-      context: ./apps/fastapi
+    ## FastAPI service
+    #- image: coelho-realtime-fastapi
+    #  context: ./apps/fastapi
+    #  docker:
+    #    dockerfile: Dockerfile.fastapi
+    #  sync:
+    #    manual:
+    #      - src: "**/*.py"
+    #        dest: /app
+    #      - src: "requirements.txt"
+    #        dest: /app
+    #      - src: "**/*.json"
+    #        dest: /app
+    #      - src: "**/*.yaml"
+    #        dest: /app
+    #      - src: "**/*.yml"
+    #        dest: /app
+    ## Kafka service
+    #- image: coelho-realtime-kafka
+    #  context: ./apps/kafka
+    #  docker:
+    #    dockerfile: Dockerfile.kafka
+    #  sync:
+    #    manual:
+    #      - src: "**/*.py"
+    #        dest: /app
+    #      - src: "requirements.txt"
+    #        dest: /app
+    ## Streamlit service
+    #- image: coelho-realtime-streamlit
+    #  context: ./apps/streamlit
+    #  docker:
+    #    dockerfile: Dockerfile.streamlit
+    #  sync:
+    #    manual:
+    #      - src: "**/*.py"
+    #        dest: /app
+    #      - src: "requirements.txt"
+    #        dest: /app
+    #      - src: "**/*.json"
+    #        dest: /app
+    # Reflex service
+    - image: coelho-realtime-reflex
+      context: ./apps/reflex
       docker:
-        dockerfile: Dockerfile.fastapi
-      sync:
-        manual:
-          - src: "**/*.py"
-            dest: /app
-          - src: "requirements.txt"
-            dest: /app
-          - src: "**/*.json"
-            dest: /app
-          - src: "**/*.yaml"
-            dest: /app
-          - src: "**/*.yml"
-            dest: /app
-    # Kafka service
-    - image: coelho-realtime-kafka
-      context: ./apps/kafka
-      docker:
-        dockerfile: Dockerfile.kafka
-      sync:
-        manual:
-          - src: "**/*.py"
-            dest: /app
-          - src: "requirements.txt"
-            dest: /app
-    # MLflow service
-    - image: coelho-realtime-mlflow
-      context: ./apps/mlflow
-      docker:
-        dockerfile: Dockerfile.mlflow
-      sync:
-        manual:
-          - src: "**/*.py"
-            dest: /app
-          - src: "requirements.txt"
-            dest: /app
-    # Streamlit service
-    - image: coelho-realtime-streamlit
-      context: ./apps/streamlit
-      docker:
-        dockerfile: Dockerfile.streamlit
+        dockerfile: Dockerfile.reflex
       sync:
         manual:
           - src: "**/*.py"
@@ -60,7 +62,6 @@ build:
   local:
     push: true  # Push to localhost:5000, K3d registry mirrors handle the rest
     useBuildkit: false
-    #useBuildkit: true
     useDockerCLI: true
 
 # MANIFESTS at top level (v4beta13 structure)
@@ -69,36 +70,48 @@ manifests:
     releases:
       - name: coelho-realtime
         chartPath: ./k3d/helm
-        namespace: coelho
+        namespace: coelho-realtime
         createNamespace: true
         setValueTemplates:
-          # Skaffold will automatically replace these with built image tags
-          fastapi.image: "{{.IMAGE_NAME_coelho_realtime_fastapi}}:{{.IMAGE_TAG_coelho_realtime_fastapi}}"
-          kafka.image: "{{.IMAGE_NAME_coelho_realtime_kafka}}:{{.IMAGE_TAG_coelho_realtime_kafka}}"
-          mlflow.image: "{{.IMAGE_NAME_coelho_realtime_mlflow}}:{{.IMAGE_TAG_coelho_realtime_mlflow}}"
-          streamlit.image: "{{.IMAGE_NAME_coelho_realtime_streamlit}}:{{.IMAGE_TAG_coelho_realtime_streamlit}}"
+          ## Skaffold will automatically replace these with built image tags
+          #fastapi.image: "{{.IMAGE_NAME_coelho_realtime_fastapi}}:{{.IMAGE_TAG_coelho_realtime_fastapi}}"
+          #kafka.image: "{{.IMAGE_NAME_coelho_realtime_kafka}}:{{.IMAGE_TAG_coelho_realtime_kafka}}"
+          #streamlit.image: "{{.IMAGE_NAME_coelho_realtime_streamlit}}:{{.IMAGE_TAG_coelho_realtime_streamlit}}"
+          reflex.image: "{{.IMAGE_NAME_coelho_realtime_reflex}}:{{.IMAGE_TAG_coelho_realtime_reflex}}"
 
 deploy:
   helm: {}
 
 portForward:
+  #- resourceType: service
+  #  resourceName: coelho-realtime-fastapi-service
+  #  namespace: coelho-realtime
+  #  port: 8000
+  #  localPort: 8000
+  #  address: 0.0.0.0
+  #- resourceType: service
+  #  resourceName: coelho-realtime-mlflow
+  #  namespace: coelho-realtime
+  #  port: 5000
+  #  localPort: 5001
+  #  address: 0.0.0.0
+  #- resourceType: service
+  #  resourceName: coelho-realtime-streamlit-service
+  #  namespace: coelho-realtime
+  #  port: 8501
+  #  localPort: 8501
+  #  address: 0.0.0.0
   - resourceType: service
-    resourceName: coelho-realtime-fastapi-service
-    namespace: coelho
+    resourceName: coelho-realtime-reflex-service
+    namespace: coelho-realtime
+    port: 3000
+    localPort: 3000
+    address: 0.0.0.0
+  - resourceType: service
+    resourceName: coelho-realtime-reflex-service
+    namespace: coelho-realtime
     port: 8000
     localPort: 8000
-    address: 0.0.0.0
-  - resourceType: service
-    resourceName: coelho-realtime-mlflow-service
-    namespace: coelho
-    port: 5001
-    localPort: 5001
-    address: 0.0.0.0
-  - resourceType: service
-    resourceName: coelho-realtime-streamlit-service
-    namespace: coelho
-    port: 8501
-    localPort: 8501
     address: 0.0.0.0
   #- resourceType: service
   #  resourceName: coelho-realtime-grafana-service
@@ -120,41 +133,41 @@ profiles:
       - command: dev
     build:
       artifacts:
-        # FastAPI - Use infer for automatic detection
-        - image: coelho-realtime-fastapi
-          context: ./apps/fastapi
+        ## FastAPI - Use infer for automatic detection
+        #- image: coelho-realtime-fastapi
+        #  context: ./apps/fastapi
+        #  docker:
+        #    dockerfile: Dockerfile.fastapi
+        #  sync:
+        #    infer:
+        #      - "**/*.py"
+        #      - "requirements.txt"
+        #      - "**/*.json"
+        ## Kafka - Use infer for automatic detection
+        #- image: coelho-realtime-kafka
+        #  context: ./apps/kafka
+        #  docker:
+        #    dockerfile: Dockerfile.kafka
+        #  sync:
+        #    infer:
+        #      - "**/*.py"
+        #      - "requirements.txt"
+        #      - "**/*.json"
+        ## Streamlit - Use infer for automatic detection  
+        #- image: coelho-realtime-streamlit
+        #  context: ./apps/streamlit
+        #  docker:
+        #    dockerfile: Dockerfile.streamlit
+        #  sync:
+        #    infer:
+        #      - "**/*.py"
+        #      - "requirements.txt"
+        #      - "**/*.json"
+        # Reflex - Use infer for automatic detection  
+        - image: coelho-realtime-reflex
+          context: ./apps/reflex
           docker:
-            dockerfile: Dockerfile.fastapi
-          sync:
-            infer:
-              - "**/*.py"
-              - "requirements.txt"
-              - "**/*.json"
-        # Kafka - Use infer for automatic detection
-        - image: coelho-realtime-kafka
-          context: ./apps/kafka
-          docker:
-            dockerfile: Dockerfile.kafka
-          sync:
-            infer:
-              - "**/*.py"
-              - "requirements.txt"
-              - "**/*.json"
-        # MLflow - Use infer for automatic detection
-        - image: coelho-realtime-mlflow
-          context: ./apps/mlflow
-          docker:
-            dockerfile: Dockerfile.mlflow
-          sync:
-            infer:
-              - "**/*.py"
-              - "requirements.txt"
-              - "**/*.json"
-        # Streamlit - Use infer for automatic detection  
-        - image: coelho-realtime-streamlit
-          context: ./apps/streamlit
-          docker:
-            dockerfile: Dockerfile.streamlit
+            dockerfile: Dockerfile.reflex
           sync:
             infer:
               - "**/*.py"
@@ -166,12 +179,12 @@ profiles:
         releases:
           - name: coelho-realtime
             chartPath: ./k3d/helm
-            namespace: coelho
+            namespace: coelho-realtime
             createNamespace: true
             setValueTemplates:
-              fastapi.image: "{{.IMAGE_NAME_coelho_realtime_fastapi}}:{{.IMAGE_TAG_coelho_realtime_fastapi}}"
-              kafka.image: "{{.IMAGE_NAME_coelho_realtime_kafka}}:{{.IMAGE_TAG_coelho_realtime_kafka}}"
-              mlflow.image: "{{.IMAGE_NAME_coelho_realtime_mlflow}}:{{.IMAGE_TAG_coelho_realtime_mlflow}}"
-              streamlit.image: "{{.IMAGE_NAME_coelho_realtime_streamlit}}:{{.IMAGE_TAG_coelho_realtime_streamlit}}"
+              #fastapi.image: "{{.IMAGE_NAME_coelho_realtime_fastapi}}:{{.IMAGE_TAG_coelho_realtime_fastapi}}"
+              #kafka.image: "{{.IMAGE_NAME_coelho_realtime_kafka}}:{{.IMAGE_TAG_coelho_realtime_kafka}}"
+              #streamlit.image: "{{.IMAGE_NAME_coelho_realtime_streamlit}}:{{.IMAGE_TAG_coelho_realtime_streamlit}}"
+              reflex.image: "{{.IMAGE_NAME_coelho_realtime_reflex}}:{{.IMAGE_TAG_coelho_realtime_reflex}}"
     deploy:
       helm: {}

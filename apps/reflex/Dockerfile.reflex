@@ -1,0 +1,24 @@
+FROM python:3.13
+
+# Install Redis server and utilities
+RUN apt-get update && apt-get install -y redis-server procps curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install uv for fast dependency installation
+RUN pip install uv --no-cache-dir
+
+WORKDIR /app
+COPY . .
+
+# Install dependencies with uv (faster than pip)
+RUN uv pip install --system -r requirements.txt
+
+# Initialize Reflex
+RUN reflex init
+
+# Expose standard Reflex ports
+EXPOSE 3000
+EXPOSE 8000
+
+# Run the app
+ENTRYPOINT ["/bin/bash", "/app/entrypoint.sh"]

@@ -1,4 +1,4 @@
-{{- $appName := "mlflow" -}}
+{{- $appName := "reflex" -}}
 
 apiVersion: v1
 {{- include "coelho-realtime.ServiceSettings" (dict "appName" $appName "root" .) | nindent 0 }}

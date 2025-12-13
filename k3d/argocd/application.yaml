@@ -8,20 +8,20 @@ metadata:
   annotations:
     # ArgoCD Image Updater Configuration
     # Automatically updates image tags when new images are pushed to k3d registry
-    argocd-image-updater.argoproj.io/image-list: fastapi=master-registry:5000/coelho-realtime-fastapi,kafka=master-registry:5000/coelho-realtime-kafka,mlflow=master-registry:5000/coelho-realtime-mlflow,streamlit=master-registry:5000/coelho-realtime-streamlit
+    argocd-image-updater.argoproj.io/image-list: fastapi=master-registry:5000/coelho-realtime-fastapi,kafka=master-registry:5000/coelho-realtime-kafka,streamlit=master-registry:5000/coelho-realtime-streamlit,reflex=master-registry:5000/coelho-realtime-reflex
     # Write changes back to Git
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/git-creds
     argocd-image-updater.argoproj.io/git-branch: master
     # Update strategy: use latest tag
     argocd-image-updater.argoproj.io/fastapi.update-strategy: latest
     argocd-image-updater.argoproj.io/kafka.update-strategy: latest
-    argocd-image-updater.argoproj.io/mlflow.update-strategy: latest
     argocd-image-updater.argoproj.io/streamlit.update-strategy: latest
+    argocd-image-updater.argoproj.io/reflex.update-strategy: latest
     # Helm parameter paths for each image
     argocd-image-updater.argoproj.io/fastapi.helm.image-name: fastapi.image
     argocd-image-updater.argoproj.io/kafka.helm.image-name: kafka.image
-    argocd-image-updater.argoproj.io/mlflow.helm.image-name: mlflow.image
     argocd-image-updater.argoproj.io/streamlit.helm.image-name: streamlit.image
+    argocd-image-updater.argoproj.io/reflex.helm.image-name: reflex.image
 spec:
   project: default
   source:

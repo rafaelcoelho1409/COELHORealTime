@@ -38,11 +38,6 @@ build:
     - docker build -t ${REGISTRY}/coelho-realtime-kafka:${CI_COMMIT_SHA} -t ${REGISTRY}/coelho-realtime-kafka:latest ./apps/kafka -f ./apps/kafka/Dockerfile.kafka
     - docker push ${REGISTRY}/coelho-realtime-kafka:${CI_COMMIT_SHA}
     - docker push ${REGISTRY}/coelho-realtime-kafka:latest
-    # Build and push MLflow
-    - echo "Building MLflow image..."
-    - docker build -t ${REGISTRY}/coelho-realtime-mlflow:${CI_COMMIT_SHA} -t ${REGISTRY}/coelho-realtime-mlflow:latest ./apps/mlflow -f ./apps/mlflow/Dockerfile.mlflow
-    - docker push ${REGISTRY}/coelho-realtime-mlflow:${CI_COMMIT_SHA}
-    - docker push ${REGISTRY}/coelho-realtime-mlflow:latest
     # Build and push Streamlit
     - echo "Building Streamlit image..."
     - docker build -t ${REGISTRY}/coelho-realtime-streamlit:${CI_COMMIT_SHA} -t ${REGISTRY}/coelho-realtime-streamlit:latest ./apps/streamlit -f ./apps/streamlit/Dockerfile.streamlit

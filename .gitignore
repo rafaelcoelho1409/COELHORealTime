@@ -95,3 +95,5 @@ ordinal_encoders/
 *.json
 *.png
 .claude/
+**/helm/charts/
+Chart.lock

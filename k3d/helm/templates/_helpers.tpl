@@ -22,8 +22,10 @@ Common environment variables for all services
 {{- define "coelho-realtime.commonEnvVars" -}}
 FASTAPI_HOST: "coelho-realtime-fastapi-service"
 KAFKA_HOST: "coelho-realtime-kafka-service"
-MLFLOW_HOST: "coelho-realtime-mlflow-service"
+MLFLOW_HOST: "coelho-realtime-mlflow"
 STREAMLIT_HOST: "coelho-realtime-streamlit-service"
+REFLEX_HOST: "coelho-realtime-reflex-service"
+REDIS_HOST: "redis://coelho-realtime-redis-master:6379"
 {{- end -}}
 
 

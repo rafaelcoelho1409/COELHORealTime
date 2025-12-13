@@ -4,7 +4,7 @@ export GIT_PYTHON_REFRESH=quiet
 
 # Create and activate the virtual environment
 rm -rf .venv
-uv venv --python 3.12
+uv venv --python 3.13
 source .venv/bin/activate
 
 # Install dependencies
