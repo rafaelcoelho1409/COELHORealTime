@@ -1,7 +1,7 @@
-FROM python:3.13
+FROM python:3.13-slim
 
 # Install Redis server and utilities
-RUN apt-get update && apt-get install -y redis-server procps curl && \
+RUN apt-get update && apt-get install -y redis-server procps curl unzip && \
     rm -rf /var/lib/apt/lists/*
 
 # Install uv for fast dependency installation

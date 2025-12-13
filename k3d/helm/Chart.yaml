@@ -8,10 +8,10 @@ appVersion: "1.0.0"
 # Commented out for Reflex-only development
 # To re-enable: uncomment, run 'helm dependency build', and set mlflow.enabled: true in values.yaml
 dependencies:
-#  - name: mlflow
-#    version: "1.8.1"
-#    repository: "https://community-charts.github.io/helm-charts"
-#    condition: mlflow.enabled
+  - name: mlflow
+    version: "1.8.1"
+    repository: "https://community-charts.github.io/helm-charts"
+    condition: mlflow.enabled
   - name: redis
     version: "24.0.8"
     repository: "https://charts.bitnami.com/bitnami"

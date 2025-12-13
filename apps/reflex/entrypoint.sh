@@ -7,7 +7,6 @@ if [[ "${REFLEX_REDIS_URL:-redis://localhost}" == "redis://localhost"* ]]; then
     # Standalone Docker mode - start Redis locally
     echo "Starting local Redis server..."
     redis-server --daemonize yes
-
     # Wait for Redis to be ready
     echo "Waiting for Redis..."
     timeout 10 bash -c 'until redis-cli ping > /dev/null 2>&1; do sleep 0.5; done' || echo "Warning: Redis may not be ready"
@@ -25,7 +24,7 @@ if [ "$ENV_MODE" = "PROD" ]; then
     echo "  Backend port: ${REFLEX_BACKEND_PORT:-8000}"
     echo "  API URL: ${REFLEX_API_URL:-http://localhost:8000}"
     echo "  Redis URL: ${REFLEX_REDIS_URL:-redis://localhost}"
-    exec reflex run --env prod --loglevel info
+    reflex run --env prod --loglevel info
 else
     echo "Starting Reflex app in DEVELOPMENT mode with hot-reload..."
     # For development, create venv if needed
@@ -34,13 +33,10 @@ else
         uv venv --python 3.13
     fi
     source .venv/bin/activate
-
     # Install/update dependencies
     echo "Installing dependencies..."
     uv pip install -r requirements.txt
-
     # Initialize Reflex
     reflex init --loglevel error || true
-
-    exec reflex run --env dev --loglevel debug
+    reflex run --env dev --loglevel debug
 fi

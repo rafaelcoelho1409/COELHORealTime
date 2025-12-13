@@ -15,7 +15,7 @@ registry:
 fastapi:
   image: coelho-realtime-fastapi:latest
   imagePullPolicy: IfNotPresent
-  replicas: 0  # Disabled for Reflex-only development
+  replicas: 1
   resources:
     requests:
       memory: "512Mi"
@@ -26,8 +26,8 @@ fastapi:
   portsSettings:
     ports:
       - name: http
-        port: 8000
-        targetPort: 8000
+        port: 8001
+        targetPort: 8001
         nodePort: 30000
         protocol: TCP
     type: LoadBalancer #ClusterIP
@@ -44,7 +44,7 @@ fastapi:
 kafka:
   image: coelho-realtime-kafka:latest
   imagePullPolicy: IfNotPresent
-  replicas: 0  # Disabled for Reflex-only development
+  replicas: 1
   resources:
     requests:
       memory: "1Gi"
@@ -89,7 +89,7 @@ kafka:
 streamlit:
   image: coelho-realtime-streamlit:latest
   imagePullPolicy: IfNotPresent
-  replicas: 0  # Disabled for Reflex-only development
+  replicas: 1
   resources:
     requests:
       memory: "256Mi"
@@ -124,7 +124,6 @@ streamlit:
 
 # MLflow subchart configuration
 mlflow:
-  enabled: false  # Disabled for Reflex-only development
   service:
     type: ClusterIP
     port: 5000
