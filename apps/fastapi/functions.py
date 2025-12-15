@@ -1,8 +1,10 @@
 import pickle
 import os
 import sys
+import time
 from typing import Any, Dict, Hashable
 from kafka import KafkaConsumer
+from kafka.errors import NoBrokersAvailable
 import json
 import pandas as pd
 import numpy as np
@@ -582,8 +584,8 @@ def load_or_create_model(project_name, model_name, folder_path = None):
     return model
 
 
-def create_consumer(project_name):
-    """Create and return Kafka consumer"""
+def create_consumer(project_name, max_retries: int = 5, retry_delay: float = 5.0):
+    """Create and return Kafka consumer with retry logic."""
     consumer_name_dict = {
         "Transaction Fraud Detection": "transaction_fraud_detection",
         "Estimated Time of Arrival": "estimated_time_of_arrival",
@@ -591,17 +593,33 @@ def create_consumer(project_name):
         "Sales Forecasting": "sales_forecasting"
     }
     KAFKA_TOPIC = consumer_name_dict[project_name]
-    return KafkaConsumer(
-        KAFKA_TOPIC,
-        bootstrap_servers = KAFKA_BROKERS,
-        auto_offset_reset = 'earliest',
-        value_deserializer = lambda v: json.loads(v.decode('utf-8')),
-        group_id = f'{KAFKA_TOPIC}_group'
-    )
+
+    for attempt in range(max_retries):
+        try:
+            consumer = KafkaConsumer(
+                KAFKA_TOPIC,
+                bootstrap_servers=KAFKA_BROKERS,
+                auto_offset_reset='earliest',
+                value_deserializer=lambda v: json.loads(v.decode('utf-8')),
+                group_id=f'{KAFKA_TOPIC}_group'
+            )
+            print(f"Kafka consumer created for {project_name}")
+            return consumer
+        except NoBrokersAvailable as e:
+            if attempt < max_retries - 1:
+                print(f"Kafka not available for {project_name}, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})")
+                time.sleep(retry_delay)
+            else:
+                print(f"Failed to connect to Kafka for {project_name} after {max_retries} attempts. Continuing without consumer.")
+                return None
+        except Exception as e:
+            print(f"Error creating Kafka consumer for {project_name}: {e}")
+            return None
+    return None
 
 
 def load_or_create_data(consumer, project_name):
-    """Load existing model or create a new one"""
+    """Load existing data or create from Kafka consumer."""
     data_name_dict = {
         "Transaction Fraud Detection": "transaction_fraud_detection.parquet",
         "Estimated Time of Arrival": "estimated_time_of_arrival.parquet",
@@ -609,16 +627,32 @@ def load_or_create_data(consumer, project_name):
         #"Sales Forecasting": "sales_forecasting.parquet"
     }
     DATA_PATH = f"data/{data_name_dict[project_name]}"
+
+    # Try to load from disk first
     try:
         data_df = pd.read_parquet(DATA_PATH)
         print("Data loaded from disk.")
-    except:
-        for message in consumer:
-            transaction = message.value
-            break
-        data_df = pd.DataFrame([transaction])
-        print(f"Creating data: {project_name}", file = sys.stderr)  
-    return data_df
+        return data_df
+    except FileNotFoundError:
+        print(f"Data file not found at {DATA_PATH}, attempting to load from Kafka...")
+    except Exception as e:
+        print(f"Error loading data from disk: {e}")
+
+    # Fall back to Kafka consumer if available
+    if consumer is not None:
+        try:
+            for message in consumer:
+                transaction = message.value
+                break
+            data_df = pd.DataFrame([transaction])
+            print(f"Creating data from Kafka: {project_name}", file=sys.stderr)
+            return data_df
+        except Exception as e:
+            print(f"Error loading data from Kafka: {e}")
+
+    # Return empty DataFrame if all else fails
+    print(f"Warning: No data available for {project_name}, returning empty DataFrame")
+    return pd.DataFrame()
 
 
 def process_batch_data(data, project_name):

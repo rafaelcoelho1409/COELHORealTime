@@ -35,7 +35,3 @@ app.add_page(
 #    route = "/sales-forecasting",
 #    title = "Sales Forecasting - COELHO RealTime"
 #)
-app.add_page(
-    counter.counter, 
-    route = "/counter", 
-    title = "Counter")

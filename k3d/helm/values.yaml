@@ -18,11 +18,11 @@ fastapi:
   replicas: 1
   resources:
     requests:
-      memory: "512Mi"
-      cpu: "300m"
+      memory: "8Gi"
+      cpu: "2000m"
     limits:
-      memory: "1536Mi"
-      cpu: "750m"
+      memory: "16Gi"
+      cpu: "4000m"
   portsSettings:
     ports:
       - name: http
@@ -36,9 +36,19 @@ fastapi:
       httpGet:
         path: /health
         port: 8001
-      initialDelaySeconds: 60  # Wait 1 minute for startup
-      periodSeconds: 30      # Check every 30 seconds
-      failureThreshold: 3    # Restart after 3 failures (90 seconds of unresponsiveness)
+      initialDelaySeconds: 120  # Wait 2 minutes for startup (model loading)
+      periodSeconds: 30         # Check every 30 seconds
+      timeoutSeconds: 10        # Allow 10 seconds for response (was 1s default!)
+      failureThreshold: 5       # Restart after 5 failures (150 seconds of unresponsiveness)
+  readinessProbeSettings:
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: 8001
+      initialDelaySeconds: 60
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
 
 
 kafka:
@@ -129,7 +139,11 @@ mlflow:
     port: 5000
     containerPort: 5000
   backendStore:
-    defaultSqlitePath: ":memory:"
+    # Use persistent SQLite instead of in-memory
+    defaultSqlitePath: "/mlflow-data/mlflow.db"
+  artifactRoot:
+    defaultArtifactRoot: "/mlflow-data/mlruns"
+    defaultArtifactsDestination: "/mlflow-data/mlartifacts"
   resources:
     requests:
       memory: "512Mi"
@@ -137,6 +151,18 @@ mlflow:
     limits:
       memory: "1Gi"
       cpu: "500m"
+  # Disable DNS rebinding protection for development environment
+  # Use "*" to allow all hosts, or specific hosts like "mlflow.company.com,192.168.*"
+  extraEnvVars:
+    MLFLOW_SERVER_ALLOWED_HOSTS: "*"
+  # Add persistent storage for SQLite database and artifacts
+  extraVolumes:
+    - name: mlflow-data
+      persistentVolumeClaim:
+        claimName: mlflow-data-pvc
+  extraVolumeMounts:
+    - name: mlflow-data
+      mountPath: /mlflow-data
 
 
 reflex:

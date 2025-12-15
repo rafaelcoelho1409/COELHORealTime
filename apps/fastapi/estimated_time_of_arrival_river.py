@@ -109,15 +109,19 @@ def main():
                             regression_metrics_dict[metric].update(y, prediction)
                         except Exception as e:
                             print(f"Error updating metric {metric}: {str(e)}")
-                        mlflow.log_metric(metric, regression_metrics_dict[metric].get())
+                        mlflow.log_metric(
+                            metric, 
+                            regression_metrics_dict[metric].get(), 
+                            step = message.offset)
                         #print(f"{metric}: {binary_classification_metrics_dict[metric].get():.2%}")
                     with open(ENCODERS_PATH, 'wb') as f:
                         pickle.dump(encoders, f)
                     mlflow.log_artifact(ENCODERS_PATH)
-                if message.offset % (BATCH_SIZE_OFFSET * 10) == 0:
+                if message.offset % (BATCH_SIZE_OFFSET) == 0:
                     MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
                     with open(MODEL_VERSION, 'wb') as f:
                         pickle.dump(model, f)
+                    mlflow.log_artifact(MODEL_VERSION)
                     data_df.to_parquet(DATA_PATH)
         except:
             print(f"Error processing message: {str(e)}")

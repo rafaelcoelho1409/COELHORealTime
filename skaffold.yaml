@@ -30,9 +30,9 @@ build:
       sync:
         manual:
           - src: "**/*.py"
-            dest: /app
+            dest: /producer
           - src: "requirements.txt"
-            dest: /app
+            dest: /producer
     # Streamlit service
     - image: coelho-realtime-streamlit
       context: ./apps/streamlit
@@ -132,16 +132,17 @@ profiles:
               - "**/*.py"
               - "requirements.txt"
               - "**/*.json"
-        # Kafka - Use infer for automatic detection
+        # Kafka - Use manual sync to /producer directory
         - image: coelho-realtime-kafka
           context: ./apps/kafka
           docker:
             dockerfile: Dockerfile.kafka
           sync:
-            infer:
-              - "**/*.py"
-              - "requirements.txt"
-              - "**/*.json"
+            manual:
+              - src: "**/*.py"
+                dest: /producer
+              - src: "requirements.txt"
+                dest: /producer
         # Streamlit - Use infer for automatic detection  
         - image: coelho-realtime-streamlit
           context: ./apps/streamlit

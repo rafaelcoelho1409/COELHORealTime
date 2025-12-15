@@ -4,12 +4,13 @@ from fastapi import (
     Request
 )
 from fastapi.responses import (
-    FileResponse, 
+    FileResponse,
     StreamingResponse
 )
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from pydantic import (
-    BaseModel, 
+    BaseModel,
     Field,
     field_validator
 )
@@ -28,7 +29,12 @@ import os
 import numpy as np
 import pandas as pd
 import io
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend before importing pyplot
 import matplotlib.pyplot as plt
+import asyncio
+from functools import lru_cache
+import time
 from functions import (
     ModelDataManager,
     process_sample,
@@ -51,7 +57,45 @@ from functions import (
 )
 
 
-MLFLOW_HOST = os.environ["MLFLOW_HOST"]
+MLFLOW_HOST = os.getenv("MLFLOW_HOST", "localhost")
+
+
+# Simple TTL cache for MLflow metrics
+class MLflowMetricsCache:
+    def __init__(self, ttl_seconds: int = 300):  # 5 minute TTL
+        self._cache: Dict[str, tuple[float, dict]] = {}
+        self._ttl = ttl_seconds
+    def get(self, key: str) -> Optional[dict]:
+        if key in self._cache:
+            timestamp, value = self._cache[key]
+            if time.time() - timestamp < self._ttl:
+                return value
+            del self._cache[key]
+        return None
+    def set(self, key: str, value: dict):
+        self._cache[key] = (time.time(), value)
+    def clear(self):
+        self._cache.clear()
+
+
+mlflow_cache = MLflowMetricsCache(ttl_seconds = 300)
+
+
+def _sync_get_mlflow_metrics(project_name: str, model_name: str) -> dict:
+    """Synchronous MLflow query - to be run in thread pool."""
+    experiment = mlflow.get_experiment_by_name(project_name)
+    if experiment is None:
+        raise ValueError(f"Experiment '{project_name}' not found in MLflow")
+    experiment_id = experiment.experiment_id
+    runs_df = mlflow.search_runs(
+        experiment_ids = [experiment_id],
+        max_results = 100  # Limit results to reduce memory
+    )
+    runs_df = runs_df[runs_df["tags.mlflow.runName"] == model_name]
+    if runs_df.empty:
+        raise ValueError(f"No runs found for model '{model_name}'")
+    run_df = runs_df.iloc[0]
+    return run_df.replace({np.nan: None}).to_dict()
 
 
 PROJECT_NAMES = [
@@ -97,7 +141,7 @@ def stop_current_model():
     healthcheck.current_training_status = f"Sending SIGTERM to model '{active_model_name}' (PID: {pid_to_stop}). Waiting for graceful shutdown (60s)..."
     try:
         process_to_stop.terminate() # Sends SIGTERM
-        process_to_stop.wait(timeout=60) # Wait for process to terminate
+        process_to_stop.wait(timeout = 60) # Wait for process to terminate
         if process_to_stop.poll() is not None: # Check if process has terminated
             print(f"Model '{active_model_name}' (PID: {pid_to_stop}) terminated gracefully after SIGTERM (exit code: {process_to_stop.returncode}).")
             healthcheck.current_training_status = f"Model '{active_model_name}' stopped gracefully (SIGTERM)."
@@ -121,8 +165,7 @@ def stop_current_model():
             print(f"Sending SIGKILL to model '{active_model_name}' (PID: {pid_to_stop}).")
             healthcheck.current_training_status = f"Sending SIGKILL to model '{active_model_name}' (PID: {pid_to_stop})."
             process_to_stop.kill() # Sends SIGKILL
-            process_to_stop.wait(timeout=10) # Wait for SIGKILL to take effect
-
+            process_to_stop.wait(timeout = 10) # Wait for SIGKILL to take effect
             if process_to_stop.poll() is not None:
                 print(f"Model '{active_model_name}' (PID: {pid_to_stop}) terminated after SIGKILL (exit code: {process_to_stop.returncode}).")
                 healthcheck.current_training_status = f"Model '{active_model_name}' stopped via SIGKILL."
@@ -276,7 +319,7 @@ class ECommerceCustomerInteractions(BaseModel):
 
     # Pydantic v2 validator syntax using @field_validator
     # Validator for quantity (handle potential float NaN input before int validation)
-    @field_validator('quantity', mode='before')
+    @field_validator('quantity', mode = 'before')
     @classmethod
     def check_quantity_is_finite_int(cls, v: Any) -> Optional[int]:
         """Convert float NaN to None before checking if input is valid Optional[int]."""
@@ -285,7 +328,7 @@ class ECommerceCustomerInteractions(BaseModel):
             return None
         return v # Let Pydantic validate if it's int or None
     # Add validator for the price field
-    @field_validator('price', mode='before')
+    @field_validator('price', mode = 'before')
     @classmethod
     def check_price_is_finite(cls, v: Any) -> Optional[float]:
         """
@@ -445,6 +488,16 @@ async def lifespan(app: FastAPI):
 ###---FastAPI App---###
 app = FastAPI(lifespan = lifespan)
 
+# Add CORS middleware for frontend access
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins = ["*"],  # Configure appropriately for production
+    allow_credentials = True,
+    allow_methods = ["*"],
+    allow_headers = ["*"],
+)
+
+
 @app.get("/health")
 async def health_check(request: Request):
     """
@@ -537,7 +590,8 @@ async def get_initial_sample(request: InitialSampleRequest):
             status_code = 503, 
             detail = "Initial transaction data sample is not loaded.")
     if request.project_name == "E-Commerce Customer Interactions":
-        initial_sample = ECommerceCustomerInteractions.model_validate(initial_sample_dict[request.project_name])
+        initial_sample = ECommerceCustomerInteractions.model_validate(
+            initial_sample_dict[request.project_name])
         return initial_sample
     else:
         return initial_sample_dict[request.project_name]
@@ -545,82 +599,71 @@ async def get_initial_sample(request: InitialSampleRequest):
 
 @app.post("/predict")
 async def predict(payload: dict):
-    #IMPORTANT OBSERVATION: payload must be something in this format:
-    #{project_name: PROJECT_NAME, model_name: MODEL_NAME} | {transaction: TransactionFraudDetection}
-    #{project_name: PROJECT_NAME, model_name: MODEL_NAME} | {eta_event: EstimatedTimeOfArrival}
-    #{project_name: PROJECT_NAME, model_name: MODEL_NAME} | {customer: ECommerceCustomerInteractions}
+    """
+    Make predictions using pre-loaded models.
+    Payload format: {project_name, model_name, ...feature_data}
+    """
     global encoders_dict, model_dict
-    x = payload
-    project_name = x["project_name"]
-    model_name = x["model_name"]
-    if model_dict[payload["project_name"]][payload["model_name"]] is None or encoders_dict[payload["project_name"]] is None:
+    project_name = payload.get("project_name")
+    model_name = payload.get("model_name")
+    if not project_name or not model_name:
         raise HTTPException(
-            status_code = 503, 
-            detail = "Model or encoders are not loaded.")
-    folder_name = project_name.lower().replace(' ', '_').replace("-", "_")
-    del x["project_name"]
-    del x["model_name"]
-    model = load_or_create_model(
-        project_name,
-        model_name,
-        f"models/{folder_name}")
-    if model_name in [
-        "ARFClassifier",
-        "ARFRegressor",
-        "DBSTREAM"
-    ]:
+            status_code = 400,
+            detail = "Missing required fields: project_name and model_name"
+        )
+    # Validate model and encoders are loaded
+    if project_name not in model_dict or model_name not in model_dict.get(project_name, {}):
+        raise HTTPException(
+            status_code = 503,
+            detail = f"Model '{model_name}' for project '{project_name}' is not loaded."
+        )
+    if project_name not in encoders_dict:
+        raise HTTPException(
+            status_code = 503,
+            detail = f"Encoders for project '{project_name}' are not loaded."
+        )
+    # Use pre-loaded model (don't reload!)
+    model = model_dict[project_name][model_name]
+    # Extract feature data (remove metadata fields)
+    x = {k: v for k, v in payload.items() if k not in ["project_name", "model_name"]}
+    if model_name in ["ARFClassifier", "ARFRegressor", "DBSTREAM"]:
         try:
-            encoders = load_or_create_encoders(
-                project_name,
-                "river"
-            )
-            processed_x, _ = process_sample(
-                x, 
-                encoders,
-                project_name) # Discard returned encoders if they are meant to be global state
+            # Use pre-loaded encoders
+            encoders = encoders_dict[project_name].get("river", {})
+            processed_x, _ = process_sample(x, encoders, project_name)
             if project_name == "Transaction Fraud Detection":
-                y_pred_proba = model.predict_proba_one(processed_x) # Use processed data
-                fraud_probability = y_pred_proba.get(1, 0.0) # Use 0.0 as default
+                y_pred_proba = model.predict_proba_one(processed_x)
+                fraud_probability = y_pred_proba.get(1, 0.0)
                 binary_prediction = 1 if fraud_probability >= 0.5 else 0
                 return {
                     "fraud_probability": fraud_probability,
                     "prediction": binary_prediction,
                 }
             elif project_name == "Estimated Time of Arrival":
-                y_pred = model.predict_one(processed_x) # Use processed data
-                return {
-                    "Estimated Time of Arrival": y_pred
-                }
+                y_pred = model.predict_one(processed_x)
+                return {"Estimated Time of Arrival": y_pred}
             elif project_name == "E-Commerce Customer Interactions":
-                y_pred = model.predict_one(processed_x) # Use processed data
-                return {
-                    "cluster": y_pred
-                }
-            #elif project_name == "Sales Forecasting":
-            #    y_pred = model.forecast(horizon = 1, xs = [processed_x]) # Use processed data
-            #    return {
-            #        "sales": y_pred
-            #    }
+                y_pred = model.predict_one(processed_x)
+                return {"cluster": y_pred}
         except Exception as e:
-            print(f"Error during prediction: {e}", file = sys.stderr)
+            print(f"Error during prediction: {e}", file=sys.stderr)
             raise HTTPException(
                 status_code = 500, 
                 detail = f"Prediction failed: {e}")
-    elif model_name in [
-        "XGBClassifier"
-    ]:
+    elif model_name in ["XGBClassifier"]:
         try:
-            encoders = load_or_create_encoders(
-                project_name,
-                "sklearn"
-            )
+            # Use pre-loaded encoders
+            encoders = encoders_dict[project_name].get("sklearn", {})
             if project_name == "Transaction Fraud Detection":
-                processed_x = process_sample(x, ..., project_name, library = "sklearn")
-                preprocessor = encoders["preprocessor"]
-                processed_x = pd.DataFrame(
-                    {x: [y] for x, y in processed_x.items()})
+                processed_x = process_sample(x, ..., project_name, library="sklearn")
+                preprocessor = encoders.get("preprocessor")
+                if preprocessor is None:
+                    raise HTTPException(
+                        status_code = 503, 
+                        detail = "Preprocessor not loaded")
+                processed_x = pd.DataFrame({k: [v] for k, v in processed_x.items()})
                 processed_x = preprocessor.transform(processed_x)
-                y_pred_proba = model.predict_proba(processed_x).tolist()[0] # Use processed data
+                y_pred_proba = model.predict_proba(processed_x).tolist()[0]
                 fraud_probability = y_pred_proba[1]
                 binary_prediction = 1 if fraud_probability >= 0.5 else 0
                 return {
@@ -628,10 +671,13 @@ async def predict(payload: dict):
                     "prediction": binary_prediction,
                 }
         except Exception as e:
-            print(f"Error during prediction: {e}", file = sys.stderr)
+            print(f"Error during prediction: {e}", file=sys.stderr)
             raise HTTPException(
                 status_code = 500, 
                 detail = f"Prediction failed: {e}")
+    raise HTTPException(
+        status_code = 400, 
+        detail = f"Unknown model: {model_name}")
         
         
 class OrdinalEncoderRequest(BaseModel):
@@ -666,16 +712,40 @@ class MLflowMetricsRequest(BaseModel):
 
 @app.post("/mlflow_metrics")
 async def get_mlflow_metrics(request: MLflowMetricsRequest):
-    experiment = mlflow.get_experiment_by_name(request.project_name)
-    experiment_id = experiment.experiment_id
-    runs_df = mlflow.search_runs(
-        experiment_ids = [experiment_id]
-    )
-    runs_df = runs_df[
-        runs_df["tags.mlflow.runName"] == request.model_name]
-    run_df = runs_df.iloc[0]
-    run_df = run_df.replace({np.nan: None}).to_dict()
-    return run_df
+    """Get MLflow metrics with caching and async execution."""
+    cache_key = f"{request.project_name}:{request.model_name}"
+    # Check cache first
+    cached_result = mlflow_cache.get(cache_key)
+    if cached_result is not None:
+        return cached_result
+    try:
+        # Run blocking MLflow call in thread pool with timeout
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                _sync_get_mlflow_metrics,
+                request.project_name,
+                request.model_name
+            ),
+            timeout = 30.0  # 30 second timeout
+        )
+        # Cache the result
+        mlflow_cache.set(cache_key, result)
+        return result
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code = 504,
+            detail = "MLflow query timed out after 30 seconds"
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code = 404, 
+            detail = str(e))
+    except Exception as e:
+        print(f"Error fetching MLflow metrics: {e}", file = sys.stderr)
+        raise HTTPException(
+            status_code = 500,
+            detail = f"Failed to fetch MLflow metrics: {str(e)}"
+        )
 
 
 @app.get("/cluster_counts")
@@ -725,7 +795,7 @@ async def switch_model(payload: dict):
                 status_code = 404, 
                 detail = f"Model key '{payload["model_key"]}' not found.")
     script_to_run = payload["model_key"]
-    command = ["python3", script_to_run] # Use the venv python
+    command = ["/app/.venv/bin/python3", "-u", script_to_run]
     try:
         print(f"Starting model: {payload["model_key"]} with script: {script_to_run}")
         # Start the new training script
@@ -774,74 +844,102 @@ async def get_current_model():
     return {"current_model": None, "status": "none running"}
 
 
-@app.post("/yellowbrick_metric", response_class = FileResponse)
-async def yellowbrick_metric(payload: dict):
-    PROJECT_NAME = payload["project_name"]
-    METRIC_TYPE = payload["metric_type"]
-    METRIC_NAME = payload["metric_name"]
-    # Ensure data is loaded for the requested project
-    data_manager.load_data(PROJECT_NAME)
-    if PROJECT_NAME == "Transaction Fraud Detection":
-        classes = list(set(data_manager.y_train.unique().tolist() + data_manager.y_test.unique().tolist()))
-        classes.sort()
-        fig_buf = io.BytesIO()
-        if METRIC_TYPE == "Classification":
+def _sync_generate_yellowbrick_plot(
+    project_name: str,
+    metric_type: str,
+    metric_name: str,
+    dm: ModelDataManager
+) -> bytes:
+    """Synchronous yellowbrick plot generation - runs in thread pool."""
+    dm.load_data(project_name)
+    if project_name != "Transaction Fraud Detection":
+        raise ValueError(f"Unsupported project: {project_name}")
+    classes = list(set(dm.y_train.unique().tolist() + dm.y_test.unique().tolist()))
+    classes.sort()
+    fig_buf = io.BytesIO()
+    yb_vis = None
+    try:
+        if metric_type == "Classification":
             yb_kwargs = yellowbrick_classification_kwargs(
-                PROJECT_NAME,
-                METRIC_NAME,
-                data_manager.y_train,
-                classes
+                project_name, metric_name, dm.y_train, classes
             )
             yb_vis = yellowbrick_classification_visualizers(
-                yb_kwargs,
-                data_manager.X_train,
-                data_manager.X_test,
-                data_manager.y_train,
-                data_manager.y_test,
+                yb_kwargs, dm.X_train, dm.X_test, dm.y_train, dm.y_test
             )
-            yb_vis.fig.savefig(fig_buf, format = "png")
-        elif METRIC_TYPE == "Feature Analysis":
+        elif metric_type == "Feature Analysis":
             yb_kwargs = yellowbrick_feature_analysis_kwargs(
-                PROJECT_NAME,
-                METRIC_NAME,
-                classes
+                project_name, metric_name, classes
             )
             yb_vis = yellowbrick_feature_analysis_visualizers(
-                yb_kwargs,
-                data_manager.X,
-                data_manager.y,
+                yb_kwargs, dm.X, dm.y
             )
-            yb_vis.fig.savefig(fig_buf, format = "png")
-        elif METRIC_TYPE == "Target":
-            labels = list(set(data_manager.y_train.unique().tolist() + data_manager.y_test.unique().tolist()))
-            features = data_manager.X_train.columns.tolist()
+        elif metric_type == "Target":
+            labels = list(set(dm.y_train.unique().tolist() + dm.y_test.unique().tolist()))
+            features = dm.X_train.columns.tolist()
             yb_kwargs = yellowbrick_target_kwargs(
-                PROJECT_NAME,
-                METRIC_NAME,
-                labels,
-                features
+                project_name, metric_name, labels, features
             )
-            yb_vis = yellowbrick_target_visualizers(
-                yb_kwargs,
-                data_manager.X,
-                data_manager.y,
-            )
-            yb_vis.fig.savefig(fig_buf, format = "png")
-        elif METRIC_TYPE == "Model Selection":
+            yb_vis = yellowbrick_target_visualizers(yb_kwargs, dm.X, dm.y)
+        elif metric_type == "Model Selection":
             yb_kwargs = yellowbrick_model_selection_kwargs(
-                PROJECT_NAME,
-                METRIC_NAME,
-                data_manager.y_train
+                project_name, metric_name, dm.y_train
             )
-            yb_vis = yellowbrick_model_selection_visualizers(
-                yb_kwargs,
-                data_manager.X,
-                data_manager.y,
-            )
-            yb_vis.fig.savefig(fig_buf, format = "png")
-        fig_buf.seek(0)
+            yb_vis = yellowbrick_model_selection_visualizers(yb_kwargs, dm.X, dm.y)
+        else:
+            raise ValueError(f"Unknown metric type: {metric_type}")
+        if yb_vis is not None:
+            yb_vis.fig.savefig(fig_buf, format="png", bbox_inches='tight')
+            fig_buf.seek(0)
+            return fig_buf.getvalue()
+        raise ValueError("Failed to generate visualization")
+    finally:
+        # CRITICAL: Proper matplotlib cleanup to prevent memory leaks
         plt.clf()
+        plt.close('all')
+        if fig_buf:
+            fig_buf.close()
+
+
+@app.post("/yellowbrick_metric", response_class = FileResponse)
+async def yellowbrick_metric(payload: dict):
+    """Generate yellowbrick visualizations asynchronously."""
+    project_name = payload.get("project_name")
+    metric_type = payload.get("metric_type")
+    metric_name = payload.get("metric_name")
+    if not all([project_name, metric_type, metric_name]):
+        raise HTTPException(
+            status_code = 400,
+            detail = "Missing required fields: project_name, metric_type, metric_name"
+        )
+    try:
+        # Run blocking visualization in thread pool with timeout
+        image_bytes = await asyncio.wait_for(
+            asyncio.to_thread(
+                _sync_generate_yellowbrick_plot,
+                project_name,
+                metric_type,
+                metric_name,
+                data_manager
+            ),
+            timeout = 120.0  # 2 minute timeout for complex visualizations
+        )
         return StreamingResponse(
-            fig_buf, 
-            media_type = "image/png")
+            io.BytesIO(image_bytes),
+            media_type = "image/png"
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code = 504,
+            detail = "Visualization generation timed out after 120 seconds"
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code = 400, 
+            detail = str(e))
+    except Exception as e:
+        print(f"Error generating yellowbrick plot: {e}", file = sys.stderr)
+        raise HTTPException(
+            status_code = 500,
+            detail = f"Failed to generate visualization: {str(e)}"
+        )
 

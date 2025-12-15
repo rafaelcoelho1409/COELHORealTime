@@ -211,16 +211,21 @@ def run_producer(event_rate_per_minute):
     # Calculate sleep time based on target rate
     target_events_per_second = event_rate_per_minute / 60.0
     base_sleep_time = 1.0 / target_events_per_second if target_events_per_second > 0 else 1.0
+    last_print_time = time.time()
+    message_count = 0
     try:
         while True:
             # Generate event
             interaction_event = generate_customer_event(event_rate_per_minute)
             if interaction_event:
                 producer.send(KAFKA_TOPIC, value=interaction_event)
-                ## Limit console output frequency for readability
-                #if random.random() < 0.05: # Print roughly 1 in 100 events
-                #    print("###--- E-Commerce Customer Interactions ---###")
-                #    pprint(interaction_event)
+                message_count += 1
+                # Print sample every 60 seconds
+                current_time = time.time()
+                if current_time - last_print_time >= 60:
+                    print(f"\n###--- E-Commerce Customer Interactions ({message_count} msgs sent) ---###")
+                    pprint(interaction_event)
+                    last_print_time = current_time
             # Adjust sleep time slightly to simulate variability and approximate target rate
             sleep_time = max(0.001, random.gauss(base_sleep_time, base_sleep_time * 0.3))
             time.sleep(sleep_time)

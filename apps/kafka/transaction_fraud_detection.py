@@ -194,6 +194,8 @@ def run_producer(
     high_value_fraud_probability):
     producer = create_producer()
     print("Starting to send transaction events...")
+    last_print_time = time.time()
+    message_count = 0
     try:
         while True:
             transaction = generate_transaction(
@@ -205,10 +207,13 @@ def run_producer(
                 high_value_fraud_probability
             )
             producer.send(KAFKA_TOPIC, value = transaction)
-            ## Limit console output frequency for readability
-            #if random.random() < 0.05:
-            #    print("###--- Transaction Fraud Detection ---###")
-            #    pprint(transaction)
+            message_count += 1
+            # Print sample every 60 seconds
+            current_time = time.time()
+            if current_time - last_print_time >= 60:
+                print(f"\n###--- Transaction Fraud Detection ({message_count} msgs sent) ---###")
+                pprint(transaction)
+                last_print_time = current_time
             # Simulate varying transaction rate
             time.sleep(random.uniform(0.05, 0.5))
     except KeyboardInterrupt:

@@ -162,20 +162,23 @@ def main():
                         print(f"Error updating metric: {str(e)}")
                     with open(ENCODERS_PATH, 'wb') as f:
                         pickle.dump(encoders, f)
-                    #mlflow.log_artifact(ENCODERS_PATH)
+                    mlflow.log_artifact(ENCODERS_PATH)
                     # Save samples_per_clusters
                     with open(CLUSTER_COUNTS_PATH, 'w') as f:
                         json.dump(dict(cluster_counts), f, indent = 4)
+                    mlflow.log_artifact(CLUSTER_COUNTS_PATH)
                     plain_dict_feature_counts = {
                         k: {fk: dict(fv) for fk, fv in v.items()}
                         for k, v in cluster_feature_counts.items()
                     }
                     with open(CLUSTER_FEATURE_COUNTS_PATH, 'w') as f:
                         json.dump(plain_dict_feature_counts, f, indent = 4)
-                if message.offset % (BATCH_SIZE_OFFSET * 10) == 0:
+                    mlflow.log_artifact(CLUSTER_FEATURE_COUNTS_PATH)
+                if message.offset % (BATCH_SIZE_OFFSET) == 0:
                     MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
                     with open(MODEL_VERSION, 'wb') as f:
                         pickle.dump(model, f)
+                    mlflow.log_artifact(MODEL_VERSION)
                     data_df.to_parquet(DATA_PATH)
         except Exception as e:
             print(f"Error processing message: {str(e)}")

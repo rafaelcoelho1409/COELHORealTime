@@ -29,23 +29,28 @@ os.makedirs("data", exist_ok = True)
 
 def main():
     # Initialize model and metrics
+    print(f"Connecting to MLflow at http://{MLFLOW_HOST}:5000")
     mlflow.set_tracking_uri(f"http://{MLFLOW_HOST}:5000")
     mlflow.set_experiment(PROJECT_NAME)
+    print(f"MLflow experiment '{PROJECT_NAME}' set successfully")
     encoders = load_or_create_encoders(
         PROJECT_NAME,
         "river"
     )
+    print("Encoders loaded")
     model = load_or_create_model(
         PROJECT_NAME,
         "ARFClassifier",
         MODEL_FOLDER
     )
+    print(f"Model loaded: {model.__class__.__name__}")
     # Create consumer
     consumer = create_consumer(PROJECT_NAME)
     print("Consumer started. Waiting for transactions...")
     data_df = load_or_create_data(
         consumer,
         PROJECT_NAME)
+    print(f"Initial data loaded with {len(data_df)} rows")
     binary_classification_metrics = [
         'Accuracy',
         'Precision',          # Typically for the positive class (Fraud)
@@ -58,7 +63,9 @@ def main():
         x: getattr(metrics, x)() for x in binary_classification_metrics
     }
     BATCH_SIZE_OFFSET = 100
+    print(f"Starting MLflow run with model: {model.__class__.__name__}")
     with mlflow.start_run(run_name = model.__class__.__name__):
+        print("MLflow run started, entering consumer loop...")
         try:
             for message in consumer:
                 transaction = message.value
@@ -101,21 +108,25 @@ def main():
                     print(f"Error updating metric {metric}: {str(e)}")
                 # Periodically log progress
                 if message.offset % BATCH_SIZE_OFFSET == 0:
-                    #print(f"Processed {message.offset} messages")
+                    print(f"Processed {message.offset} messages")
                     for metric in binary_classification_metrics:
                         try:
                             binary_classification_metrics_dict[metric].update(y, prediction)
                         except Exception as e:
                             print(f"Error updating metric {metric}: {str(e)}")
-                        mlflow.log_metric(metric, binary_classification_metrics_dict[metric].get())
+                        mlflow.log_metric(
+                            metric, 
+                            binary_classification_metrics_dict[metric].get(), 
+                            step = message.offset)
                         #print(f"{metric}: {binary_classification_metrics_dict[metric].get():.2%}")
                     with open(ENCODERS_PATH, 'wb') as f:
                         pickle.dump(encoders, f)
-                    #mlflow.log_artifact(ENCODERS_PATH)
-                if message.offset % (BATCH_SIZE_OFFSET * 10) == 0:
+                    mlflow.log_artifact(ENCODERS_PATH)
+                if message.offset % (BATCH_SIZE_OFFSET) == 0:
                     MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
                     with open(MODEL_VERSION, 'wb') as f:
                         pickle.dump(model, f)
+                    mlflow.log_artifact(MODEL_VERSION)
                     data_df.to_parquet(DATA_PATH)
         except Exception as e:
             print(f"Error processing message: {str(e)}")

@@ -185,6 +185,8 @@ def run_producer(
     """Runs the Kafka producer to continuously generate ETA prediction events."""
     producer = create_producer()
     print("Starting to send ETA prediction events...")
+    last_print_time = time.time()
+    message_count = 0
     try:
         while True:
             eta_event = generate_eta_event(
@@ -193,11 +195,13 @@ def run_producer(
                 incident_probability
             )
             producer.send(KAFKA_TOPIC, value = eta_event)
-            ## Limit console output frequency for readability
-            #if random.random() < 0.05:
-            #    # Print only key info to keep console cleaner
-            #    print("###--- Estimated Time of Arrival ---###")
-            #    pprint(eta_event)
+            message_count += 1
+            # Print sample every 60 seconds
+            current_time = time.time()
+            if current_time - last_print_time >= 60:
+                print(f"\n###--- Estimated Time of Arrival ({message_count} msgs sent) ---###")
+                pprint(eta_event)
+                last_print_time = current_time
             # Simulate varying request rate (e.g., new ride request every 0.1 to 1 second)
             time.sleep(random.uniform(0.1, 1.0))
     except KeyboardInterrupt:

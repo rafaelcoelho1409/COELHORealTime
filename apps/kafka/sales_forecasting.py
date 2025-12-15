@@ -194,6 +194,7 @@ def run_producer(time_scale_factor, max_events, initial_delay_s):
     current_sim_time = INITIAL_DATE
     events_sent = 0
     drift_change_interval_days = 180 # Change concept drift stage every ~6 months
+    last_print_time = time.time()
 
     try:
         while True:
@@ -208,10 +209,12 @@ def run_producer(time_scale_factor, max_events, initial_delay_s):
             producer.send(KAFKA_TOPIC, value=event)
             events_sent += 1
 
-            ## --- Output ---
-            #if events_sent % 100 == 0: # Log every 100 events
-            #    print("###--- Sales Forecasting ---###")
-            #    pprint(event)
+            # Print sample every 60 seconds
+            current_time = time.time()
+            if current_time - last_print_time >= 60:
+                print(f"\n###--- Sales Forecasting ({events_sent} msgs sent) ---###")
+                pprint(event)
+                last_print_time = current_time
 
             # --- Time Progression ---
             # Simulate processing for a store; multiple transactions can happen closely

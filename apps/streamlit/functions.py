@@ -46,7 +46,7 @@ def timestamp_to_api_response(timestamp_date, timestamp_time):
 def switch_active_model(
     key_to_activate, 
     project_name,
-    FASTAPI_URL = f"http://{FASTAPI_HOST}:8000"
+    FASTAPI_URL = f"http://{FASTAPI_HOST}:8001"
     ):
     try:
         response = requests.post(
@@ -252,7 +252,7 @@ def display_yellowbrick_metric(
     else:
         with st.spinner("Loading Yellowbrick Metric..."):
             yb_image = requests.post(
-                f"http://{FASTAPI_HOST}:8000/yellowbrick_metric",
+                f"http://{FASTAPI_HOST}:8001/yellowbrick_metric",
                 json = {
                     "project_name": project_name,
                     "metric_type": metric_type,
