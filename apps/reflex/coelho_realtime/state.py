@@ -2,6 +2,7 @@ import reflex as rx
 import os
 import asyncio
 import datetime as dt
+import plotly.graph_objects as go
 from .utils import httpx_client_post
 
 FASTAPI_HOST = os.getenv("FASTAPI_HOST", "localhost")
@@ -73,62 +74,12 @@ class State(rx.State):
         """Get Transaction Fraud Detection form data."""
         return self.form_data.get("Transaction Fraud Detection", {})
 
-    # Transaction Fraud Detection dropdown options with proper types
+    # Transaction Fraud Detection dropdown options (consolidated)
     @rx.var
-    def tfd_currency_options(self) -> list[str]:
-        """Get currency dropdown options."""
+    def tfd_options(self) -> dict[str, list[str]]:
+        """Get all TFD dropdown options as a dict."""
         opts = self.dropdown_options.get("Transaction Fraud Detection", {})
-        if isinstance(opts, dict):
-            return opts.get("currency", [])
-        return []
-
-    @rx.var
-    def tfd_merchant_id_options(self) -> list[str]:
-        """Get merchant ID dropdown options."""
-        opts = self.dropdown_options.get("Transaction Fraud Detection", {})
-        if isinstance(opts, dict):
-            return opts.get("merchant_id", [])
-        return []
-
-    @rx.var
-    def tfd_product_category_options(self) -> list[str]:
-        """Get product category dropdown options."""
-        opts = self.dropdown_options.get("Transaction Fraud Detection", {})
-        if isinstance(opts, dict):
-            return opts.get("product_category", [])
-        return []
-
-    @rx.var
-    def tfd_transaction_type_options(self) -> list[str]:
-        """Get transaction type dropdown options."""
-        opts = self.dropdown_options.get("Transaction Fraud Detection", {})
-        if isinstance(opts, dict):
-            return opts.get("transaction_type", [])
-        return []
-
-    @rx.var
-    def tfd_payment_method_options(self) -> list[str]:
-        """Get payment method dropdown options."""
-        opts = self.dropdown_options.get("Transaction Fraud Detection", {})
-        if isinstance(opts, dict):
-            return opts.get("payment_method", [])
-        return []
-
-    @rx.var
-    def tfd_browser_options(self) -> list[str]:
-        """Get browser dropdown options."""
-        opts = self.dropdown_options.get("Transaction Fraud Detection", {})
-        if isinstance(opts, dict):
-            return opts.get("browser", [])
-        return []
-
-    @rx.var
-    def tfd_os_options(self) -> list[str]:
-        """Get OS dropdown options."""
-        opts = self.dropdown_options.get("Transaction Fraud Detection", {})
-        if isinstance(opts, dict):
-            return opts.get("os", [])
-        return []
+        return opts if isinstance(opts, dict) else {}
 
     @rx.var
     def tfd_prediction_show(self) -> bool:
@@ -162,60 +113,86 @@ class State(rx.State):
             return "red" if results.get("prediction", 0) == 1 else "green"
         return "gray"
 
-    # Individual metric computed vars
     @rx.var
-    def tfd_metric_f1(self) -> str:
-        """Get F1 metric as percentage string."""
-        metrics = self.mlflow_metrics.get("Transaction Fraud Detection", {})
-        if isinstance(metrics, dict):
-            value = metrics.get("metrics.F1", 0)
-            return f"{value * 100:.2f}%"
-        return "0.00%"
+    def tfd_fraud_gauge(self) -> go.Figure:
+        """Generate Plotly gauge chart for fraud probability."""
+        prob = self.tfd_fraud_probability * 100
 
-    @rx.var
-    def tfd_metric_accuracy(self) -> str:
-        """Get Accuracy metric as percentage string."""
-        metrics = self.mlflow_metrics.get("Transaction Fraud Detection", {})
-        if isinstance(metrics, dict):
-            value = metrics.get("metrics.Accuracy", 0)
-            return f"{value * 100:.2f}%"
-        return "0.00%"
+        # Determine risk level and colors
+        if prob < 30:
+            risk_text = "LOW RISK"
+            bar_color = "#22c55e"  # green
+        elif prob < 70:
+            risk_text = "MEDIUM RISK"
+            bar_color = "#eab308"  # yellow
+        else:
+            risk_text = "HIGH RISK"
+            bar_color = "#ef4444"  # red
 
-    @rx.var
-    def tfd_metric_recall(self) -> str:
-        """Get Recall metric as percentage string."""
-        metrics = self.mlflow_metrics.get("Transaction Fraud Detection", {})
-        if isinstance(metrics, dict):
-            value = metrics.get("metrics.Recall", 0)
-            return f"{value * 100:.2f}%"
-        return "0.00%"
+        fig = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=prob,
+            number={
+                'suffix': "%",
+                'font': {'size': 40, 'color': bar_color}
+            },
+            title={
+                'text': f"<b>{risk_text}</b><br><span style='font-size:14px;color:gray'>Fraud Probability</span>",
+                'font': {'size': 18}
+            },
+            gauge={
+                'axis': {
+                    'range': [0, 100],
+                    'tickwidth': 1,
+                    'tickcolor': "#666",
+                    'tickvals': [0, 25, 50, 75, 100],
+                    'ticktext': ['0%', '25%', '50%', '75%', '100%']
+                },
+                'bar': {'color': bar_color, 'thickness': 0.75},
+                'bgcolor': "rgba(0,0,0,0)",
+                'borderwidth': 2,
+                'bordercolor': "#333",
+                'steps': [
+                    {'range': [0, 30], 'color': 'rgba(34, 197, 94, 0.3)'},    # green zone
+                    {'range': [30, 70], 'color': 'rgba(234, 179, 8, 0.3)'},   # yellow zone
+                    {'range': [70, 100], 'color': 'rgba(239, 68, 68, 0.3)'}   # red zone
+                ],
+                'threshold': {
+                    'line': {'color': "#333", 'width': 4},
+                    'thickness': 0.8,
+                    'value': prob
+                }
+            }
+        ))
 
-    @rx.var
-    def tfd_metric_precision(self) -> str:
-        """Get Precision metric as percentage string."""
-        metrics = self.mlflow_metrics.get("Transaction Fraud Detection", {})
-        if isinstance(metrics, dict):
-            value = metrics.get("metrics.Precision", 0)
-            return f"{value * 100:.2f}%"
-        return "0.00%"
+        fig.update_layout(
+            height=280,
+            margin=dict(l=30, r=30, t=80, b=30),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            font={'color': '#888'}
+        )
 
-    @rx.var
-    def tfd_metric_rocauc(self) -> str:
-        """Get ROCAUC metric as percentage string."""
-        metrics = self.mlflow_metrics.get("Transaction Fraud Detection", {})
-        if isinstance(metrics, dict):
-            value = metrics.get("metrics.ROCAUC", 0)
-            return f"{value * 100:.2f}%"
-        return "0.00%"
+        return fig
 
+    # Transaction Fraud Detection metrics (consolidated)
     @rx.var
-    def tfd_metric_geometric_mean(self) -> str:
-        """Get GeometricMean metric as percentage string."""
+    def tfd_metrics(self) -> dict[str, str]:
+        """Get all TFD metrics as formatted percentage strings."""
         metrics = self.mlflow_metrics.get("Transaction Fraud Detection", {})
-        if isinstance(metrics, dict):
-            value = metrics.get("metrics.GeometricMean", 0)
-            return f"{value * 100:.2f}%"
-        return "0.00%"
+        if not isinstance(metrics, dict):
+            return {
+                "f1": "0.00%", "accuracy": "0.00%", "recall": "0.00%",
+                "precision": "0.00%", "rocauc": "0.00%", "geometric_mean": "0.00%"
+            }
+        return {
+            "f1": f"{metrics.get('metrics.F1', 0) * 100:.2f}%",
+            "accuracy": f"{metrics.get('metrics.Accuracy', 0) * 100:.2f}%",
+            "recall": f"{metrics.get('metrics.Recall', 0) * 100:.2f}%",
+            "precision": f"{metrics.get('metrics.Precision', 0) * 100:.2f}%",
+            "rocauc": f"{metrics.get('metrics.ROCAUC', 0) * 100:.2f}%",
+            "geometric_mean": f"{metrics.get('metrics.GeometricMean', 0) * 100:.2f}%",
+        }
 
     @rx.var
     def ml_training_switch_checked(self) -> bool:
@@ -482,100 +459,28 @@ class State(rx.State):
             async with self:
                 self.dropdown_options["Transaction Fraud Detection"] = {}
 
-    # TFD Form field update handlers
+    # TFD Form field update handler (consolidated)
+    # Field type mappings for automatic conversion
+    _tfd_float_fields = {"amount", "lat", "lon"}
+    _tfd_int_fields = {"account_age_days"}
+    _tfd_bool_fields = {"cvv_provided", "billing_address_match"}
+
     @rx.event
-    def update_tfd_field(self, field: str, value):
-        """Update a single TFD form field."""
+    def update_tfd(self, field: str, value):
+        """Update a TFD form field with automatic type conversion."""
+        try:
+            if field in self._tfd_float_fields:
+                value = float(value) if value else 0.0
+            elif field in self._tfd_int_fields:
+                value = int(value) if value else 0
+            elif field in self._tfd_bool_fields:
+                value = bool(value)
+            # str fields need no conversion
+        except (ValueError, TypeError):
+            return  # Ignore invalid conversions
         current = self.form_data.get("Transaction Fraud Detection", {})
         current[field] = value
         self.form_data = {**self.form_data, "Transaction Fraud Detection": current}
-
-    @rx.event
-    def update_tfd_amount(self, value: str):
-        """Update amount field."""
-        try:
-            self.update_tfd_field("amount", float(value) if value else 0.0)
-        except ValueError:
-            pass
-
-    @rx.event
-    def update_tfd_account_age(self, value: str):
-        """Update account age field."""
-        try:
-            self.update_tfd_field("account_age_days", int(value) if value else 0)
-        except ValueError:
-            pass
-
-    @rx.event
-    def update_tfd_date(self, value: str):
-        """Update date field."""
-        self.update_tfd_field("timestamp_date", value)
-
-    @rx.event
-    def update_tfd_time(self, value: str):
-        """Update time field."""
-        self.update_tfd_field("timestamp_time", value)
-
-    @rx.event
-    def update_tfd_currency(self, value: str):
-        """Update currency field."""
-        self.update_tfd_field("currency", value)
-
-    @rx.event
-    def update_tfd_merchant_id(self, value: str):
-        """Update merchant_id field."""
-        self.update_tfd_field("merchant_id", value)
-
-    @rx.event
-    def update_tfd_product_category(self, value: str):
-        """Update product_category field."""
-        self.update_tfd_field("product_category", value)
-
-    @rx.event
-    def update_tfd_transaction_type(self, value: str):
-        """Update transaction_type field."""
-        self.update_tfd_field("transaction_type", value)
-
-    @rx.event
-    def update_tfd_payment_method(self, value: str):
-        """Update payment_method field."""
-        self.update_tfd_field("payment_method", value)
-
-    @rx.event
-    def update_tfd_lat(self, value: str):
-        """Update latitude field."""
-        try:
-            self.update_tfd_field("lat", float(value) if value else 0.0)
-        except ValueError:
-            pass
-
-    @rx.event
-    def update_tfd_lon(self, value: str):
-        """Update longitude field."""
-        try:
-            self.update_tfd_field("lon", float(value) if value else 0.0)
-        except ValueError:
-            pass
-
-    @rx.event
-    def update_tfd_browser(self, value: str):
-        """Update browser field."""
-        self.update_tfd_field("browser", value)
-
-    @rx.event
-    def update_tfd_os(self, value: str):
-        """Update os field."""
-        self.update_tfd_field("os", value)
-
-    @rx.event
-    def update_tfd_cvv_provided(self, value: bool):
-        """Update cvv_provided field."""
-        self.update_tfd_field("cvv_provided", value)
-
-    @rx.event
-    def update_tfd_billing_address_match(self, value: bool):
-        """Update billing_address_match field."""
-        self.update_tfd_field("billing_address_match", value)
 
     @rx.event
     async def init_transaction_fraud_detection_form(self, sample: dict):
@@ -641,11 +546,6 @@ class State(rx.State):
                         "show": True
                     }
                 }
-            yield rx.toast.success(
-                "Prediction complete",
-                description = f"Result: {'Fraud' if result.get('prediction') == 1 else 'Not Fraud'}",
-                duration = 3000
-            )
         except Exception as e:
             print(f"Error making prediction: {e}")
             async with self:
@@ -657,11 +557,6 @@ class State(rx.State):
                         "show": False
                     }
                 }
-            yield rx.toast.error(
-                "Prediction failed",
-                description = str(e),
-                duration = 5000
-            )
 
     @rx.event(background = True)
     async def get_mlflow_metrics(self, project_name: str):

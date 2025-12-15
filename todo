@@ -1,1 +1,4 @@
 - Transfer saved models and encoders to MLflow or to MinIO
+- Configure MLflow to use MinIO as backend
+- Create a separated service to process ML training in real-time, to avoid FastAPI crashes
+- Give the user the options to choose different MLflow models on pages like an A/B test

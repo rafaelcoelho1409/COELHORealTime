@@ -601,7 +601,8 @@ def create_consumer(project_name, max_retries: int = 5, retry_delay: float = 5.0
                 bootstrap_servers=KAFKA_BROKERS,
                 auto_offset_reset='earliest',
                 value_deserializer=lambda v: json.loads(v.decode('utf-8')),
-                group_id=f'{KAFKA_TOPIC}_group'
+                group_id=f'{KAFKA_TOPIC}_group',
+                consumer_timeout_ms=1000  # 1 second timeout for graceful shutdown checks
             )
             print(f"Kafka consumer created for {project_name}")
             return consumer
