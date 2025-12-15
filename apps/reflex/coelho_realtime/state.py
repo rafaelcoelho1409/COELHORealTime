@@ -1,11 +1,8 @@
 import reflex as rx
 import os
-import datetime as dt
 import asyncio
-from .utils import (
-    httpx_client_get,
-    httpx_client_post
-)
+import datetime as dt
+from .utils import httpx_client_post
 
 FASTAPI_HOST = os.getenv("FASTAPI_HOST", "localhost")
 FASTAPI_BASE_URL = f"http://{FASTAPI_HOST}:8001"
@@ -20,17 +17,14 @@ class State(rx.State):
         "/e-commerce-customer-interactions": "E-Commerce Customer Interactions"
     }
     project_name: str = "Home"
-
     # Track the currently active Kafka producer/model
     # Only one model runs at a time to conserve resources
     activated_model: str = ""
     model_switch_message: str = ""
     model_switch_error: str = ""
-
     # ML training switch state - user-controlled toggle
     ml_training_enabled: bool = False
     _current_page_model_key: str = ""  # Track which model key belongs to current page
-
     incremental_ml_state: dict = {
         "Transaction Fraud Detection": False,
         "Estimated Time of Arrival": False,
@@ -78,16 +72,6 @@ class State(rx.State):
     def tfd_form_data(self) -> dict:
         """Get Transaction Fraud Detection form data."""
         return self.form_data.get("Transaction Fraud Detection", {})
-
-    @rx.var
-    def tfd_dropdown_options(self) -> dict:
-        """Get Transaction Fraud Detection dropdown options."""
-        return self.dropdown_options.get("Transaction Fraud Detection", {})
-
-    @rx.var
-    def tfd_prediction_results(self) -> dict:
-        """Get Transaction Fraud Detection prediction results."""
-        return self.prediction_results.get("Transaction Fraud Detection", {})
 
     # Transaction Fraud Detection dropdown options with proper types
     @rx.var
@@ -163,14 +147,6 @@ class State(rx.State):
         return 0.0
 
     @rx.var
-    def tfd_is_fraud(self) -> bool:
-        """Check if prediction is fraud."""
-        results = self.prediction_results.get("Transaction Fraud Detection", {})
-        if isinstance(results, dict):
-            return results.get("prediction", 0) == 1
-        return False
-
-    @rx.var
     def tfd_prediction_text(self) -> str:
         """Get prediction result text."""
         results = self.prediction_results.get("Transaction Fraud Detection", {})
@@ -185,26 +161,6 @@ class State(rx.State):
         if isinstance(results, dict):
             return "red" if results.get("prediction", 0) == 1 else "green"
         return "gray"
-
-    @rx.var
-    def tfd_pie_chart_data(self) -> list[dict]:
-        """Get pie chart data for fraud probability visualization."""
-        results = self.prediction_results.get("Transaction Fraud Detection", {})
-        if isinstance(results, dict):
-            fraud_prob = results.get("fraud_probability", 0.0)
-            return [
-                {"name": "Fraud", "value": round(fraud_prob * 100, 2), "fill": "#FF0000"},
-                {"name": "Not Fraud", "value": round((1 - fraud_prob) * 100, 2), "fill": "#0000FF"}
-            ]
-        return [
-            {"name": "Fraud", "value": 0, "fill": "#FF0000"},
-            {"name": "Not Fraud", "value": 0, "fill": "#0000FF"}
-        ]
-
-    @rx.var
-    def tfd_mlflow_metrics(self) -> dict:
-        """Get Transaction Fraud Detection MLflow metrics."""
-        return self.mlflow_metrics.get("Transaction Fraud Detection", {})
 
     # Individual metric computed vars
     @rx.var
@@ -271,10 +227,6 @@ class State(rx.State):
     ## EVENTS
     ##==========================================================================
     @rx.event
-    def change_incremental_ml_state(self, page_name: str, state: bool):
-        self.incremental_ml_state[page_name] = state
-
-    @rx.event
     def set_current_page_model(self, model_key: str):
         """Set the model key for the current page (called on page mount)."""
         self._current_page_model_key = model_key
@@ -282,7 +234,7 @@ class State(rx.State):
         # Switch will be ON only if this page's model is already running
         self.ml_training_enabled = (self.activated_model == model_key)
 
-    @rx.event(background=True)
+    @rx.event(background = True)
     async def toggle_ml_training(self, enabled: bool, model_key: str, project_name: str):
         """
         Toggle ML training on/off via the switch component.
@@ -290,51 +242,38 @@ class State(rx.State):
         """
         async with self:
             self.ml_training_enabled = enabled
-
         if enabled:
-            # Start the model - inline the logic here since we can't call other background events
+            # Start the model
             if self.activated_model == model_key:
                 yield rx.toast.info(
                     f"Already running",
-                    description=f"ML training for {project_name} is already active",
-                    duration=3000,
+                    description = f"ML training for {project_name} is already active",
+                    duration = 3000,
                 )
-                # Still start polling even if already running
-                async for _ in self._poll_metrics_loop(project_name):
-                    yield _
                 return
-
             try:
                 response = await httpx_client_post(
-                    url=f"{FASTAPI_BASE_URL}/switch_model",
-                    json={
+                    url = f"{FASTAPI_BASE_URL}/switch_model",
+                    json = {
                         "model_key": model_key,
                         "project_name": project_name
                     },
-                    timeout=30.0
+                    timeout = 30.0
                 )
                 result = response.json()
                 message = result.get("message", "Model switched successfully")
-
                 async with self:
                     self.activated_model = model_key
                     self.model_switch_message = message
                     self.model_switch_error = ""
                     self.ml_training_enabled = True
-
                 yield rx.toast.success(
                     f"Real-time ML training started",
-                    description=f"Processing live data for {project_name}",
-                    duration=5000,
-                    close_button=True,
+                    description = f"Processing live data for {project_name}",
+                    duration = 5000,
+                    close_button = True,
                 )
-
                 print(f"Model start successful: {message}")
-
-                # Start polling metrics in real-time
-                async for _ in self._poll_metrics_loop(project_name):
-                    yield _
-
             except Exception as e:
                 error_msg = f"Error starting model: {e}"
                 print(error_msg)
@@ -344,78 +283,43 @@ class State(rx.State):
                     self.ml_training_enabled = False
                     if self.activated_model == model_key:
                         self.activated_model = ""
-
                 yield rx.toast.error(
                     f"Failed to start ML training",
-                    description=str(e),
-                    duration=8000,
-                    close_button=True,
+                    description = str(e),
+                    duration = 8000,
+                    close_button = True,
                 )
         else:
             # Stop the model
             if not self.activated_model:
                 return
-
             try:
                 await httpx_client_post(
-                    url=f"{FASTAPI_BASE_URL}/switch_model",
-                    json={
+                    url = f"{FASTAPI_BASE_URL}/switch_model",
+                    json = {
                         "model_key": "none",
                         "project_name": ""
                     },
-                    timeout=30.0
+                    timeout = 30.0
                 )
                 async with self:
                     self.activated_model = ""
                     self.model_switch_message = "Model stopped"
                     self.ml_training_enabled = False
-
                 yield rx.toast.info(
                     "Real-time ML training stopped",
-                    description=f"Stopped processing for {project_name}",
-                    duration=3000,
+                    description = f"Stopped processing for {project_name}",
+                    duration = 3000,
                 )
             except Exception as e:
                 print(f"Error stopping model: {e}")
                 yield rx.toast.warning(
                     "Could not stop ML training",
-                    description=str(e),
-                    duration=5000,
+                    description = str(e),
+                    duration = 5000,
                 )
 
-    async def _poll_metrics_loop(self, project_name: str):
-        """Internal polling loop for real-time metrics updates."""
-        while self.ml_training_enabled:
-            try:
-                # Fetch metrics
-                response = await httpx_client_post(
-                    url=f"{FASTAPI_BASE_URL}/mlflow_metrics",
-                    json={
-                        "project_name": project_name,
-                        "model_name": "ARFClassifier"
-                    },
-                    timeout=30.0
-                )
-                async with self:
-                    self.mlflow_metrics = {
-                        **self.mlflow_metrics,
-                        project_name: response.json()
-                    }
-                print(f"Metrics updated for {project_name}")
-            except Exception as e:
-                print(f"Error fetching metrics: {e}")
-
-            # Yield empty to push state update to frontend
-            yield
-
-            # Wait 5 seconds before next poll
-            await asyncio.sleep(5)
-
-            # Check if still enabled after sleep
-            if not self.ml_training_enabled:
-                break
-
-    @rx.event(background=True)
+    @rx.event(background = True)
     async def cleanup_on_page_leave(self, project_name: str):
         """
         Called when user navigates away from a page.
@@ -426,132 +330,44 @@ class State(rx.State):
             if self.activated_model == self._current_page_model_key:
                 try:
                     await httpx_client_post(
-                        url=f"{FASTAPI_BASE_URL}/switch_model",
-                        json={
+                        url = f"{FASTAPI_BASE_URL}/switch_model",
+                        json = {
                             "model_key": "none",
                             "project_name": ""
                         },
-                        timeout=30.0
+                        timeout = 30.0
                     )
                     async with self:
                         self.activated_model = ""
                         self.model_switch_message = "Model stopped"
                         self.ml_training_enabled = False
-
                     yield rx.toast.info(
                         "Real-time ML training stopped",
-                        description=f"Stopped processing for {project_name}",
-                        duration=3000,
+                        description = f"Stopped processing for {project_name}",
+                        duration = 3000,
                     )
                 except Exception as e:
                     print(f"Error stopping model on page leave: {e}")
 
-    @rx.event(background=True)
-    async def switch_active_model(self, model_key: str, project_name: str):
-        """Start a model (called from toggle or directly)."""
-        if self.activated_model == model_key:
-            return
-
-        try:
-            response = await httpx_client_post(
-                url=f"{FASTAPI_BASE_URL}/switch_model",
-                json={
-                    "model_key": model_key,
-                    "project_name": project_name
-                },
-                timeout=30.0
-            )
-            result = response.json()
-            message = result.get("message", "Model switched successfully")
-
-            async with self:
-                self.activated_model = model_key
-                self.model_switch_message = message
-                self.model_switch_error = ""
-                self.ml_training_enabled = True
-
-            yield rx.toast.success(
-                f"Real-time ML training started",
-                description=f"Processing live data for {project_name}",
-                duration=5000,
-                close_button=True,
-            )
-
-        except Exception as e:
-            error_msg = f"Error starting model: {e}"
-            print(error_msg)
-            async with self:
-                self.model_switch_error = error_msg
-                self.model_switch_message = ""
-                self.ml_training_enabled = False
-
-            yield rx.toast.error(
-                f"Failed to start ML training",
-                description=str(e),
-                duration=8000,
-                close_button=True,
-            )
-
-    @rx.event(background=True)
-    async def stop_active_model(self):
-        """Stop the currently active model."""
-        if not self.activated_model:
-            return
-
-        try:
-            await httpx_client_post(
-                url=f"{FASTAPI_BASE_URL}/switch_model",
-                json={
-                    "model_key": "none",
-                    "project_name": ""
-                },
-                timeout=30.0
-            )
-            async with self:
-                self.activated_model = ""
-                self.model_switch_message = "Model stopped"
-                self.ml_training_enabled = False
-
-            yield rx.toast.info(
-                "Real-time ML training stopped",
-                description="All background processes have been stopped",
-                duration=3000,
-            )
-        except Exception as e:
-            print(f"Error stopping model: {e}")
-            yield rx.toast.warning(
-                "Could not stop ML training",
-                description=str(e),
-                duration=5000,
-            )
-
-    def get_model_key(self, project_name: str, model_type: str = "river") -> str:
-        """Generate model key from project name and type."""
-        return f"{project_name.replace(' ', '_').replace('-', '_').lower()}_{model_type}.py"
-
-    @rx.event(background=True)
+    @rx.event(background = True)
     async def update_sample(self, project_name: str):
         """Fetch initial sample from FastAPI (runs in background to avoid lock expiration)."""
         if project_name == "Home":
             async with self:
                 self.incremental_ml_sample[project_name] = {}
             return
-
         try:
             sample = await httpx_client_post(
-                url=f"{FASTAPI_BASE_URL}/initial_sample",
-                json={"project_name": project_name},
-                timeout=30.0
+                url = f"{FASTAPI_BASE_URL}/initial_sample",
+                json = {"project_name": project_name},
+                timeout = 30.0
             )
             sample_data = sample.json()
-
             async with self:
                 self.incremental_ml_sample[project_name] = sample_data
-
             # Initialize form data with sample
             if project_name == "Transaction Fraud Detection":
                 await self._init_tfd_form_internal(sample_data)
-
         except Exception as e:
             print(f"Error fetching initial sample for {project_name}: {e}")
             async with self:
@@ -571,7 +387,6 @@ class State(rx.State):
             except:
                 timestamp_date = dt.datetime.now().strftime("%Y-%m-%d")
                 timestamp_time = dt.datetime.now().strftime("%H:%M")
-
         form_data = {
             "amount": sample.get("amount", 0.0),
             "account_age_days": sample.get("account_age_days", 0),
@@ -593,57 +408,52 @@ class State(rx.State):
             "ip_address": sample.get("ip_address", ""),
             "user_agent": sample.get("user_agent", "")
         }
-
         async with self:
             self.form_data["Transaction Fraud Detection"] = form_data
-
         # Fetch dropdown options in parallel
         await self._fetch_tfd_options_internal()
 
     async def _fetch_tfd_options_internal(self):
         """Internal helper to fetch dropdown options in parallel."""
         project_name = "Transaction Fraud Detection"
-
         try:
             # Fetch all unique values in parallel for better performance
             responses = await asyncio.gather(
                 httpx_client_post(
-                    url=f"{FASTAPI_BASE_URL}/unique_values",
-                    json={"column_name": "currency", "project_name": project_name},
-                    timeout=30.0
+                    url = f"{FASTAPI_BASE_URL}/unique_values",
+                    json = {"column_name": "currency", "project_name": project_name},
+                    timeout = 30.0
                 ),
                 httpx_client_post(
-                    url=f"{FASTAPI_BASE_URL}/unique_values",
-                    json={"column_name": "merchant_id", "project_name": project_name},
-                    timeout=30.0
+                    url = f"{FASTAPI_BASE_URL}/unique_values",
+                    json = {"column_name": "merchant_id", "project_name": project_name},
+                    timeout = 30.0
                 ),
                 httpx_client_post(
-                    url=f"{FASTAPI_BASE_URL}/unique_values",
-                    json={"column_name": "product_category", "project_name": project_name},
-                    timeout=30.0
+                    url = f"{FASTAPI_BASE_URL}/unique_values",
+                    json = {"column_name": "product_category", "project_name": project_name},
+                    timeout = 30.0
                 ),
                 httpx_client_post(
-                    url=f"{FASTAPI_BASE_URL}/unique_values",
-                    json={"column_name": "transaction_type", "project_name": project_name},
-                    timeout=30.0
+                    url = f"{FASTAPI_BASE_URL}/unique_values",
+                    json = {"column_name": "transaction_type", "project_name": project_name},
+                    timeout = 30.0
                 ),
                 httpx_client_post(
-                    url=f"{FASTAPI_BASE_URL}/unique_values",
-                    json={"column_name": "payment_method", "project_name": project_name},
-                    timeout=30.0
+                    url = f"{FASTAPI_BASE_URL}/unique_values",
+                    json = {"column_name": "payment_method", "project_name": project_name},
+                    timeout = 30.0
                 ),
                 httpx_client_post(
-                    url=f"{FASTAPI_BASE_URL}/unique_values",
-                    json={"column_name": "device_info", "project_name": project_name},
-                    timeout=30.0
+                    url = f"{FASTAPI_BASE_URL}/unique_values",
+                    json = {"column_name": "device_info", "project_name": project_name},
+                    timeout = 30.0
                 ),
-                return_exceptions=True
+                return_exceptions = True
             )
-
             # Unpack responses
             currency_response, merchant_response, product_response, \
                 transaction_response, payment_response, device_response = responses
-
             # Parse device info
             browsers = set()
             oses = set()
@@ -656,7 +466,6 @@ class State(rx.State):
                         oses.add(device_dict.get("os", ""))
                     except:
                         pass
-
             dropdown_options = {
                 "currency": currency_response.json().get("unique_values", []) if not isinstance(currency_response, Exception) else [],
                 "merchant_id": merchant_response.json().get("unique_values", []) if not isinstance(merchant_response, Exception) else [],
@@ -666,10 +475,8 @@ class State(rx.State):
                 "browser": sorted(list(browsers)),
                 "os": sorted(list(oses))
             }
-
             async with self:
                 self.dropdown_options["Transaction Fraud Detection"] = dropdown_options
-
         except Exception as e:
             print(f"Error fetching dropdown options: {e}")
             async with self:
@@ -780,15 +587,13 @@ class State(rx.State):
         """Fetch unique values for all dropdown fields."""
         await self._fetch_tfd_options_internal()
 
-    @rx.event(background=True)
+    @rx.event(background = True)
     async def predict_transaction_fraud_detection(self):
         """Make prediction for transaction fraud detection using current form state."""
         project_name = "Transaction Fraud Detection"
         current_form = self.form_data.get(project_name, {})
-
         # Combine date and time
         timestamp = f"{current_form.get('timestamp_date', '')}T{current_form.get('timestamp_time', '')}:00.000000+00:00"
-
         # Prepare request payload from current form state
         payload = {
             "project_name": project_name,
@@ -816,18 +621,16 @@ class State(rx.State):
             "cvv_provided": bool(current_form.get("cvv_provided", False)),
             "billing_address_match": bool(current_form.get("billing_address_match", False))
         }
-
         # Make prediction
         try:
             print(f"Making prediction with payload: {payload}")
             response = await httpx_client_post(
-                url=f"{FASTAPI_BASE_URL}/predict",
-                json=payload,
-                timeout=30.0
+                url = f"{FASTAPI_BASE_URL}/predict",
+                json = payload,
+                timeout = 30.0
             )
             result = response.json()
             print(f"Prediction result: {result}")
-
             # Create new dict to trigger reactivity
             async with self:
                 self.prediction_results = {
@@ -840,8 +643,8 @@ class State(rx.State):
                 }
             yield rx.toast.success(
                 "Prediction complete",
-                description=f"Result: {'Fraud' if result.get('prediction') == 1 else 'Not Fraud'}",
-                duration=3000
+                description = f"Result: {'Fraud' if result.get('prediction') == 1 else 'Not Fraud'}",
+                duration = 3000
             )
         except Exception as e:
             print(f"Error making prediction: {e}")
@@ -856,21 +659,21 @@ class State(rx.State):
                 }
             yield rx.toast.error(
                 "Prediction failed",
-                description=str(e),
-                duration=5000
+                description = str(e),
+                duration = 5000
             )
 
-    @rx.event(background=True)
+    @rx.event(background = True)
     async def get_mlflow_metrics(self, project_name: str):
         """Fetch MLflow metrics for a project (runs in background to avoid lock expiration)."""
         try:
             response = await httpx_client_post(
-                url=f"{FASTAPI_BASE_URL}/mlflow_metrics",
-                json={
+                url = f"{FASTAPI_BASE_URL}/mlflow_metrics",
+                json = {
                     "project_name": project_name,
                     "model_name": "ARFClassifier"
                 },
-                timeout=60.0
+                timeout = 60.0
             )
             async with self:
                 self.mlflow_metrics = {
@@ -885,18 +688,18 @@ class State(rx.State):
                     project_name: {}
                 }
 
-    @rx.event(background=True)
+    @rx.event(background = True)
     async def refresh_mlflow_metrics(self, project_name: str):
         """Force refresh MLflow metrics bypassing cache."""
         try:
             response = await httpx_client_post(
-                url=f"{FASTAPI_BASE_URL}/mlflow_metrics",
-                json={
+                url = f"{FASTAPI_BASE_URL}/mlflow_metrics",
+                json = {
                     "project_name": project_name,
                     "model_name": "ARFClassifier",
                     "force_refresh": True
                 },
-                timeout=60.0
+                timeout = 60.0
             )
             async with self:
                 self.mlflow_metrics = {
@@ -905,13 +708,13 @@ class State(rx.State):
                 }
             yield rx.toast.success(
                 "Metrics refreshed",
-                description=f"Latest metrics loaded for {project_name}",
-                duration=2000
+                description = f"Latest metrics loaded for {project_name}",
+                duration = 2000
             )
         except Exception as e:
             print(f"Error refreshing MLflow metrics: {e}")
             yield rx.toast.error(
                 "Refresh failed",
-                description=str(e),
-                duration=3000
+                description = str(e),
+                duration = 3000
             )

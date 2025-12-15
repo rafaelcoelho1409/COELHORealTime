@@ -32,28 +32,28 @@ def ml_training_switch(model_key: str, project_name: str) -> rx.Component:
                         "Processing live Kafka stream data",
                         "Toggle to start processing live data"
                     ),
-                    size="1",
-                    color="gray"
+                    size = "1",
+                    color = "gray"
                 ),
-                spacing="1",
-                align_items="start"
+                spacing = "1",
+                align_items = "start"
             ),
             rx.switch(
-                checked=State.ml_training_enabled,
-                on_change=lambda checked: State.toggle_ml_training(
+                checked = State.ml_training_enabled,
+                on_change = lambda checked: State.toggle_ml_training(
                     checked,
                     model_key,
                     project_name
                 ),
-                size="3"
+                size = "3"
             ),
-            justify="between",
-            align_items="center",
-            width="100%"
+            justify = "between",
+            align_items = "center",
+            width = "100%"
         ),
-        variant="surface",
-        size="2",
-        width="100%"
+        variant = "surface",
+        size = "2",
+        width = "100%"
     )
 
 
