@@ -35,6 +35,25 @@ OS_TYPES = ['Android', 'iOS', 'Windows', 'macOS', 'Linux', 'Other']
 LAT_BOUNDS_HOU = (29.5, 30.1)  # Approximate North/South bounds for Houston metro
 LON_BOUNDS_HOU = (-95.8, -95.0) # Approximate West/East bounds for Houston metro
 
+# Limited set of referrer URLs to avoid dropdown performance issues
+REFERRER_URLS = [
+    'direct',
+    'google.com',
+    'facebook.com',
+    'amazon.com',
+    'instagram.com',
+    'twitter.com',
+    'youtube.com',
+    'tiktok.com',
+    'pinterest.com',
+    'reddit.com',
+    'linkedin.com',
+    'bing.com',
+    'yahoo.com',
+    'email_campaign',
+    'affiliate_link',
+]
+
 # Keep track of active sessions to make event sequences more realistic
 active_sessions = {} # session_id -> {customer_id, last_event_time, events_in_session, current_product_focus}
 MAX_ACTIVE_SESSIONS = 500 # Limit memory usage
@@ -127,7 +146,7 @@ def generate_customer_event(event_rate_per_minute):
     search_query = None
     # Generate details based on event type
     if event_type in ['page_view', 'add_to_cart', 'purchase', 'leave_review']:
-        product_id = f'prod_{random.randint(1000, 90000)}' # Increased range slightly
+        product_id = f'prod_{random.randint(1000, 1100)}' # Limited to 100 products for dropdown performance
         product_category = random.choice(PRODUCT_CATEGORIES)
         # Adjust price ranges slightly for USD context if desired, keeping it broad
         price = round(random.uniform(5.0, 2500.0), 2)
@@ -164,11 +183,9 @@ def generate_customer_event(event_rate_per_minute):
         'lat': round(random.uniform(LAT_BOUNDS_HOU[0], LAT_BOUNDS_HOU[1]), 3),
         'lon': round(random.uniform(LON_BOUNDS_HOU[0], LON_BOUNDS_HOU[1]), 3)
     }
-    # Simulate referrer (simplified) - using global sites
+    # Simulate referrer - using fixed list for dropdown performance
     if events_so_far == 0:
-        referrer_url = random.choices(
-            [fake.url(), 'direct', 'google.com', 'facebook.com', 'amazon.com'], # Added amazon
-            weights = [0.1, 0.3, 0.3, 0.15, 0.15], k = 1)[0]
+        referrer_url = random.choice(REFERRER_URLS)
     # Update session state
     session_data['last_event_time'] = now_ts
     session_data['events_in_session'] += 1

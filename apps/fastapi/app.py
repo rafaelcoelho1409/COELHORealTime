@@ -556,6 +556,7 @@ async def get_sample(request: SampleRequest):
 class UniqueValuesRequest(BaseModel):
     column_name: str
     project_name: str
+    limit: int = 100  # Default limit to prevent dropdown performance issues
 
 
 @app.post("/unique_values")
@@ -563,7 +564,7 @@ async def get_unique_values(request: UniqueValuesRequest):
     global data_dict # Need to access the global data
     if data_dict[request.project_name] is None:
         raise HTTPException(
-            status_code = 503, 
+            status_code = 503,
             detail = "Data is not loaded.")
     column = request.column_name
     if column not in data_dict[request.project_name].columns:
@@ -573,10 +574,13 @@ async def get_unique_values(request: UniqueValuesRequest):
     try:
         # Use apply(str) for robustness against mixed types or non-string/numeric data
         unique_values = data_dict[request.project_name][column].apply(str).unique().tolist()
+        # Apply limit to prevent performance issues with high-cardinality fields
+        if len(unique_values) > request.limit:
+            unique_values = unique_values[:request.limit]
         return {"unique_values": unique_values}
     except Exception as e:
         raise HTTPException(
-            status_code = 500, 
+            status_code = 500,
             detail = f"Error getting unique values for column '{column}': {e}")
     
 

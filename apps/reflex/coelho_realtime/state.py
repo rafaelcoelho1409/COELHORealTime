@@ -3,10 +3,43 @@ import os
 import asyncio
 import datetime as dt
 import plotly.graph_objects as go
-from .utils import httpx_client_post
+from .utils import httpx_client_post, httpx_client_get
 
 FASTAPI_HOST = os.getenv("FASTAPI_HOST", "localhost")
 FASTAPI_BASE_URL = f"http://{FASTAPI_HOST}:8001"
+
+
+# =============================================================================
+# Form Value Helpers
+# =============================================================================
+# These helpers ensure form values display correctly in Reflex inputs.
+# JavaScript treats 0, 0.0, None, and "" as falsy, which causes issues with
+# Reflex's .get() method returning defaults instead of actual values.
+# Converting numeric values to strings ensures they display properly.
+
+def safe_str(val, default: str = "") -> str:
+    """Safely convert value to string, handling None."""
+    return str(val) if val is not None else default
+
+def safe_int_str(val, default: int = 0) -> str:
+    """Safely convert to int then string, handling None. Returns string for form display."""
+    return str(int(val)) if val is not None else str(default)
+
+def safe_float_str(val, default: float = 0.0) -> str:
+    """Safely convert to float then string, handling None. Returns string for form display."""
+    return str(float(val)) if val is not None else str(default)
+
+def safe_bool(val, default: bool = False) -> bool:
+    """Safely convert to bool, handling None."""
+    return bool(val) if val is not None else default
+
+def get_str(data: dict, key: str, default: str = "") -> str:
+    """Get string value from dict, converting None to default."""
+    return data.get(key) or default
+
+def get_nested_str(data: dict, key1: str, key2: str, default: str = "") -> str:
+    """Get nested string value from dict, converting None to default."""
+    return data.get(key1, {}).get(key2) or default
 
 
 class State(rx.State):
@@ -33,6 +66,8 @@ class State(rx.State):
     }
     incremental_ml_model_name: dict = {
         "Transaction Fraud Detection": "Adaptive Random Forest Classifier (River)",
+        "Estimated Time of Arrival": "Adaptive Random Forest Regressor (River)",
+        "E-Commerce Customer Interactions": "DBSTREAM Clustering (River)",
     }
     incremental_ml_sample: dict = {
         "Transaction Fraud Detection": {},
@@ -199,6 +234,431 @@ class State(rx.State):
         """Check if ML training is enabled for the current page's model."""
         return self.ml_training_enabled and self.activated_model == self._current_page_model_key
 
+    # =========================================================================
+    # Estimated Time of Arrival (ETA) computed vars
+    # =========================================================================
+    @rx.var
+    def eta_form_data(self) -> dict:
+        """Get Estimated Time of Arrival form data."""
+        return self.form_data.get("Estimated Time of Arrival", {})
+
+    @rx.var
+    def eta_options(self) -> dict[str, list[str]]:
+        """Get all ETA dropdown options as a dict."""
+        opts = self.dropdown_options.get("Estimated Time of Arrival", {})
+        return opts if isinstance(opts, dict) else {}
+
+    @rx.var
+    def eta_prediction_show(self) -> bool:
+        """Check if ETA prediction results should be shown."""
+        results = self.prediction_results.get("Estimated Time of Arrival", {})
+        if isinstance(results, dict):
+            return results.get("show", False)
+        return False
+
+    @rx.var
+    def eta_prediction_seconds(self) -> float:
+        """Get ETA prediction in seconds."""
+        results = self.prediction_results.get("Estimated Time of Arrival", {})
+        if isinstance(results, dict):
+            return results.get("eta_seconds", 0.0)
+        return 0.0
+
+    @rx.var
+    def eta_prediction_minutes(self) -> float:
+        """Get ETA prediction in minutes."""
+        return round(self.eta_prediction_seconds / 60, 2) if self.eta_prediction_seconds > 0 else 0.0
+
+    @rx.var
+    def eta_metrics(self) -> dict[str, str]:
+        """Get all ETA regression metrics as formatted strings."""
+        metrics = self.mlflow_metrics.get("Estimated Time of Arrival", {})
+        if not isinstance(metrics, dict):
+            return {
+                "mae": "0.00", "mape": "0.00", "mse": "0.00", "r2": "0.00",
+                "rmse": "0.00", "rmsle": "0.00", "smape": "0.00"
+            }
+        return {
+            "mae": f"{metrics.get('metrics.MAE', 0):.2f}",
+            "mape": f"{metrics.get('metrics.MAPE', 0):.2f}",
+            "mse": f"{metrics.get('metrics.MSE', 0):.2f}",
+            "r2": f"{metrics.get('metrics.R2', 0):.2f}",
+            "rmse": f"{metrics.get('metrics.RMSE', 0):.2f}",
+            "rmsle": f"{metrics.get('metrics.RMSLE', 0):.2f}",
+            "smape": f"{metrics.get('metrics.SMAPE', 0):.2f}",
+        }
+
+    @rx.var
+    def eta_prediction_figure(self) -> go.Figure:
+        """Generate Plotly figure for ETA prediction display."""
+        seconds = self.eta_prediction_seconds
+        minutes = self.eta_prediction_minutes
+
+        fig = go.Figure()
+        fig.add_trace(
+            go.Indicator(
+                mode="number",
+                value=seconds,
+                title={'text': "<b>Seconds</b>", 'font': {'size': 18}},
+                number={'font': {'size': 48, 'color': '#3b82f6'}},
+                domain={'row': 0, 'column': 0}
+            )
+        )
+        fig.add_trace(
+            go.Indicator(
+                mode="number",
+                value=minutes,
+                title={'text': "<b>Minutes</b>", 'font': {'size': 18}},
+                number={'font': {'size': 48, 'color': '#22c55e'}},
+                domain={'row': 1, 'column': 0}
+            )
+        )
+        fig.update_layout(
+            grid={'rows': 2, 'columns': 1, 'pattern': "independent"},
+            height=250,
+            margin=dict(l=20, r=20, t=40, b=20),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+        )
+        return fig
+
+    # Average speed for initial ETA estimate (same as Kafka producer)
+    _eta_avg_speed_kmh = 40
+
+    @rx.var
+    def eta_estimated_distance_km(self) -> float:
+        """Calculate estimated distance using Haversine formula."""
+        import math
+        form_data = self.form_data.get("Estimated Time of Arrival", {})
+        origin_lat = float(form_data.get("origin_lat", 0))
+        origin_lon = float(form_data.get("origin_lon", 0))
+        dest_lat = float(form_data.get("destination_lat", 0))
+        dest_lon = float(form_data.get("destination_lon", 0))
+
+        # Haversine formula
+        lon1, lat1, lon2, lat2 = map(math.radians, [origin_lon, origin_lat, dest_lon, dest_lat])
+        dlon = lon2 - lon1
+        dlat = lat2 - lat1
+        a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+        c = 2 * math.asin(math.sqrt(a))
+        r = 6371  # Radius of earth in kilometers
+        return round(c * r, 2)
+
+    @rx.var
+    def eta_initial_estimated_travel_time_seconds(self) -> int:
+        """Calculate initial estimated travel time based on distance and average speed."""
+        distance = self.eta_estimated_distance_km
+        if distance <= 0:
+            return 60  # Minimum 1 minute
+        # Same formula as Kafka producer: (distance / AVG_SPEED_KMH) * 3600
+        travel_time = int((distance / self._eta_avg_speed_kmh) * 3600)
+        return max(60, travel_time)  # Minimum 1 minute
+
+    @rx.var
+    def eta_map_figure(self) -> go.Figure:
+        """Generate Plotly Scattermapbox figure for origin/destination display."""
+        form_data = self.form_data.get("Estimated Time of Arrival", {})
+        origin_lat = float(form_data.get("origin_lat", 29.8))
+        origin_lon = float(form_data.get("origin_lon", -95.4))
+        destination_lat = float(form_data.get("destination_lat", 29.8))
+        destination_lon = float(form_data.get("destination_lon", -95.4))
+
+        fig = go.Figure()
+
+        # Add markers for origin and destination
+        fig.add_trace(
+            go.Scattermapbox(
+                lat=[origin_lat, destination_lat],
+                lon=[origin_lon, destination_lon],
+                mode='markers+text',
+                marker=go.scattermapbox.Marker(
+                    size=[15, 15],
+                    color=['#3b82f6', '#ef4444'],  # blue for origin, red for destination
+                ),
+                text=['Origin', 'Destination'],
+                textposition='bottom right',
+                name="Locations"
+            )
+        )
+
+        # Add line connecting origin and destination
+        fig.add_trace(
+            go.Scattermapbox(
+                lat=[origin_lat, destination_lat],
+                lon=[origin_lon, destination_lon],
+                mode='lines',
+                line=go.scattermapbox.Line(
+                    width=2,
+                    color='#333333',
+                ),
+                name="Route (approx.)",
+                hoverinfo='none'
+            )
+        )
+
+        # Calculate center point and zoom level
+        center_lat = (origin_lat + destination_lat) / 2
+        center_lon = (origin_lon + destination_lon) / 2
+        lat_diff = abs(origin_lat - destination_lat)
+        lon_diff = abs(origin_lon - destination_lon)
+        zoom = 9 if lat_diff > 0.01 or lon_diff > 0.01 else 11
+
+        fig.update_layout(
+            title='Origin and Destination Map',
+            autosize=True,
+            showlegend=False,
+            hovermode='closest',
+            mapbox=dict(
+                bearing=0,
+                center=dict(lat=center_lat, lon=center_lon),
+                pitch=0,
+                zoom=zoom,
+                style='open-street-map'
+            ),
+            margin={"r": 0, "t": 30, "l": 0, "b": 0},
+            height=300
+        )
+        return fig
+
+    # =========================================================================
+    # E-Commerce Customer Interactions (ECCI) computed vars
+    # =========================================================================
+    @rx.var
+    def ecci_form_data(self) -> dict:
+        """Get E-Commerce Customer Interactions form data."""
+        return self.form_data.get("E-Commerce Customer Interactions", {})
+
+    @rx.var
+    def ecci_options(self) -> dict[str, list[str]]:
+        """Get all ECCI dropdown options as a dict."""
+        opts = self.dropdown_options.get("E-Commerce Customer Interactions", {})
+        return opts if isinstance(opts, dict) else {}
+
+    @rx.var
+    def ecci_prediction_show(self) -> bool:
+        """Check if ECCI prediction results should be shown."""
+        results = self.prediction_results.get("E-Commerce Customer Interactions", {})
+        if isinstance(results, dict):
+            return results.get("show", False)
+        return False
+
+    @rx.var
+    def ecci_predicted_cluster(self) -> int:
+        """Get predicted cluster number."""
+        results = self.prediction_results.get("E-Commerce Customer Interactions", {})
+        if isinstance(results, dict):
+            return results.get("cluster", 0)
+        return 0
+
+    @rx.var
+    def ecci_prediction_figure(self) -> go.Figure:
+        """Generate Plotly figure for ECCI cluster prediction display."""
+        cluster = self.ecci_predicted_cluster
+
+        fig = go.Figure()
+        fig.add_trace(
+            go.Indicator(
+                mode="number",
+                value=cluster,
+                title={'text': "<b>Cluster</b>", 'font': {'size': 24}},
+                number={'font': {'size': 72, 'color': '#8b5cf6'}},  # purple
+                domain={'row': 0, 'column': 0}
+            )
+        )
+        fig.update_layout(
+            grid={'rows': 1, 'columns': 1},
+            height=250,
+            margin=dict(l=20, r=20, t=60, b=20),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+        )
+        return fig
+
+    @rx.var
+    def ecci_location_figure(self) -> go.Figure:
+        """Generate Plotly Scattermapbox figure for ECCI location display."""
+        form_data = self.form_data.get("E-Commerce Customer Interactions", {})
+        lat = float(form_data.get("lat", 29.8))
+        lon = float(form_data.get("lon", -95.4))
+
+        fig = go.Figure()
+
+        # Add marker for location
+        fig.add_trace(
+            go.Scattermapbox(
+                lat=[lat],
+                lon=[lon],
+                mode='markers',
+                marker=go.scattermapbox.Marker(
+                    size=15,
+                    color='#8b5cf6',  # purple
+                ),
+                text=['Customer Location'],
+                name="Location"
+            )
+        )
+
+        fig.update_layout(
+            title='Customer Location',
+            autosize=True,
+            showlegend=False,
+            hovermode='closest',
+            mapbox=dict(
+                bearing=0,
+                center=dict(lat=lat, lon=lon),
+                pitch=0,
+                zoom=10,
+                style='open-street-map'
+            ),
+            margin={"r": 0, "t": 30, "l": 0, "b": 0},
+            height=300
+        )
+        return fig
+
+    # ECCI Cluster Analytics state vars
+    ecci_cluster_counts: dict = {}
+    ecci_selected_feature: str = "event_type"
+    ecci_cluster_feature_counts: dict = {}
+
+    @rx.var
+    def ecci_feature_options(self) -> list[str]:
+        """Get available features for cluster analysis."""
+        return [
+            "event_type",
+            "product_category",
+            "referrer_url",
+            "quantity",
+            "time_on_page_seconds",
+            "session_event_sequence",
+            "device_type",
+            "browser",
+            "os",
+        ]
+
+    @rx.var
+    def ecci_cluster_counts_figure(self) -> go.Figure:
+        """Generate bar chart for samples per cluster."""
+        cluster_counts = self.ecci_cluster_counts
+        fig = go.Figure()
+
+        if cluster_counts:
+            clusters = list(cluster_counts.keys())
+            counts = list(cluster_counts.values())
+
+            fig.add_trace(
+                go.Bar(
+                    x=[f"Cluster {c}" for c in clusters],
+                    y=counts,
+                    marker_color='#8b5cf6',
+                    text=counts,
+                    textposition='auto',
+                )
+            )
+
+        fig.update_layout(
+            title='Samples per Cluster',
+            xaxis_title='Cluster',
+            yaxis_title='Count',
+            height=350,
+            margin=dict(l=40, r=20, t=50, b=40),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+        )
+        return fig
+
+    @rx.var
+    def ecci_selected_cluster_feature_figure(self) -> go.Figure:
+        """Generate bar chart for predicted cluster's feature distribution."""
+        fig = go.Figure()
+        predicted_cluster = self.ecci_predicted_cluster
+        feature_counts = self.ecci_cluster_feature_counts
+        selected_feature = self.ecci_selected_feature
+
+        cluster_key = str(predicted_cluster)
+        if cluster_key in feature_counts:
+            cluster_data = feature_counts[cluster_key]
+            if isinstance(cluster_data, dict):
+                # Sort by count descending and take top 10
+                sorted_items = sorted(cluster_data.items(), key=lambda x: x[1], reverse=True)[:10]
+                labels = [str(item[0]) for item in sorted_items]
+                values = [item[1] for item in sorted_items]
+
+                fig.add_trace(
+                    go.Bar(
+                        x=labels,
+                        y=values,
+                        marker_color='#3b82f6',
+                        text=values,
+                        textposition='auto',
+                    )
+                )
+
+        fig.update_layout(
+            title=f'Cluster {predicted_cluster} - {selected_feature}',
+            xaxis_title=selected_feature,
+            yaxis_title='Count',
+            height=300,
+            margin=dict(l=40, r=20, t=50, b=80),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            xaxis_tickangle=-45,
+        )
+        return fig
+
+    @rx.var
+    def ecci_all_clusters_feature_figure(self) -> go.Figure:
+        """Generate grouped bar chart for all clusters' feature distribution."""
+        fig = go.Figure()
+        feature_counts = self.ecci_cluster_feature_counts
+        selected_feature = self.ecci_selected_feature
+
+        if feature_counts:
+            # Get all unique feature values across clusters
+            all_values = set()
+            for cluster_data in feature_counts.values():
+                if isinstance(cluster_data, dict):
+                    all_values.update(cluster_data.keys())
+
+            # Sort and limit to top 10 by total count
+            value_totals = {}
+            for val in all_values:
+                total = sum(
+                    cluster_data.get(val, 0)
+                    for cluster_data in feature_counts.values()
+                    if isinstance(cluster_data, dict)
+                )
+                value_totals[val] = total
+
+            top_values = sorted(value_totals.keys(), key=lambda x: value_totals[x], reverse=True)[:10]
+
+            # Add a bar for each cluster
+            colors = ['#8b5cf6', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#ec4899']
+            for i, (cluster_id, cluster_data) in enumerate(sorted(feature_counts.items())):
+                if isinstance(cluster_data, dict):
+                    values = [cluster_data.get(val, 0) for val in top_values]
+                    fig.add_trace(
+                        go.Bar(
+                            name=f'Cluster {cluster_id}',
+                            x=[str(v) for v in top_values],
+                            y=values,
+                            marker_color=colors[i % len(colors)],
+                        )
+                    )
+
+        fig.update_layout(
+            title=f'Feature Distribution: {selected_feature}',
+            xaxis_title=selected_feature,
+            yaxis_title='Count',
+            barmode='group',
+            height=400,
+            margin=dict(l=40, r=20, t=50, b=100),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            xaxis_tickangle=-45,
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+        )
+        return fig
+
 
     ##==========================================================================
     ## EVENTS
@@ -345,6 +805,10 @@ class State(rx.State):
             # Initialize form data with sample
             if project_name == "Transaction Fraud Detection":
                 await self._init_tfd_form_internal(sample_data)
+            elif project_name == "Estimated Time of Arrival":
+                await self._init_eta_form_internal(sample_data)
+            elif project_name == "E-Commerce Customer Interactions":
+                await self._init_ecci_form_internal(sample_data)
         except Exception as e:
             print(f"Error fetching initial sample for {project_name}: {e}")
             async with self:
@@ -353,7 +817,7 @@ class State(rx.State):
     async def _init_tfd_form_internal(self, sample: dict):
         """Internal helper to initialize TFD form (called from background events)."""
         # Parse timestamp
-        timestamp_str = sample.get("timestamp", "")
+        timestamp_str = sample.get("timestamp") or ""
         timestamp_date = ""
         timestamp_time = ""
         if timestamp_str:
@@ -364,29 +828,35 @@ class State(rx.State):
             except:
                 timestamp_date = dt.datetime.now().strftime("%Y-%m-%d")
                 timestamp_time = dt.datetime.now().strftime("%H:%M")
+
         form_data = {
-            "amount": sample.get("amount", 0.0),
-            "account_age_days": sample.get("account_age_days", 0),
+            # Numeric fields - convert to string for proper display
+            "amount": safe_float_str(sample.get("amount"), 0.0),
+            "account_age_days": safe_int_str(sample.get("account_age_days"), 0),
+            "lat": safe_float_str(sample.get("location", {}).get("lat"), 0.0),
+            "lon": safe_float_str(sample.get("location", {}).get("lon"), 0.0),
+            # Timestamp fields
             "timestamp_date": timestamp_date,
             "timestamp_time": timestamp_time,
-            "currency": sample.get("currency", ""),
-            "merchant_id": sample.get("merchant_id", ""),
-            "product_category": sample.get("product_category", ""),
-            "transaction_type": sample.get("transaction_type", ""),
-            "payment_method": sample.get("payment_method", ""),
-            "lat": sample.get("location", {}).get("lat", 0.0),
-            "lon": sample.get("location", {}).get("lon", 0.0),
-            "browser": sample.get("device_info", {}).get("browser", ""),
-            "os": sample.get("device_info", {}).get("os", ""),
-            "cvv_provided": sample.get("cvv_provided", False),
-            "billing_address_match": sample.get("billing_address_match", False),
-            "transaction_id": sample.get("transaction_id", ""),
-            "user_id": sample.get("user_id", ""),
-            "ip_address": sample.get("ip_address", ""),
-            "user_agent": sample.get("user_agent", "")
+            # String fields - use or "" to handle None
+            "currency": get_str(sample, "currency"),
+            "merchant_id": get_str(sample, "merchant_id"),
+            "product_category": get_str(sample, "product_category"),
+            "transaction_type": get_str(sample, "transaction_type"),
+            "payment_method": get_str(sample, "payment_method"),
+            "browser": get_nested_str(sample, "device_info", "browser"),
+            "os": get_nested_str(sample, "device_info", "os"),
+            # Boolean fields
+            "cvv_provided": safe_bool(sample.get("cvv_provided"), False),
+            "billing_address_match": safe_bool(sample.get("billing_address_match"), False),
+            # Read-only string fields
+            "transaction_id": get_str(sample, "transaction_id"),
+            "user_id": get_str(sample, "user_id"),
+            "ip_address": get_str(sample, "ip_address"),
+            "user_agent": get_str(sample, "user_agent"),
         }
         async with self:
-            self.form_data["Transaction Fraud Detection"] = form_data
+            self.form_data = {**self.form_data, "Transaction Fraud Detection": form_data}
         # Fetch dropdown options in parallel
         await self._fetch_tfd_options_internal()
 
@@ -558,15 +1028,22 @@ class State(rx.State):
                     }
                 }
 
+    # Model name mapping for MLflow metrics
+    _mlflow_model_names: dict = {
+        "Transaction Fraud Detection": "ARFClassifier",
+        "Estimated Time of Arrival": "ARFRegressor",
+    }
+
     @rx.event(background = True)
     async def get_mlflow_metrics(self, project_name: str):
         """Fetch MLflow metrics for a project (runs in background to avoid lock expiration)."""
+        model_name = self._mlflow_model_names.get(project_name, "ARFClassifier")
         try:
             response = await httpx_client_post(
                 url = f"{FASTAPI_BASE_URL}/mlflow_metrics",
                 json = {
                     "project_name": project_name,
-                    "model_name": "ARFClassifier"
+                    "model_name": model_name
                 },
                 timeout = 60.0
             )
@@ -586,12 +1063,13 @@ class State(rx.State):
     @rx.event(background = True)
     async def refresh_mlflow_metrics(self, project_name: str):
         """Force refresh MLflow metrics bypassing cache."""
+        model_name = self._mlflow_model_names.get(project_name, "ARFClassifier")
         try:
             response = await httpx_client_post(
                 url = f"{FASTAPI_BASE_URL}/mlflow_metrics",
                 json = {
                     "project_name": project_name,
-                    "model_name": "ARFClassifier",
+                    "model_name": model_name,
                     "force_refresh": True
                 },
                 timeout = 60.0
@@ -613,3 +1091,605 @@ class State(rx.State):
                 description = str(e),
                 duration = 3000
             )
+
+    # =========================================================================
+    # Estimated Time of Arrival (ETA) event handlers
+    # =========================================================================
+    async def _init_eta_form_internal(self, sample: dict):
+        """Internal helper to initialize ETA form (called from background events)."""
+        # Parse timestamp
+        timestamp_str = sample.get("timestamp") or ""
+        timestamp_date = ""
+        timestamp_time = ""
+        if timestamp_str:
+            try:
+                timestamp = dt.datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%S.%f%z")
+                timestamp_date = timestamp.strftime("%Y-%m-%d")
+                timestamp_time = timestamp.strftime("%H:%M")
+            except:
+                timestamp_date = dt.datetime.now().strftime("%Y-%m-%d")
+                timestamp_time = dt.datetime.now().strftime("%H:%M")
+
+        # Get select field values for dropdown options
+        driver_id = get_str(sample, "driver_id")
+        vehicle_id = get_str(sample, "vehicle_id")
+        weather = get_str(sample, "weather")
+        vehicle_type = get_str(sample, "vehicle_type")
+
+        # Fetch dropdown options first, ensuring sample values are included
+        await self._fetch_eta_options_internal(
+            driver_id=driver_id,
+            vehicle_id=vehicle_id,
+            weather=weather,
+            vehicle_type=vehicle_type
+        )
+
+        # Then set form data (after options are loaded so selects work correctly)
+        form_data = {
+            # Select fields (string)
+            "driver_id": driver_id,
+            "vehicle_id": vehicle_id,
+            "weather": weather,
+            "vehicle_type": vehicle_type,
+            # Timestamp fields
+            "timestamp_date": timestamp_date,
+            "timestamp_time": timestamp_time,
+            # Coordinate fields (float as string)
+            "origin_lat": safe_float_str(sample.get("origin", {}).get("lat"), 29.8),
+            "origin_lon": safe_float_str(sample.get("origin", {}).get("lon"), -95.4),
+            "destination_lat": safe_float_str(sample.get("destination", {}).get("lat"), 29.8),
+            "destination_lon": safe_float_str(sample.get("destination", {}).get("lon"), -95.4),
+            # Integer fields (as string for proper display)
+            "hour_of_day": safe_int_str(sample.get("hour_of_day"), 12),
+            "debug_incident_delay_seconds": safe_int_str(sample.get("debug_incident_delay_seconds"), 0),
+            "initial_estimated_travel_time_seconds": safe_int_str(sample.get("initial_estimated_travel_time_seconds"), 60),
+            "day_of_week": safe_int_str(sample.get("day_of_week"), 0),
+            # Float fields (as string for proper display)
+            "driver_rating": safe_float_str(sample.get("driver_rating"), 4.5),
+            "debug_traffic_factor": safe_float_str(sample.get("debug_traffic_factor"), 1.0),
+            "debug_weather_factor": safe_float_str(sample.get("debug_weather_factor"), 1.0),
+            "debug_driver_factor": safe_float_str(sample.get("debug_driver_factor"), 1.0),
+            "temperature_celsius": safe_float_str(sample.get("temperature_celsius"), 25.0),
+            "estimated_distance_km": safe_float_str(sample.get("estimated_distance_km"), 0.0),
+            # Read-only string fields
+            "trip_id": get_str(sample, "trip_id"),
+        }
+        # Create new dict to trigger reactivity
+        async with self:
+            self.form_data = {**self.form_data, "Estimated Time of Arrival": form_data}
+
+    async def _fetch_eta_options_internal(
+        self,
+        driver_id: str = None,
+        vehicle_id: str = None,
+        weather: str = None,
+        vehicle_type: str = None
+    ):
+        """Internal helper to fetch ETA dropdown options in parallel.
+
+        Args:
+            driver_id: If provided, ensures this value is in the driver_id options
+            vehicle_id: If provided, ensures this value is in the vehicle_id options
+            weather: If provided, ensures this value is in the weather options
+            vehicle_type: If provided, ensures this value is in the vehicle_type options
+        """
+        project_name = "Estimated Time of Arrival"
+        try:
+            responses = await asyncio.gather(
+                httpx_client_post(
+                    url = f"{FASTAPI_BASE_URL}/unique_values",
+                    json = {"column_name": "driver_id", "project_name": project_name},
+                    timeout = 30.0
+                ),
+                httpx_client_post(
+                    url = f"{FASTAPI_BASE_URL}/unique_values",
+                    json = {"column_name": "vehicle_id", "project_name": project_name},
+                    timeout = 30.0
+                ),
+                httpx_client_post(
+                    url = f"{FASTAPI_BASE_URL}/unique_values",
+                    json = {"column_name": "weather", "project_name": project_name},
+                    timeout = 30.0
+                ),
+                httpx_client_post(
+                    url = f"{FASTAPI_BASE_URL}/unique_values",
+                    json = {"column_name": "vehicle_type", "project_name": project_name},
+                    timeout = 30.0
+                ),
+                return_exceptions = True
+            )
+            driver_response, vehicle_response, weather_response, vehicle_type_response = responses
+
+            # Get options and ensure sample values are included
+            driver_id_options = driver_response.json().get("unique_values", []) if not isinstance(driver_response, Exception) else []
+            if driver_id and driver_id not in driver_id_options:
+                driver_id_options = [driver_id] + driver_id_options
+
+            vehicle_id_options = vehicle_response.json().get("unique_values", []) if not isinstance(vehicle_response, Exception) else []
+            if vehicle_id and vehicle_id not in vehicle_id_options:
+                vehicle_id_options = [vehicle_id] + vehicle_id_options
+
+            weather_options = weather_response.json().get("unique_values", []) if not isinstance(weather_response, Exception) else []
+            if weather and weather not in weather_options:
+                weather_options = [weather] + weather_options
+
+            vehicle_type_options = vehicle_type_response.json().get("unique_values", []) if not isinstance(vehicle_type_response, Exception) else []
+            if vehicle_type and vehicle_type not in vehicle_type_options:
+                vehicle_type_options = [vehicle_type] + vehicle_type_options
+
+            dropdown_options = {
+                "driver_id": driver_id_options,
+                "vehicle_id": vehicle_id_options,
+                "weather": weather_options,
+                "vehicle_type": vehicle_type_options,
+            }
+            async with self:
+                self.dropdown_options["Estimated Time of Arrival"] = dropdown_options
+        except Exception as e:
+            print(f"Error fetching ETA dropdown options: {e}")
+            async with self:
+                self.dropdown_options["Estimated Time of Arrival"] = {}
+
+    # ETA coordinate bounds (Houston metro area)
+    _eta_lat_bounds = (29.5, 30.1)
+    _eta_lon_bounds = (-95.8, -95.0)
+
+    # ETA Form field update handler (consolidated)
+    _eta_float_fields = {
+        "origin_lat", "origin_lon", "destination_lat", "destination_lon",
+        "driver_rating", "debug_traffic_factor", "debug_weather_factor",
+        "debug_driver_factor", "temperature_celsius", "estimated_distance_km"
+    }
+    _eta_int_fields = {"hour_of_day", "debug_incident_delay_seconds", "initial_estimated_travel_time_seconds", "day_of_week"}
+
+    # Coordinate fields that should reset prediction when changed
+    _eta_coordinate_fields = {"origin_lat", "origin_lon", "destination_lat", "destination_lon"}
+
+    @rx.event
+    def update_eta(self, field: str, value):
+        """Update an ETA form field with automatic type conversion."""
+        try:
+            if field in self._eta_float_fields:
+                value = float(value) if value else 0.0
+            elif field in self._eta_int_fields:
+                value = int(value) if value else 0
+            # str fields need no conversion
+        except (ValueError, TypeError):
+            return  # Ignore invalid conversions
+        current = self.form_data.get("Estimated Time of Arrival", {})
+        current[field] = value
+        self.form_data = {**self.form_data, "Estimated Time of Arrival": current}
+        # Reset prediction if coordinate field changed
+        if field in self._eta_coordinate_fields:
+            self.prediction_results = {
+                **self.prediction_results,
+                "Estimated Time of Arrival": {"show": False, "eta_seconds": 0.0}
+            }
+
+    @rx.event
+    def generate_random_eta_coordinates(self):
+        """Generate random coordinates within Houston metro bounds."""
+        import random
+        current = self.form_data.get("Estimated Time of Arrival", {})
+        # Generate random origin coordinates
+        current["origin_lat"] = round(random.uniform(self._eta_lat_bounds[0], self._eta_lat_bounds[1]), 6)
+        current["origin_lon"] = round(random.uniform(self._eta_lon_bounds[0], self._eta_lon_bounds[1]), 6)
+        # Generate random destination coordinates (ensure not too close to origin)
+        while True:
+            dest_lat = round(random.uniform(self._eta_lat_bounds[0], self._eta_lat_bounds[1]), 6)
+            dest_lon = round(random.uniform(self._eta_lon_bounds[0], self._eta_lon_bounds[1]), 6)
+            if abs(current["origin_lat"] - dest_lat) >= 0.01 or abs(current["origin_lon"] - dest_lon) >= 0.01:
+                break
+        current["destination_lat"] = dest_lat
+        current["destination_lon"] = dest_lon
+        self.form_data = {**self.form_data, "Estimated Time of Arrival": current}
+        # Reset prediction when coordinates change
+        self.prediction_results = {
+            **self.prediction_results,
+            "Estimated Time of Arrival": {"show": False, "eta_seconds": 0.0}
+        }
+
+    @rx.event(background = True)
+    async def predict_eta(self):
+        """Make prediction for Estimated Time of Arrival using current form state."""
+        project_name = "Estimated Time of Arrival"
+        current_form = self.form_data.get(project_name, {})
+        # Combine date and time
+        timestamp = f"{current_form.get('timestamp_date', '')}T{current_form.get('timestamp_time', '')}:00.000000+00:00"
+        # Prepare request payload from current form state
+        payload = {
+            "project_name": project_name,
+            "model_name": "ARFRegressor",
+            "trip_id": current_form.get("trip_id", ""),
+            "driver_id": current_form.get("driver_id", ""),
+            "vehicle_id": current_form.get("vehicle_id", ""),
+            "timestamp": timestamp,
+            "origin": {
+                "lat": float(current_form.get("origin_lat", 0)),
+                "lon": float(current_form.get("origin_lon", 0))
+            },
+            "destination": {
+                "lat": float(current_form.get("destination_lat", 0)),
+                "lon": float(current_form.get("destination_lon", 0))
+            },
+            "estimated_distance_km": self.eta_estimated_distance_km,
+            "weather": current_form.get("weather", ""),
+            "temperature_celsius": float(current_form.get("temperature_celsius", 0)),
+            "day_of_week": int(current_form.get("day_of_week", 0)),
+            "hour_of_day": int(current_form.get("hour_of_day", 0)),
+            "driver_rating": float(current_form.get("driver_rating", 0)),
+            "vehicle_type": current_form.get("vehicle_type", ""),
+            "initial_estimated_travel_time_seconds": self.eta_initial_estimated_travel_time_seconds,
+            "debug_traffic_factor": float(current_form.get("debug_traffic_factor", 0)),
+            "debug_weather_factor": float(current_form.get("debug_weather_factor", 0)),
+            "debug_incident_delay_seconds": int(current_form.get("debug_incident_delay_seconds", 0)),
+            "debug_driver_factor": float(current_form.get("debug_driver_factor", 0))
+        }
+        # Make prediction
+        try:
+            print(f"Making ETA prediction with payload: {payload}")
+            response = await httpx_client_post(
+                url = f"{FASTAPI_BASE_URL}/predict",
+                json = payload,
+                timeout = 30.0
+            )
+            result = response.json()
+            print(f"ETA Prediction result: {result}")
+            eta_seconds = result.get("Estimated Time of Arrival", 0.0)
+            async with self:
+                self.prediction_results = {
+                    **self.prediction_results,
+                    project_name: {
+                        "eta_seconds": eta_seconds,
+                        "show": True
+                    }
+                }
+        except Exception as e:
+            print(f"Error making ETA prediction: {e}")
+            async with self:
+                self.prediction_results = {
+                    **self.prediction_results,
+                    project_name: {
+                        "eta_seconds": 0.0,
+                        "show": False
+                    }
+                }
+
+    # =========================================================================
+    # E-Commerce Customer Interactions (ECCI) event handlers
+    # =========================================================================
+    async def _init_ecci_form_internal(self, sample: dict):
+        """Internal helper to initialize ECCI form (called from background events)."""
+        # Parse timestamp
+        timestamp_str = sample.get("timestamp") or ""
+        timestamp_date = ""
+        timestamp_time = ""
+        if timestamp_str:
+            try:
+                timestamp = dt.datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%S.%f%z")
+                timestamp_date = timestamp.strftime("%Y-%m-%d")
+                timestamp_time = timestamp.strftime("%H:%M")
+            except:
+                timestamp_date = dt.datetime.now().strftime("%Y-%m-%d")
+                timestamp_time = dt.datetime.now().strftime("%H:%M")
+
+        form_data = {
+            # Device info (nested structure) - select fields
+            "browser": get_nested_str(sample, "device_info", "browser"),
+            "device_type": get_nested_str(sample, "device_info", "device_type"),
+            "os": get_nested_str(sample, "device_info", "os"),
+            # Location (float as string)
+            "lat": safe_float_str(sample.get("location", {}).get("lat"), 29.8),
+            "lon": safe_float_str(sample.get("location", {}).get("lon"), -95.4),
+            # Select/string fields
+            "event_type": get_str(sample, "event_type"),
+            "product_category": get_str(sample, "product_category"),
+            # Text input fields
+            "product_id": get_str(sample, "product_id"),
+            "referrer_url": get_str(sample, "referrer_url"),
+            # Numeric fields (as string for proper display)
+            "price": safe_float_str(sample.get("price"), 0.0),
+            "session_event_sequence": safe_int_str(sample.get("session_event_sequence"), 1),
+            "quantity": safe_int_str(sample.get("quantity"), 1),
+            "time_on_page_seconds": safe_int_str(sample.get("time_on_page_seconds"), 0),
+            # Timestamp fields
+            "timestamp_date": timestamp_date,
+            "timestamp_time": timestamp_time,
+            # Read-only string fields
+            "customer_id": get_str(sample, "customer_id"),
+            "event_id": get_str(sample, "event_id"),
+            "page_url": get_str(sample, "page_url"),
+            "search_query": get_str(sample, "search_query"),
+            "session_id": get_str(sample, "session_id"),
+        }
+        # Create new dict to trigger reactivity
+        async with self:
+            self.form_data = {**self.form_data, "E-Commerce Customer Interactions": form_data}
+        # Fetch dropdown options in parallel
+        await self._fetch_ecci_options_internal()
+
+    async def _fetch_ecci_options_internal(self):
+        """Internal helper to fetch ECCI dropdown options in parallel.
+        Note: product_id and referrer_url are excluded - they use text inputs due to high cardinality.
+        """
+        project_name = "E-Commerce Customer Interactions"
+        try:
+            # Only fetch low-cardinality fields for dropdowns
+            responses = await asyncio.gather(
+                httpx_client_post(
+                    url=f"{FASTAPI_BASE_URL}/unique_values",
+                    json={"column_name": "device_info", "project_name": project_name, "limit": 50},
+                    timeout=30.0
+                ),
+                httpx_client_post(
+                    url=f"{FASTAPI_BASE_URL}/unique_values",
+                    json={"column_name": "event_type", "project_name": project_name, "limit": 20},
+                    timeout=30.0
+                ),
+                httpx_client_post(
+                    url=f"{FASTAPI_BASE_URL}/unique_values",
+                    json={"column_name": "product_category", "project_name": project_name, "limit": 50},
+                    timeout=30.0
+                ),
+                return_exceptions=True
+            )
+            (device_response, event_type_response, product_category_response) = responses
+
+            # Parse device info to extract browser, device_type, os options
+            browsers = set()
+            device_types = set()
+            oses = set()
+            if not isinstance(device_response, Exception):
+                device_info_options = device_response.json().get("unique_values", [])
+                for device_str in device_info_options:
+                    try:
+                        device_dict = eval(device_str)
+                        browsers.add(device_dict.get("browser", ""))
+                        device_types.add(device_dict.get("device_type", ""))
+                        oses.add(device_dict.get("os", ""))
+                    except:
+                        pass
+
+            dropdown_options = {
+                "browser": sorted(list(browsers - {""})),
+                "device_type": sorted(list(device_types - {""})),
+                "os": sorted(list(oses - {""})),
+                "event_type": event_type_response.json().get("unique_values", []) if not isinstance(event_type_response, Exception) else [],
+                "product_category": product_category_response.json().get("unique_values", []) if not isinstance(product_category_response, Exception) else [],
+            }
+            async with self:
+                self.dropdown_options["E-Commerce Customer Interactions"] = dropdown_options
+        except Exception as e:
+            print(f"Error fetching ECCI dropdown options: {e}")
+            async with self:
+                self.dropdown_options["E-Commerce Customer Interactions"] = {}
+
+    # ECCI coordinate bounds (Houston metro area - same as ETA)
+    _ecci_lat_bounds = (29.5, 30.1)
+    _ecci_lon_bounds = (-95.8, -95.0)
+
+    # ECCI Form field update handler (consolidated)
+    _ecci_float_fields = {"lat", "lon", "price"}
+    _ecci_int_fields = {"session_event_sequence", "quantity", "time_on_page_seconds"}
+
+    @rx.event
+    def update_ecci(self, field: str, value):
+        """Update an ECCI form field with automatic type conversion."""
+        try:
+            if field in self._ecci_float_fields:
+                value = float(value) if value else 0.0
+            elif field in self._ecci_int_fields:
+                value = int(value) if value else 0
+            # str fields need no conversion
+        except (ValueError, TypeError):
+            return  # Ignore invalid conversions
+        current = self.form_data.get("E-Commerce Customer Interactions", {})
+        current[field] = value
+        self.form_data = {**self.form_data, "E-Commerce Customer Interactions": current}
+
+    @rx.event
+    def generate_random_ecci_coordinates(self):
+        """Generate random coordinates within Houston metro bounds for ECCI."""
+        import random
+        current = self.form_data.get("E-Commerce Customer Interactions", {})
+        current["lat"] = round(random.uniform(self._ecci_lat_bounds[0], self._ecci_lat_bounds[1]), 3)
+        current["lon"] = round(random.uniform(self._ecci_lon_bounds[0], self._ecci_lon_bounds[1]), 3)
+        self.form_data = {**self.form_data, "E-Commerce Customer Interactions": current}
+        # Reset prediction when coordinates change
+        self.prediction_results = {
+            **self.prediction_results,
+            "E-Commerce Customer Interactions": {"show": False, "cluster": 0}
+        }
+
+    @rx.event(background=True)
+    async def predict_ecci(self):
+        """Make prediction for E-Commerce Customer Interactions using current form state."""
+        project_name = "E-Commerce Customer Interactions"
+        current_form = self.form_data.get(project_name, {})
+        # Combine date and time
+        timestamp = f"{current_form.get('timestamp_date', '')}T{current_form.get('timestamp_time', '')}:00.000000+00:00"
+        # Prepare request payload from current form state
+        payload = {
+            "project_name": project_name,
+            "customer_id": current_form.get("customer_id", ""),
+            "device_info": {
+                "device_type": current_form.get("device_type", ""),
+                "browser": current_form.get("browser", ""),
+                "os": current_form.get("os", "")
+            },
+            "event_id": current_form.get("event_id", ""),
+            "event_type": current_form.get("event_type", ""),
+            "location": {
+                "lat": float(current_form.get("lat", 0)),
+                "lon": float(current_form.get("lon", 0))
+            },
+            "page_url": current_form.get("page_url", ""),
+            "price": float(current_form.get("price", 0)),
+            "product_category": current_form.get("product_category", ""),
+            "product_id": current_form.get("product_id", ""),
+            "quantity": int(current_form.get("quantity", 1)) if current_form.get("quantity") else None,
+            "referrer_url": current_form.get("referrer_url", ""),
+            "search_query": current_form.get("search_query", ""),
+            "session_event_sequence": int(current_form.get("session_event_sequence", 1)),
+            "session_id": current_form.get("session_id", ""),
+            "time_on_page_seconds": int(current_form.get("time_on_page_seconds", 0)),
+            "timestamp": timestamp
+        }
+        # Make prediction
+        try:
+            print(f"Making ECCI prediction with payload: {payload}")
+            response = await httpx_client_post(
+                url=f"{FASTAPI_BASE_URL}/predict",
+                json=payload,
+                timeout=30.0
+            )
+            result = response.json()
+            print(f"ECCI Prediction result: {result}")
+            cluster = result.get("cluster", 0)
+            async with self:
+                self.prediction_results = {
+                    **self.prediction_results,
+                    project_name: {
+                        "cluster": cluster,
+                        "show": True
+                    }
+                }
+        except Exception as e:
+            print(f"Error making ECCI prediction: {e}")
+            async with self:
+                self.prediction_results = {
+                    **self.prediction_results,
+                    project_name: {
+                        "cluster": 0,
+                        "show": False
+                    }
+                }
+
+    @rx.event(background=True)
+    async def fetch_ecci_cluster_counts(self):
+        """Fetch cluster counts from FastAPI."""
+        try:
+            response = await httpx_client_get(
+                url=f"{FASTAPI_BASE_URL}/cluster_counts",
+                timeout=30.0
+            )
+            cluster_counts = response.json()
+            async with self:
+                self.ecci_cluster_counts = cluster_counts
+        except Exception as e:
+            print(f"Error fetching ECCI cluster counts: {e}")
+            async with self:
+                self.ecci_cluster_counts = {}
+
+    @rx.event(background=True)
+    async def fetch_ecci_cluster_feature_counts(self, feature: str = None):
+        """Fetch feature counts per cluster from FastAPI."""
+        if feature is None:
+            feature = self.ecci_selected_feature
+        # Handle device_info sub-features
+        device_info_features = ["device_type", "browser", "os"]
+        column_name = "device_info" if feature in device_info_features else feature
+        try:
+            response = await httpx_client_post(
+                url=f"{FASTAPI_BASE_URL}/cluster_feature_counts",
+                json={"column_name": column_name},
+                timeout=30.0
+            )
+            raw_data = response.json()
+            # Process device_info sub-features
+            if feature in device_info_features:
+                processed_data = {}
+                for cluster_id, device_counts in raw_data.items():
+                    processed_data[cluster_id] = {}
+                    for device_str, count in device_counts.items():
+                        try:
+                            import ast
+                            device_dict = ast.literal_eval(device_str)
+                            feature_value = device_dict.get(feature, "unknown")
+                            if feature_value in processed_data[cluster_id]:
+                                processed_data[cluster_id][feature_value] += count
+                            else:
+                                processed_data[cluster_id][feature_value] = count
+                        except:
+                            pass
+                async with self:
+                    self.ecci_cluster_feature_counts = processed_data
+            else:
+                async with self:
+                    self.ecci_cluster_feature_counts = raw_data
+        except Exception as e:
+            print(f"Error fetching ECCI cluster feature counts: {e}")
+            async with self:
+                self.ecci_cluster_feature_counts = {}
+
+    @rx.event
+    def set_ecci_selected_feature(self, feature: str):
+        """Set the selected feature and trigger data fetch."""
+        self.ecci_selected_feature = feature
+        return State.fetch_ecci_cluster_feature_counts(feature)
+
+    # =========================================================================
+    # Randomize Form Event Handlers
+    # =========================================================================
+    @rx.event(background=True)
+    async def randomize_tfd_form(self):
+        """Fetch a random sample and populate the TFD form."""
+        project_name = "Transaction Fraud Detection"
+        try:
+            response = await httpx_client_post(
+                url=f"{FASTAPI_BASE_URL}/sample",
+                json={"project_name": project_name},
+                timeout=30.0
+            )
+            sample_data = response.json()
+            await self._init_tfd_form_internal(sample_data)
+            # Reset prediction when form is randomized
+            async with self:
+                self.prediction_results = {
+                    **self.prediction_results,
+                    project_name: {"prediction": None, "probability": None, "show": False}
+                }
+        except Exception as e:
+            print(f"Error randomizing TFD form: {e}")
+
+    @rx.event(background=True)
+    async def randomize_eta_form(self):
+        """Fetch a random sample and populate the ETA form."""
+        project_name = "Estimated Time of Arrival"
+        try:
+            response = await httpx_client_post(
+                url=f"{FASTAPI_BASE_URL}/sample",
+                json={"project_name": project_name},
+                timeout=30.0
+            )
+            sample_data = response.json()
+            await self._init_eta_form_internal(sample_data)
+            # Reset prediction when form is randomized
+            async with self:
+                self.prediction_results = {
+                    **self.prediction_results,
+                    project_name: {"eta_seconds": 0.0, "show": False}
+                }
+        except Exception as e:
+            print(f"Error randomizing ETA form: {e}")
+
+    @rx.event(background=True)
+    async def randomize_ecci_form(self):
+        """Fetch a random sample and populate the ECCI form."""
+        project_name = "E-Commerce Customer Interactions"
+        try:
+            response = await httpx_client_post(
+                url=f"{FASTAPI_BASE_URL}/sample",
+                json={"project_name": project_name},
+                timeout=30.0
+            )
+            sample_data = response.json()
+            await self._init_ecci_form_internal(sample_data)
+            # Reset prediction when form is randomized
+            async with self:
+                self.prediction_results = {
+                    **self.prediction_results,
+                    project_name: {"cluster": 0, "show": False}
+                }
+        except Exception as e:
+            print(f"Error randomizing ECCI form: {e}")
