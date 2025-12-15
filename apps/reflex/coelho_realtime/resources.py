@@ -13,18 +13,18 @@ def ml_training_switch(model_key: str, project_name: str) -> rx.Component:
         rx.hstack(
             rx.vstack(
                 rx.hstack(
-                    rx.icon("activity", size=18, color=rx.cond(
+                    rx.icon("activity", size = 18, color = rx.cond(
                         State.ml_training_enabled,
                         rx.color("green", 9),
                         rx.color("gray", 9)
                     )),
                     rx.text(
                         "Real-time ML Training",
-                        size="3",
-                        weight="medium"
+                        size = "3",
+                        weight = "medium"
                     ),
-                    spacing="2",
-                    align_items="center"
+                    spacing = "2",
+                    align_items = "center"
                 ),
                 rx.text(
                     rx.cond(
@@ -175,275 +175,257 @@ def page_tabs() -> rx.Component:
 ## TRANSACTION FRAUD DETECTION
 def transaction_fraud_detection_form() -> rx.Component:
     return rx.hstack(
-        # Left column - Form
+        # Left column - Form (no form wrapper, using on_change handlers)
         rx.card(
-            rx.form(
-                rx.vstack(
-                    # Row 1: Amount and Account Age
-                    rx.hstack(
-                        rx.vstack(
-                            rx.text("Amount", size = "1", color = "gray"),
-                            rx.input(
-                                name = "amount",
-                                type = "number",
-                                value = State.tfd_form_data.get("amount", ""),
-                                step = 0.01,
-                                required = True,
-                                width = "100%"
-                            ),
-                            spacing = "1",
-                            align_items = "start",
-                            width = "100%"
-                        ),
-                        rx.vstack(
-                            rx.text("Account Age (days)", size = "1", color = "gray"),
-                            rx.input(
-                                name = "account_age_days",
-                                type = "number",
-                                value = State.tfd_form_data.get("account_age_days", ""),
-                                min = 0,
-                                step = 1,
-                                required = True,
-                                width = "100%"
-                            ),
-                            spacing = "1",
-                            align_items = "start",
-                            width = "100%"
-                        ),
-                        spacing = "3",
-                        width = "100%"
-                    ),
-                    # Row 2: Date and Time
-                    rx.hstack(
-                        rx.vstack(
-                            rx.text("Date", size = "1", color = "gray"),
-                            rx.input(
-                                name = "timestamp_date",
-                                type = "date",
-                                value = State.tfd_form_data.get("timestamp_date", ""),
-                                required = True,
-                                width = "100%"
-                            ),
-                            spacing = "1",
-                            align_items = "start",
-                            width = "100%"
-                        ),
-                        rx.vstack(
-                            rx.text("Time", size = "1", color = "gray"),
-                            rx.input(
-                                name = "timestamp_time",
-                                type = "time",
-                                value = State.tfd_form_data.get("timestamp_time", ""),
-                                required = True,
-                                width = "100%"
-                            ),
-                            spacing = "1",
-                            align_items = "start",
-                            width = "100%"
-                        ),
-                        spacing = "3",
-                        width = "100%"
-                    ),
-                    # Row 3: Currency
+            rx.vstack(
+                # Row 1: Amount and Account Age
+                rx.hstack(
                     rx.vstack(
-                        rx.text("Currency", size = "1", color = "gray"),
-                        rx.select(
-                            State.tfd_currency_options,
-                            name = "currency",
-                            value = State.tfd_form_data.get("currency", ""),
-                            required = True,
+                        rx.text("Amount", size = "1", color = "gray"),
+                        rx.input(
+                            type = "number",
+                            value = State.tfd_form_data.get("amount", ""),
+                            on_change = State.update_tfd_amount,
+                            step = 0.01,
                             width = "100%"
                         ),
                         spacing = "1",
                         align_items = "start",
                         width = "100%"
                     ),
-                    # Row 4: Merchant ID and Product Category
-                    rx.hstack(
-                        rx.vstack(
-                            rx.text("Merchant ID", size = "1", color = "gray"),
-                            rx.select(
-                                State.tfd_merchant_id_options,
-                                name = "merchant_id",
-                                value = State.tfd_form_data.get("merchant_id", ""),
-                                required = True,
-                                width = "100%"
-                            ),
-                            spacing = "1",
-                            align_items = "start",
-                            width = "100%"
-                        ),
-                        rx.vstack(
-                            rx.text("Product Category", size = "1", color = "gray"),
-                            rx.select(
-                                State.tfd_product_category_options,
-                                name = "product_category",
-                                value = State.tfd_form_data.get("product_category", ""),
-                                required = True,
-                                width = "100%"
-                            ),
-                            spacing = "1",
-                            align_items = "start",
-                            width = "100%"
-                        ),
-                        spacing = "3",
-                        width = "100%"
-                    ),
-                    # Row 5: Transaction Type and Payment Method
-                    rx.hstack(
-                        rx.vstack(
-                            rx.text("Transaction Type", size = "1", color = "gray"),
-                            rx.select(
-                                State.tfd_transaction_type_options,
-                                name = "transaction_type",
-                                value = State.tfd_form_data.get("transaction_type", ""),
-                                required = True,
-                                width = "100%"
-                            ),
-                            spacing = "1",
-                            align_items = "start",
-                            width = "100%"
-                        ),
-                        rx.vstack(
-                            rx.text("Payment Method", size = "1", color = "gray"),
-                            rx.select(
-                                State.tfd_payment_method_options,
-                                name = "payment_method",
-                                value = State.tfd_form_data.get("payment_method", ""),
-                                required = True,
-                                width = "100%"
-                            ),
-                            spacing = "1",
-                            align_items = "start",
-                            width = "100%"
-                        ),
-                        spacing = "3",
-                        width = "100%"
-                    ),
-                    # Row 6: Latitude and Longitude
-                    rx.hstack(
-                        rx.vstack(
-                            rx.text("Latitude", size = "1", color = "gray"),
-                            rx.input(
-                                name = "lat",
-                                type = "number",
-                                value = State.tfd_form_data.get("lat", ""),
-                                min = -90.0,
-                                max = 90.0,
-                                step = 0.0001,
-                                required = True,
-                                width = "100%"
-                            ),
-                            spacing = "1",
-                            align_items = "start",
-                            width = "100%"
-                        ),
-                        rx.vstack(
-                            rx.text("Longitude", size = "1", color = "gray"),
-                            rx.input(
-                                name = "lon",
-                                type = "number",
-                                value = State.tfd_form_data.get("lon", ""),
-                                min = -180.0,
-                                max = 180.0,
-                                step = 0.0001,
-                                required = True,
-                                width = "100%"
-                            ),
-                            spacing = "1",
-                            align_items = "start",
-                            width = "100%"
-                        ),
-                        spacing = "3",
-                        width = "100%"
-                    ),
-                    # Row 7: Browser and OS
-                    rx.hstack(
-                        rx.vstack(
-                            rx.text("Browser", size = "1", color = "gray"),
-                            rx.select(
-                                State.tfd_browser_options,
-                                name = "browser",
-                                value = State.tfd_form_data.get("browser", ""),
-                                required = True,
-                                width = "100%"
-                            ),
-                            spacing = "1",
-                            align_items = "start",
-                            width = "100%"
-                        ),
-                        rx.vstack(
-                            rx.text("OS", size = "1", color = "gray"),
-                            rx.select(
-                                State.tfd_os_options,
-                                name = "os",
-                                value = State.tfd_form_data.get("os", ""),
-                                required = True,
-                                width = "100%"
-                            ),
-                            spacing = "1",
-                            align_items = "start",
-                            width = "100%"
-                        ),
-                        spacing = "3",
-                        width = "100%"
-                    ),
-                    # Row 8: CVV Provided and Billing Address Match
-                    rx.hstack(
-                        rx.checkbox(
-                            "CVV Provided",
-                            name = "cvv_provided",
-                            checked = State.tfd_form_data.get("cvv_provided", False),
-                            size = "1"
-                        ),
-                        rx.checkbox(
-                            "Billing Address Match",
-                            name = "billing_address_match",
-                            checked = State.tfd_form_data.get("billing_address_match", False),
-                            size = "1"
-                        ),
-                        spacing = "4",
-                        width = "100%"
-                    ),
-                    # Display fields
                     rx.vstack(
-                        rx.text(
-                            f"Transaction ID: {State.tfd_form_data.get('transaction_id', '')}",
-                            size = "1",
-                            color = "gray"
-                        ),
-                        rx.text(
-                            f"User ID: {State.tfd_form_data.get('user_id', '')}",
-                            size = "1",
-                            color = "gray"
-                        ),
-                        rx.text(
-                            f"IP Address: {State.tfd_form_data.get('ip_address', '')}",
-                            size = "1",
-                            color = "gray"
-                        ),
-                        rx.text(
-                            f"User Agent: {State.tfd_form_data.get('user_agent', '')}",
-                            size = "1",
-                            color = "gray"
+                        rx.text("Account Age (days)", size = "1", color = "gray"),
+                        rx.input(
+                            type = "number",
+                            value = State.tfd_form_data.get("account_age_days", ""),
+                            on_change = State.update_tfd_account_age,
+                            min = 0,
+                            step = 1,
+                            width = "100%"
                         ),
                         spacing = "1",
                         align_items = "start",
-                        width = "100%"
-                    ),
-                    # Submit button
-                    rx.button(
-                        "Predict",
-                        type = "submit",
-                        size = "3",
                         width = "100%"
                     ),
                     spacing = "3",
+                    width = "100%"
+                ),
+                # Row 2: Date and Time
+                rx.hstack(
+                    rx.vstack(
+                        rx.text("Date", size = "1", color = "gray"),
+                        rx.input(
+                            type = "date",
+                            value = State.tfd_form_data.get("timestamp_date", ""),
+                            on_change = State.update_tfd_date,
+                            width = "100%"
+                        ),
+                        spacing = "1",
+                        align_items = "start",
+                        width = "100%"
+                    ),
+                    rx.vstack(
+                        rx.text("Time", size = "1", color = "gray"),
+                        rx.input(
+                            type = "time",
+                            value = State.tfd_form_data.get("timestamp_time", ""),
+                            on_change = State.update_tfd_time,
+                            width = "100%"
+                        ),
+                        spacing = "1",
+                        align_items = "start",
+                        width = "100%"
+                    ),
+                    spacing = "3",
+                    width = "100%"
+                ),
+                # Row 3: Currency
+                rx.vstack(
+                    rx.text("Currency", size = "1", color = "gray"),
+                    rx.select(
+                        State.tfd_currency_options,
+                        value = State.tfd_form_data.get("currency", ""),
+                        on_change = State.update_tfd_currency,
+                        width = "100%"
+                    ),
+                    spacing = "1",
                     align_items = "start",
                     width = "100%"
                 ),
-                on_submit = State.predict_transaction_fraud_detection,
-                reset_on_submit = False,
+                # Row 4: Merchant ID and Product Category
+                rx.hstack(
+                    rx.vstack(
+                        rx.text("Merchant ID", size = "1", color = "gray"),
+                        rx.select(
+                            State.tfd_merchant_id_options,
+                            value = State.tfd_form_data.get("merchant_id", ""),
+                            on_change = State.update_tfd_merchant_id,
+                            width = "100%"
+                        ),
+                        spacing = "1",
+                        align_items = "start",
+                        width = "100%"
+                    ),
+                    rx.vstack(
+                        rx.text("Product Category", size = "1", color = "gray"),
+                        rx.select(
+                            State.tfd_product_category_options,
+                            value = State.tfd_form_data.get("product_category", ""),
+                            on_change = State.update_tfd_product_category,
+                            width = "100%"
+                        ),
+                        spacing = "1",
+                        align_items = "start",
+                        width = "100%"
+                    ),
+                    spacing = "3",
+                    width = "100%"
+                ),
+                # Row 5: Transaction Type and Payment Method
+                rx.hstack(
+                    rx.vstack(
+                        rx.text("Transaction Type", size = "1", color = "gray"),
+                        rx.select(
+                            State.tfd_transaction_type_options,
+                            value = State.tfd_form_data.get("transaction_type", ""),
+                            on_change = State.update_tfd_transaction_type,
+                            width = "100%"
+                        ),
+                        spacing = "1",
+                        align_items = "start",
+                        width = "100%"
+                    ),
+                    rx.vstack(
+                        rx.text("Payment Method", size = "1", color = "gray"),
+                        rx.select(
+                            State.tfd_payment_method_options,
+                            value = State.tfd_form_data.get("payment_method", ""),
+                            on_change = State.update_tfd_payment_method,
+                            width = "100%"
+                        ),
+                        spacing = "1",
+                        align_items = "start",
+                        width = "100%"
+                    ),
+                    spacing = "3",
+                    width = "100%"
+                ),
+                # Row 6: Latitude and Longitude
+                rx.hstack(
+                    rx.vstack(
+                        rx.text("Latitude", size = "1", color = "gray"),
+                        rx.input(
+                            type = "number",
+                            value = State.tfd_form_data.get("lat", ""),
+                            on_change = State.update_tfd_lat,
+                            min = -90.0,
+                            max = 90.0,
+                            step = 0.0001,
+                            width = "100%"
+                        ),
+                        spacing = "1",
+                        align_items = "start",
+                        width = "100%"
+                    ),
+                    rx.vstack(
+                        rx.text("Longitude", size = "1", color = "gray"),
+                        rx.input(
+                            type = "number",
+                            value = State.tfd_form_data.get("lon", ""),
+                            on_change = State.update_tfd_lon,
+                            min = -180.0,
+                            max = 180.0,
+                            step = 0.0001,
+                            width = "100%"
+                        ),
+                        spacing = "1",
+                        align_items = "start",
+                        width = "100%"
+                    ),
+                    spacing = "3",
+                    width = "100%"
+                ),
+                # Row 7: Browser and OS
+                rx.hstack(
+                    rx.vstack(
+                        rx.text("Browser", size = "1", color = "gray"),
+                        rx.select(
+                            State.tfd_browser_options,
+                            value = State.tfd_form_data.get("browser", ""),
+                            on_change = State.update_tfd_browser,
+                            width = "100%"
+                        ),
+                        spacing = "1",
+                        align_items = "start",
+                        width = "100%"
+                    ),
+                    rx.vstack(
+                        rx.text("OS", size = "1", color = "gray"),
+                        rx.select(
+                            State.tfd_os_options,
+                            value = State.tfd_form_data.get("os", ""),
+                            on_change = State.update_tfd_os,
+                            width = "100%"
+                        ),
+                        spacing = "1",
+                        align_items = "start",
+                        width = "100%"
+                    ),
+                    spacing = "3",
+                    width = "100%"
+                ),
+                # Row 8: CVV Provided and Billing Address Match
+                rx.hstack(
+                    rx.checkbox(
+                        "CVV Provided",
+                        checked = State.tfd_form_data.get("cvv_provided", False),
+                        on_change = State.update_tfd_cvv_provided,
+                        size = "1"
+                    ),
+                    rx.checkbox(
+                        "Billing Address Match",
+                        checked = State.tfd_form_data.get("billing_address_match", False),
+                        on_change = State.update_tfd_billing_address_match,
+                        size = "1"
+                    ),
+                    spacing = "4",
+                    width = "100%"
+                ),
+                # Display fields
+                rx.vstack(
+                    rx.text(
+                        f"Transaction ID: {State.tfd_form_data.get('transaction_id', '')}",
+                        size = "1",
+                        color = "gray"
+                    ),
+                    rx.text(
+                        f"User ID: {State.tfd_form_data.get('user_id', '')}",
+                        size = "1",
+                        color = "gray"
+                    ),
+                    rx.text(
+                        f"IP Address: {State.tfd_form_data.get('ip_address', '')}",
+                        size = "1",
+                        color = "gray"
+                    ),
+                    rx.text(
+                        f"User Agent: {State.tfd_form_data.get('user_agent', '')}",
+                        size = "1",
+                        color = "gray"
+                    ),
+                    spacing = "1",
+                    align_items = "start",
+                    width = "100%"
+                ),
+                # Predict button (regular button with on_click)
+                rx.button(
+                    "Predict",
+                    on_click = State.predict_transaction_fraud_detection,
+                    size = "3",
+                    width = "100%"
+                ),
+                spacing = "3",
+                align_items = "start",
                 width = "100%"
             ),
             width = "30%"
@@ -455,7 +437,19 @@ def transaction_fraud_detection_form() -> rx.Component:
                 size = "2",
                 color = "gray"
             ),
-            rx.heading("Classification Metrics", size = "6"),
+            rx.hstack(
+                rx.heading("Classification Metrics", size = "6"),
+                rx.button(
+                    rx.icon("refresh-cw", size = 16),
+                    on_click = State.refresh_mlflow_metrics("Transaction Fraud Detection"),
+                    size = "1",
+                    variant = "ghost",
+                    cursor = "pointer",
+                    title = "Refresh metrics"
+                ),
+                align_items = "center",
+                spacing = "2"
+            ),
             transaction_fraud_detection_metrics(),
             rx.divider(),
             rx.cond(
@@ -464,6 +458,53 @@ def transaction_fraud_detection_form() -> rx.Component:
                     rx.heading("Prediction", size = "6"),
                     rx.card(
                         rx.vstack(
+                            # Title with prediction result
+                            rx.text(
+                                f"Fraud Probability: {State.tfd_fraud_probability * 100:.2f}% - {State.tfd_prediction_text}",
+                                size = "5",
+                                weight = "bold",
+                                align = "center",
+                                color = State.tfd_prediction_color
+                            ),
+                            # Visual probability bar
+                            rx.vstack(
+                                rx.hstack(
+                                    rx.text("Fraud", size = "2", color = "red"),
+                                    rx.spacer(),
+                                    rx.text("Not Fraud", size = "2", color = "blue"),
+                                    width = "100%"
+                                ),
+                                rx.box(
+                                    rx.hstack(
+                                        rx.box(
+                                            width = f"{State.tfd_fraud_probability * 100}%",
+                                            height = "100%",
+                                            background = "#FF0000",
+                                        ),
+                                        rx.box(
+                                            width = f"{(1 - State.tfd_fraud_probability) * 100}%",
+                                            height = "100%",
+                                            background = "#0000FF",
+                                        ),
+                                        width = "100%",
+                                        height = "100%",
+                                        spacing = "0"
+                                    ),
+                                    width = "100%",
+                                    height = "40px",
+                                    border_radius = "8px",
+                                    overflow = "hidden",
+                                    border = f"1px solid {rx.color('gray', 6)}"
+                                ),
+                                rx.hstack(
+                                    rx.text(f"{State.tfd_fraud_probability * 100:.1f}%", size = "2", color = "red", weight = "bold"),
+                                    rx.spacer(),
+                                    rx.text(f"{(1 - State.tfd_fraud_probability) * 100:.1f}%", size = "2", color = "blue", weight = "bold"),
+                                    width = "100%"
+                                ),
+                                spacing = "1",
+                                width = "100%"
+                            ),
                             # Prediction summary cards
                             rx.hstack(
                                 rx.card(
@@ -481,7 +522,8 @@ def transaction_fraud_detection_form() -> rx.Component:
                                         width = "100%"
                                     ),
                                     variant = "surface",
-                                    size = "3"
+                                    size = "3",
+                                    width = "100%"
                                 ),
                                 rx.card(
                                     rx.vstack(
@@ -491,18 +533,15 @@ def transaction_fraud_detection_form() -> rx.Component:
                                             size = "8",
                                             weight = "bold",
                                             align = "center",
-                                            color = rx.cond(
-                                                State.tfd_fraud_probability > 0.5,
-                                                "red",
-                                                "green"
-                                            )
+                                            color = "red"
                                         ),
                                         spacing = "2",
                                         align_items = "center",
                                         width = "100%"
                                     ),
                                     variant = "surface",
-                                    size = "3"
+                                    size = "3",
+                                    width = "100%"
                                 ),
                                 rx.card(
                                     rx.vstack(
@@ -512,57 +551,27 @@ def transaction_fraud_detection_form() -> rx.Component:
                                             size = "8",
                                             weight = "bold",
                                             align = "center",
-                                            color = rx.cond(
-                                                State.tfd_fraud_probability > 0.5,
-                                                "green",
-                                                "red"
-                                            )
+                                            color = "blue"
                                         ),
                                         spacing = "2",
                                         align_items = "center",
                                         width = "100%"
                                     ),
                                     variant = "surface",
-                                    size = "3"
+                                    size = "3",
+                                    width = "100%"
                                 ),
                                 spacing = "3",
-                                width = "100%"
-                            ),
-                            # Visual probability bar
-                            rx.vstack(
-                                rx.text("Fraud Risk Assessment", size = "3", weight = "medium"),
-                                rx.box(
-                                    rx.box(
-                                        width = f"{State.tfd_fraud_probability * 100}%",
-                                        height = "40px",
-                                        background = rx.cond(
-                                            State.tfd_fraud_probability > 0.7,
-                                            "linear-gradient(90deg, #FF0000, #FF6666)",
-                                            rx.cond(
-                                                State.tfd_fraud_probability > 0.3,
-                                                "linear-gradient(90deg, #FFA500, #FFD700)",
-                                                "linear-gradient(90deg, #00FF00, #66FF66)"
-                                            )
-                                        ),
-                                        border_radius = "8px",
-                                        transition = "width 0.5s ease-in-out"
-                                    ),
-                                    width = "100%",
-                                    height = "40px",
-                                    background = rx.color("gray", 3),
-                                    border_radius = "8px",
-                                    border = f"1px solid {rx.color('gray', 6)}"
-                                ),
-                                spacing = "2",
                                 width = "100%"
                             ),
                             spacing = "4",
                             width = "100%"
                         ),
-                        variant = "classic"
+                        variant = "classic",
+                        width = "100%"
                     ),
                     spacing = "4",
-                    align_items = "start",
+                    align_items = "stretch",
                     width = "100%"
                 )
             ),

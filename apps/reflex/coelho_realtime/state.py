@@ -187,6 +187,21 @@ class State(rx.State):
         return "gray"
 
     @rx.var
+    def tfd_pie_chart_data(self) -> list[dict]:
+        """Get pie chart data for fraud probability visualization."""
+        results = self.prediction_results.get("Transaction Fraud Detection", {})
+        if isinstance(results, dict):
+            fraud_prob = results.get("fraud_probability", 0.0)
+            return [
+                {"name": "Fraud", "value": round(fraud_prob * 100, 2), "fill": "#FF0000"},
+                {"name": "Not Fraud", "value": round((1 - fraud_prob) * 100, 2), "fill": "#0000FF"}
+            ]
+        return [
+            {"name": "Fraud", "value": 0, "fill": "#FF0000"},
+            {"name": "Not Fraud", "value": 0, "fill": "#0000FF"}
+        ]
+
+    @rx.var
     def tfd_mlflow_metrics(self) -> dict:
         """Get Transaction Fraud Detection MLflow metrics."""
         return self.mlflow_metrics.get("Transaction Fraud Detection", {})
@@ -284,6 +299,9 @@ class State(rx.State):
                     description=f"ML training for {project_name} is already active",
                     duration=3000,
                 )
+                # Still start polling even if already running
+                async for _ in self._poll_metrics_loop(project_name):
+                    yield _
                 return
 
             try:
@@ -312,6 +330,10 @@ class State(rx.State):
                 )
 
                 print(f"Model start successful: {message}")
+
+                # Start polling metrics in real-time
+                async for _ in self._poll_metrics_loop(project_name):
+                    yield _
 
             except Exception as e:
                 error_msg = f"Error starting model: {e}"
@@ -360,6 +382,38 @@ class State(rx.State):
                     description=str(e),
                     duration=5000,
                 )
+
+    async def _poll_metrics_loop(self, project_name: str):
+        """Internal polling loop for real-time metrics updates."""
+        while self.ml_training_enabled:
+            try:
+                # Fetch metrics
+                response = await httpx_client_post(
+                    url=f"{FASTAPI_BASE_URL}/mlflow_metrics",
+                    json={
+                        "project_name": project_name,
+                        "model_name": "ARFClassifier"
+                    },
+                    timeout=30.0
+                )
+                async with self:
+                    self.mlflow_metrics = {
+                        **self.mlflow_metrics,
+                        project_name: response.json()
+                    }
+                print(f"Metrics updated for {project_name}")
+            except Exception as e:
+                print(f"Error fetching metrics: {e}")
+
+            # Yield empty to push state update to frontend
+            yield
+
+            # Wait 5 seconds before next poll
+            await asyncio.sleep(5)
+
+            # Check if still enabled after sleep
+            if not self.ml_training_enabled:
+                break
 
     @rx.event(background=True)
     async def cleanup_on_page_leave(self, project_name: str):
@@ -621,6 +675,101 @@ class State(rx.State):
             async with self:
                 self.dropdown_options["Transaction Fraud Detection"] = {}
 
+    # TFD Form field update handlers
+    @rx.event
+    def update_tfd_field(self, field: str, value):
+        """Update a single TFD form field."""
+        current = self.form_data.get("Transaction Fraud Detection", {})
+        current[field] = value
+        self.form_data = {**self.form_data, "Transaction Fraud Detection": current}
+
+    @rx.event
+    def update_tfd_amount(self, value: str):
+        """Update amount field."""
+        try:
+            self.update_tfd_field("amount", float(value) if value else 0.0)
+        except ValueError:
+            pass
+
+    @rx.event
+    def update_tfd_account_age(self, value: str):
+        """Update account age field."""
+        try:
+            self.update_tfd_field("account_age_days", int(value) if value else 0)
+        except ValueError:
+            pass
+
+    @rx.event
+    def update_tfd_date(self, value: str):
+        """Update date field."""
+        self.update_tfd_field("timestamp_date", value)
+
+    @rx.event
+    def update_tfd_time(self, value: str):
+        """Update time field."""
+        self.update_tfd_field("timestamp_time", value)
+
+    @rx.event
+    def update_tfd_currency(self, value: str):
+        """Update currency field."""
+        self.update_tfd_field("currency", value)
+
+    @rx.event
+    def update_tfd_merchant_id(self, value: str):
+        """Update merchant_id field."""
+        self.update_tfd_field("merchant_id", value)
+
+    @rx.event
+    def update_tfd_product_category(self, value: str):
+        """Update product_category field."""
+        self.update_tfd_field("product_category", value)
+
+    @rx.event
+    def update_tfd_transaction_type(self, value: str):
+        """Update transaction_type field."""
+        self.update_tfd_field("transaction_type", value)
+
+    @rx.event
+    def update_tfd_payment_method(self, value: str):
+        """Update payment_method field."""
+        self.update_tfd_field("payment_method", value)
+
+    @rx.event
+    def update_tfd_lat(self, value: str):
+        """Update latitude field."""
+        try:
+            self.update_tfd_field("lat", float(value) if value else 0.0)
+        except ValueError:
+            pass
+
+    @rx.event
+    def update_tfd_lon(self, value: str):
+        """Update longitude field."""
+        try:
+            self.update_tfd_field("lon", float(value) if value else 0.0)
+        except ValueError:
+            pass
+
+    @rx.event
+    def update_tfd_browser(self, value: str):
+        """Update browser field."""
+        self.update_tfd_field("browser", value)
+
+    @rx.event
+    def update_tfd_os(self, value: str):
+        """Update os field."""
+        self.update_tfd_field("os", value)
+
+    @rx.event
+    def update_tfd_cvv_provided(self, value: bool):
+        """Update cvv_provided field."""
+        self.update_tfd_field("cvv_provided", value)
+
+    @rx.event
+    def update_tfd_billing_address_match(self, value: bool):
+        """Update billing_address_match field."""
+        self.update_tfd_field("billing_address_match", value)
+
     @rx.event
     async def init_transaction_fraud_detection_form(self, sample: dict):
         """Initialize Transaction Fraud Detection form with sample data."""
@@ -631,60 +780,85 @@ class State(rx.State):
         """Fetch unique values for all dropdown fields."""
         await self._fetch_tfd_options_internal()
 
-    @rx.event
-    async def predict_transaction_fraud_detection(self, form_data: dict):
-        """Make prediction for transaction fraud detection."""
+    @rx.event(background=True)
+    async def predict_transaction_fraud_detection(self):
+        """Make prediction for transaction fraud detection using current form state."""
         project_name = "Transaction Fraud Detection"
-        current_form = self.form_data[project_name]
+        current_form = self.form_data.get(project_name, {})
+
         # Combine date and time
-        timestamp = f"{form_data.get('timestamp_date', current_form.get('timestamp_date'))}T{form_data.get('timestamp_time', current_form.get('timestamp_time'))}:00.000000+00:00"
-        # Prepare request payload
+        timestamp = f"{current_form.get('timestamp_date', '')}T{current_form.get('timestamp_time', '')}:00.000000+00:00"
+
+        # Prepare request payload from current form state
         payload = {
             "project_name": project_name,
             "model_name": "ARFClassifier",
-            "transaction_id": current_form.get("transaction_id"),
-            "user_id": current_form.get("user_id"),
+            "transaction_id": current_form.get("transaction_id", ""),
+            "user_id": current_form.get("user_id", ""),
             "timestamp": timestamp,
-            "amount": float(form_data.get("amount", current_form.get("amount"))),
-            "currency": form_data.get("currency", current_form.get("currency")),
-            "merchant_id": form_data.get("merchant_id", current_form.get("merchant_id")),
-            "product_category": form_data.get("product_category", current_form.get("product_category")),
-            "transaction_type": form_data.get("transaction_type", current_form.get("transaction_type")),
-            "payment_method": form_data.get("payment_method", current_form.get("payment_method")),
+            "amount": float(current_form.get("amount", 0)),
+            "currency": current_form.get("currency", ""),
+            "merchant_id": current_form.get("merchant_id", ""),
+            "product_category": current_form.get("product_category", ""),
+            "transaction_type": current_form.get("transaction_type", ""),
+            "payment_method": current_form.get("payment_method", ""),
             "location": {
-                "lat": float(form_data.get("lat", current_form.get("lat"))),
-                "lon": float(form_data.get("lon", current_form.get("lon")))
+                "lat": float(current_form.get("lat", 0)),
+                "lon": float(current_form.get("lon", 0))
             },
-            "ip_address": current_form.get("ip_address"),
+            "ip_address": current_form.get("ip_address", ""),
             "device_info": {
-                "os": form_data.get("os", current_form.get("os")),
-                "browser": form_data.get("browser", current_form.get("browser"))
+                "os": current_form.get("os", ""),
+                "browser": current_form.get("browser", "")
             },
-            "user_agent": current_form.get("user_agent"),
-            "account_age_days": int(form_data.get("account_age_days", current_form.get("account_age_days"))),
-            "cvv_provided": form_data.get("cvv_provided", str(current_form.get("cvv_provided"))).lower() == "true",
-            "billing_address_match": form_data.get("billing_address_match", str(current_form.get("billing_address_match"))).lower() == "true"
+            "user_agent": current_form.get("user_agent", ""),
+            "account_age_days": int(current_form.get("account_age_days", 0)),
+            "cvv_provided": bool(current_form.get("cvv_provided", False)),
+            "billing_address_match": bool(current_form.get("billing_address_match", False))
         }
+
         # Make prediction
         try:
+            print(f"Making prediction with payload: {payload}")
             response = await httpx_client_post(
                 url=f"{FASTAPI_BASE_URL}/predict",
                 json=payload,
                 timeout=30.0
             )
             result = response.json()
-            self.prediction_results[project_name] = {
-                "prediction": result.get("prediction"),
-                "fraud_probability": result.get("fraud_probability"),
-                "show": True
-            }
+            print(f"Prediction result: {result}")
+
+            # Create new dict to trigger reactivity
+            async with self:
+                self.prediction_results = {
+                    **self.prediction_results,
+                    project_name: {
+                        "prediction": result.get("prediction"),
+                        "fraud_probability": result.get("fraud_probability"),
+                        "show": True
+                    }
+                }
+            yield rx.toast.success(
+                "Prediction complete",
+                description=f"Result: {'Fraud' if result.get('prediction') == 1 else 'Not Fraud'}",
+                duration=3000
+            )
         except Exception as e:
             print(f"Error making prediction: {e}")
-            self.prediction_results[project_name] = {
-                "prediction": None,
-                "fraud_probability": 0.0,
-                "show": False
-            }
+            async with self:
+                self.prediction_results = {
+                    **self.prediction_results,
+                    project_name: {
+                        "prediction": None,
+                        "fraud_probability": 0.0,
+                        "show": False
+                    }
+                }
+            yield rx.toast.error(
+                "Prediction failed",
+                description=str(e),
+                duration=5000
+            )
 
     @rx.event(background=True)
     async def get_mlflow_metrics(self, project_name: str):
@@ -699,8 +873,45 @@ class State(rx.State):
                 timeout=60.0
             )
             async with self:
-                self.mlflow_metrics[project_name] = response.json()
+                self.mlflow_metrics = {
+                    **self.mlflow_metrics,
+                    project_name: response.json()
+                }
         except Exception as e:
             print(f"Error fetching MLflow metrics: {e}")
             async with self:
-                self.mlflow_metrics[project_name] = {}
+                self.mlflow_metrics = {
+                    **self.mlflow_metrics,
+                    project_name: {}
+                }
+
+    @rx.event(background=True)
+    async def refresh_mlflow_metrics(self, project_name: str):
+        """Force refresh MLflow metrics bypassing cache."""
+        try:
+            response = await httpx_client_post(
+                url=f"{FASTAPI_BASE_URL}/mlflow_metrics",
+                json={
+                    "project_name": project_name,
+                    "model_name": "ARFClassifier",
+                    "force_refresh": True
+                },
+                timeout=60.0
+            )
+            async with self:
+                self.mlflow_metrics = {
+                    **self.mlflow_metrics,
+                    project_name: response.json()
+                }
+            yield rx.toast.success(
+                "Metrics refreshed",
+                description=f"Latest metrics loaded for {project_name}",
+                duration=2000
+            )
+        except Exception as e:
+            print(f"Error refreshing MLflow metrics: {e}")
+            yield rx.toast.error(
+                "Refresh failed",
+                description=str(e),
+                duration=3000
+            )

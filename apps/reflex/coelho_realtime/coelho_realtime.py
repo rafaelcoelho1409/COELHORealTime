@@ -5,7 +5,6 @@ from .pages import (
     estimated_time_of_arrival,
     e_commerce_customer_interactions,
     #sales_forecasting,
-    counter
 )
 
 app = rx.App()

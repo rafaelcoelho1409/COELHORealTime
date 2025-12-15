@@ -78,7 +78,7 @@ class MLflowMetricsCache:
         self._cache.clear()
 
 
-mlflow_cache = MLflowMetricsCache(ttl_seconds = 300)
+mlflow_cache = MLflowMetricsCache(ttl_seconds = 30)  # Reduced from 300 to 30 seconds
 
 
 def _sync_get_mlflow_metrics(project_name: str, model_name: str) -> dict:
@@ -89,11 +89,13 @@ def _sync_get_mlflow_metrics(project_name: str, model_name: str) -> dict:
     experiment_id = experiment.experiment_id
     runs_df = mlflow.search_runs(
         experiment_ids = [experiment_id],
-        max_results = 100  # Limit results to reduce memory
+        max_results = 100,  # Limit results to reduce memory
+        order_by = ["start_time DESC"]  # Get most recent runs first
     )
     runs_df = runs_df[runs_df["tags.mlflow.runName"] == model_name]
     if runs_df.empty:
         raise ValueError(f"No runs found for model '{model_name}'")
+    # Get the most recent run (already sorted by start_time DESC)
     run_df = runs_df.iloc[0]
     return run_df.replace({np.nan: None}).to_dict()
 
@@ -600,7 +602,8 @@ async def get_initial_sample(request: InitialSampleRequest):
 @app.post("/predict")
 async def predict(payload: dict):
     """
-    Make predictions using pre-loaded models.
+    Make predictions using the latest model from disk.
+    Reloads model before each prediction to stay synchronized with training.
     Payload format: {project_name, model_name, ...feature_data}
     """
     global encoders_dict, model_dict
@@ -611,19 +614,37 @@ async def predict(payload: dict):
             status_code = 400,
             detail = "Missing required fields: project_name and model_name"
         )
-    # Validate model and encoders are loaded
-    if project_name not in model_dict or model_name not in model_dict.get(project_name, {}):
-        raise HTTPException(
-            status_code = 503,
-            detail = f"Model '{model_name}' for project '{project_name}' is not loaded."
-        )
-    if project_name not in encoders_dict:
-        raise HTTPException(
-            status_code = 503,
-            detail = f"Encoders for project '{project_name}' are not loaded."
-        )
-    # Use pre-loaded model (don't reload!)
-    model = model_dict[project_name][model_name]
+    # Reload model from disk to get the latest trained version
+    model_folder_name = project_name.lower().replace(' ', '_').replace("-", "_")
+    model_folder = f"models/{model_folder_name}"
+    try:
+        model = load_or_create_model(project_name, model_name, model_folder)
+        # Update in-memory cache
+        if project_name not in model_dict:
+            model_dict[project_name] = {}
+        model_dict[project_name][model_name] = model
+    except Exception as e:
+        print(f"Error reloading model from disk: {e}", file=sys.stderr)
+        # Fall back to cached model if available
+        if project_name in model_dict and model_name in model_dict.get(project_name, {}):
+            model = model_dict[project_name][model_name]
+            print(f"Using cached model for {project_name}/{model_name}")
+        else:
+            raise HTTPException(
+                status_code = 503,
+                detail = f"Model '{model_name}' for project '{project_name}' could not be loaded: {e}"
+            )
+    # Reload encoders from disk to stay synchronized with training
+    try:
+        for library in ENCODER_LIBRARIES:
+            encoders_dict[project_name][library] = load_or_create_encoders(project_name, library)
+    except Exception as e:
+        print(f"Error reloading encoders: {e}", file=sys.stderr)
+        if project_name not in encoders_dict:
+            raise HTTPException(
+                status_code = 503,
+                detail = f"Encoders for project '{project_name}' could not be loaded: {e}"
+            )
     # Extract feature data (remove metadata fields)
     x = {k: v for k, v in payload.items() if k not in ["project_name", "model_name"]}
     if model_name in ["ARFClassifier", "ARFRegressor", "DBSTREAM"]:
@@ -708,16 +729,18 @@ async def get_ordinal_encoder(request: OrdinalEncoderRequest):
 class MLflowMetricsRequest(BaseModel):
     project_name: str
     model_name: str
+    force_refresh: bool = False  # Bypass cache when True
 
 
 @app.post("/mlflow_metrics")
 async def get_mlflow_metrics(request: MLflowMetricsRequest):
     """Get MLflow metrics with caching and async execution."""
     cache_key = f"{request.project_name}:{request.model_name}"
-    # Check cache first
-    cached_result = mlflow_cache.get(cache_key)
-    if cached_result is not None:
-        return cached_result
+    # Check cache first (unless force_refresh is True)
+    if not request.force_refresh:
+        cached_result = mlflow_cache.get(cache_key)
+        if cached_result is not None:
+            return cached_result
     try:
         # Run blocking MLflow call in thread pool with timeout
         result = await asyncio.wait_for(
