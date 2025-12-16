@@ -3,6 +3,7 @@ import os
 import asyncio
 import datetime as dt
 import plotly.graph_objects as go
+import folium
 from .utils import httpx_client_post, httpx_client_get
 
 FASTAPI_HOST = os.getenv("FASTAPI_HOST", "localhost")
@@ -325,19 +326,170 @@ class State(rx.State):
     # Average speed for initial ETA estimate (same as Kafka producer)
     _eta_avg_speed_kmh = 40
 
+    def _safe_float(self, value, default: float) -> float:
+        """Safely convert value to float, returning default on any error."""
+        if value is None or value == "":
+            return default
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return default
+
+    # =========================================================================
+    # Map coordinate computed vars (for reflex-map)
+    # =========================================================================
+    @rx.var
+    def eta_origin_lat(self) -> float:
+        """Get ETA origin latitude."""
+        form_data = self.form_data.get("Estimated Time of Arrival") or {}
+        return self._safe_float(form_data.get("origin_lat"), 29.8)
+
+    @rx.var
+    def eta_origin_lon(self) -> float:
+        """Get ETA origin longitude."""
+        form_data = self.form_data.get("Estimated Time of Arrival") or {}
+        return self._safe_float(form_data.get("origin_lon"), -95.4)
+
+    @rx.var
+    def eta_destination_lat(self) -> float:
+        """Get ETA destination latitude."""
+        form_data = self.form_data.get("Estimated Time of Arrival") or {}
+        return self._safe_float(form_data.get("destination_lat"), 29.8)
+
+    @rx.var
+    def eta_destination_lon(self) -> float:
+        """Get ETA destination longitude."""
+        form_data = self.form_data.get("Estimated Time of Arrival") or {}
+        return self._safe_float(form_data.get("destination_lon"), -95.4)
+
+    @rx.var
+    def ecci_lat(self) -> float:
+        """Get ECCI location latitude."""
+        form_data = self.form_data.get("E-Commerce Customer Interactions") or {}
+        return self._safe_float(form_data.get("lat"), 29.8)
+
+    @rx.var
+    def ecci_lon(self) -> float:
+        """Get ECCI location longitude."""
+        form_data = self.form_data.get("E-Commerce Customer Interactions") or {}
+        return self._safe_float(form_data.get("lon"), -95.4)
+
+    # =========================================================================
+    # Folium Map HTML generation (for rx.html embedding)
+    # =========================================================================
+    @rx.var
+    def eta_folium_map_html(self) -> str:
+        """Generate Folium map HTML for ETA origin/destination display."""
+        # Get coordinates
+        origin_lat = self.eta_origin_lat
+        origin_lon = self.eta_origin_lon
+        dest_lat = self.eta_destination_lat
+        dest_lon = self.eta_destination_lon
+
+        # Calculate center
+        center_lat = (origin_lat + dest_lat) / 2
+        center_lon = (origin_lon + dest_lon) / 2
+
+        # Create map centered between origin and destination
+        m = folium.Map(
+            location=[center_lat, center_lon],
+            zoom_start=10,
+            tiles='cartodbpositron'
+        )
+
+        # Add origin marker (blue)
+        folium.Marker(
+            location=[origin_lat, origin_lon],
+            popup='Origin',
+            icon=folium.Icon(color='blue', icon='play')
+        ).add_to(m)
+
+        # Add destination marker (red)
+        folium.Marker(
+            location=[dest_lat, dest_lon],
+            popup='Destination',
+            icon=folium.Icon(color='red', icon='stop')
+        ).add_to(m)
+
+        # Add line connecting origin and destination
+        folium.PolyLine(
+            locations=[[origin_lat, origin_lon], [dest_lat, dest_lon]],
+            color='#333333',
+            weight=3,
+            opacity=0.8
+        ).add_to(m)
+
+        # Generate HTML with proper sizing
+        html = m._repr_html_()
+        # Make iframe fill container completely
+        html = html.replace(
+            'style="position:relative;width:100%;height:0;padding-bottom:60%;"',
+            'style="width:100%;height:300px;"'
+        )
+        html = html.replace(
+            'style="position:absolute;width:100%;height:100%;left:0;top:0;',
+            'style="width:100%;height:100%;'
+        )
+        # Remove Jupyter notebook trust message
+        html = html.replace(
+            'Make this Notebook Trusted to load map: File -> Trust Notebook',
+            ''
+        )
+        return html
+
+    @rx.var
+    def ecci_folium_map_html(self) -> str:
+        """Generate Folium map HTML for ECCI customer location display."""
+        # Get coordinates
+        lat = self.ecci_lat
+        lon = self.ecci_lon
+
+        # Create map centered on customer location
+        m = folium.Map(
+            location=[lat, lon],
+            zoom_start=10,
+            tiles='cartodbpositron'
+        )
+
+        # Add customer location marker (purple - using darkpurple)
+        folium.Marker(
+            location=[lat, lon],
+            popup='Customer Location',
+            icon=folium.Icon(color='purple', icon='user')
+        ).add_to(m)
+
+        # Generate HTML with proper sizing
+        html = m._repr_html_()
+        # Make iframe fill container completely
+        html = html.replace(
+            'style="position:relative;width:100%;height:0;padding-bottom:60%;"',
+            'style="width:100%;height:250px;"'
+        )
+        html = html.replace(
+            'style="position:absolute;width:100%;height:100%;left:0;top:0;',
+            'style="width:100%;height:100%;'
+        )
+        # Remove Jupyter notebook trust message
+        html = html.replace(
+            'Make this Notebook Trusted to load map: File -> Trust Notebook',
+            ''
+        )
+        return html
+
     @rx.var
     def eta_estimated_distance_km(self) -> float:
         """Calculate estimated distance using Haversine formula."""
         import math
-        form_data = self.form_data.get("Estimated Time of Arrival", {})
-        # Safely convert coordinates (handles empty strings and None)
-        try:
-            origin_lat = float(form_data.get("origin_lat") or 0)
-            origin_lon = float(form_data.get("origin_lon") or 0)
-            dest_lat = float(form_data.get("destination_lat") or 0)
-            dest_lon = float(form_data.get("destination_lon") or 0)
-        except (ValueError, TypeError):
+        # Safely get form data dict
+        form_data = self.form_data.get("Estimated Time of Arrival") or {}
+        if not isinstance(form_data, dict):
             return 0.0
+
+        # Safely convert coordinates with defaults
+        origin_lat = self._safe_float(form_data.get("origin_lat"), 0)
+        origin_lon = self._safe_float(form_data.get("origin_lon"), 0)
+        dest_lat = self._safe_float(form_data.get("destination_lat"), 0)
+        dest_lon = self._safe_float(form_data.get("destination_lon"), 0)
 
         # Haversine formula
         lon1, lat1, lon2, lat2 = map(math.radians, [origin_lon, origin_lat, dest_lon, dest_lat])
@@ -357,82 +509,6 @@ class State(rx.State):
         # Same formula as Kafka producer: (distance / AVG_SPEED_KMH) * 3600
         travel_time = int((distance / self._eta_avg_speed_kmh) * 3600)
         return max(60, travel_time)  # Minimum 1 minute
-
-    @rx.var
-    def eta_map_figure(self) -> go.Figure:
-        """Generate Plotly Scattermapbox figure for origin/destination display.
-
-        Note: Using Scattermapbox (not Scattermap) for compatibility with react-plotly.js
-        which may bundle Plotly.js < 2.35.0. Scattermap requires MapLibre (Plotly.js 2.35+).
-        """
-        form_data = self.form_data.get("Estimated Time of Arrival", {})
-        # Safely convert coordinates (handles empty strings and None)
-        try:
-            origin_lat = float(form_data.get("origin_lat") or 29.8)
-            origin_lon = float(form_data.get("origin_lon") or -95.4)
-            destination_lat = float(form_data.get("destination_lat") or 29.8)
-            destination_lon = float(form_data.get("destination_lon") or -95.4)
-        except (ValueError, TypeError):
-            # Default to Houston coordinates if conversion fails
-            origin_lat, origin_lon = 29.8, -95.4
-            destination_lat, destination_lon = 29.8, -95.4
-
-        fig = go.Figure()
-
-        # Add markers for origin and destination (using Scattermapbox for compatibility)
-        fig.add_trace(
-            go.Scattermapbox(
-                lat=[origin_lat, destination_lat],
-                lon=[origin_lon, destination_lon],
-                mode='markers+text',
-                marker=go.scattermapbox.Marker(
-                    size=[15, 15],
-                    color=['#3b82f6', '#ef4444'],  # blue for origin, red for destination
-                ),
-                text=['Origin', 'Destination'],
-                textposition='bottom right',
-                name="Locations"
-            )
-        )
-
-        # Add line connecting origin and destination
-        fig.add_trace(
-            go.Scattermapbox(
-                lat=[origin_lat, destination_lat],
-                lon=[origin_lon, destination_lon],
-                mode='lines',
-                line=go.scattermapbox.Line(
-                    width=2,
-                    color='#333333',
-                ),
-                name="Route (approx.)",
-                hoverinfo='none'
-            )
-        )
-
-        # Calculate center point and zoom level
-        center_lat = (origin_lat + destination_lat) / 2
-        center_lon = (origin_lon + destination_lon) / 2
-        lat_diff = abs(origin_lat - destination_lat)
-        lon_diff = abs(origin_lon - destination_lon)
-        zoom = 9 if lat_diff > 0.01 or lon_diff > 0.01 else 11
-
-        fig.update_layout(
-            title='Origin and Destination Map',
-            autosize=True,
-            showlegend=False,
-            hovermode='closest',
-            mapbox=dict(  # Using mapbox (not map) for Scattermapbox compatibility
-                bearing=0,
-                center=dict(lat=center_lat, lon=center_lon),
-                pitch=0,
-                zoom=zoom,
-                style='open-street-map'  # Free style, no Mapbox token required
-            ),
-            margin={"r": 0, "t": 30, "l": 0, "b": 0},
-            height=300
-        )
-        return fig
 
     # =========================================================================
     # E-Commerce Customer Interactions (ECCI) computed vars
@@ -485,56 +561,6 @@ class State(rx.State):
             margin=dict(l=20, r=20, t=60, b=20),
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
-        )
-        return fig
-
-    @rx.var
-    def ecci_location_figure(self) -> go.Figure:
-        """Generate Plotly Scattermapbox figure for ECCI location display.
-
-        Note: Using Scattermapbox (not Scattermap) for compatibility with react-plotly.js
-        which may bundle Plotly.js < 2.35.0. Scattermap requires MapLibre (Plotly.js 2.35+).
-        """
-        form_data = self.form_data.get("E-Commerce Customer Interactions", {})
-        # Safely convert coordinates (handles empty strings and None)
-        try:
-            lat = float(form_data.get("lat") or 29.8)
-            lon = float(form_data.get("lon") or -95.4)
-        except (ValueError, TypeError):
-            # Default to Houston coordinates if conversion fails
-            lat, lon = 29.8, -95.4
-
-        fig = go.Figure()
-
-        # Add marker for location (using Scattermapbox for compatibility)
-        fig.add_trace(
-            go.Scattermapbox(
-                lat=[lat],
-                lon=[lon],
-                mode='markers',
-                marker=go.scattermapbox.Marker(
-                    size=15,
-                    color='#8b5cf6',  # purple
-                ),
-                text=['Customer Location'],
-                name="Location"
-            )
-        )
-
-        fig.update_layout(
-            title='Customer Location',
-            autosize=True,
-            showlegend=False,
-            hovermode='closest',
-            mapbox=dict(  # Using mapbox (not map) for Scattermapbox compatibility
-                bearing=0,
-                center=dict(lat=lat, lon=lon),
-                pitch=0,
-                zoom=10,
-                style='open-street-map'  # Free style, no Mapbox token required
-            ),
-            margin={"r": 0, "t": 30, "l": 0, "b": 0},
-            height=300
         )
         return fig
 
@@ -974,16 +1000,6 @@ class State(rx.State):
         current = self.form_data.get("Transaction Fraud Detection", {})
         current[field] = value
         self.form_data = {**self.form_data, "Transaction Fraud Detection": current}
-
-    @rx.event
-    async def init_transaction_fraud_detection_form(self, sample: dict):
-        """Initialize Transaction Fraud Detection form with sample data."""
-        await self._init_tfd_form_internal(sample)
-
-    @rx.event
-    async def fetch_transaction_fraud_detection_options(self):
-        """Fetch unique values for all dropdown fields."""
-        await self._fetch_tfd_options_internal()
 
     @rx.event(background = True)
     async def predict_transaction_fraud_detection(self):

@@ -1,8 +1,5 @@
 import httpx
 
-# Default timeout for all HTTP requests (30 seconds)
-DEFAULT_TIMEOUT = httpx.Timeout(30.0, connect = 10.0)
-
 
 ## FUNCTIONS
 async def httpx_client_get(timeout: float = 30.0, **kwargs):

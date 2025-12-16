@@ -1,18 +1,17 @@
 import reflex as rx
 from .pages import (
-    home, 
+    home,
     transaction_fraud_detection,
     estimated_time_of_arrival,
     e_commerce_customer_interactions,
-    #sales_forecasting,
 )
 
 app = rx.App()
 
 # Register pages
 app.add_page(
-    home.index, 
-    route = "/", 
+    home.index,
+    route = "/",
     title = "Home - COELHO RealTime")
 app.add_page(
     transaction_fraud_detection.index,
@@ -29,8 +28,3 @@ app.add_page(
     route = "/e-commerce-customer-interactions",
     title = "E-Commerce Customer Interactions - COELHO RealTime"
 )
-#app.add_page(
-#    sales_forecasting.index,
-#    route = "/sales-forecasting",
-#    title = "Sales Forecasting - COELHO RealTime"
-#)

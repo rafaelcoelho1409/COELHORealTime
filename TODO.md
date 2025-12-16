@@ -59,7 +59,24 @@ Real-time ML platform with incremental learning, featuring:
 - [ ] Test model logging and retrieval from MinIO
 - [ ] Add MinIO to Services dropdown in navbar
 
-### Phase 5: ML Training Service Separation (Priority: HIGH)
+### Phase 5: MLflow Model Integration (Priority: HIGH)
+**Goal:** Connect Reflex pages to latest models registered on MLflow instead of loading in-memory models
+
+- [ ] Update FastAPI to load models from MLflow registry:
+  - [ ] Query MLflow for latest model version per project
+  - [ ] Load model artifacts from MinIO via MLflow
+  - [ ] Cache loaded models to avoid repeated downloads
+- [ ] Implement model hot-reloading:
+  - [ ] Periodic check for new model versions
+  - [ ] Graceful model swap without downtime
+- [ ] Update prediction endpoints:
+  - [ ] Use MLflow-loaded models for inference
+  - [ ] Return model version in prediction response
+- [ ] Add model info to Reflex UI:
+  - [ ] Display current model version on each page
+  - [ ] Show last model update timestamp
+
+### Phase 6: ML Training Service Separation (Priority: HIGH)
 **Goal:** Isolate ML training from FastAPI to prevent crashes and improve stability
 
 **Problem:** Currently, real-time ML training runs inside FastAPI, which can cause:
@@ -72,10 +89,10 @@ Real-time ML platform with incremental learning, featuring:
 - [ ] Design new service architecture:
   ```
   Kafka → ML Training Service → MLflow (models)
-                ↓
-            Redis/MinIO (state sync)
-                ↓
-          FastAPI (predictions only)
+               ↓
+           Redis/MinIO (state sync)
+               ↓
+         FastAPI (predictions only)
   ```
 - [ ] Create new Python service for ML training:
   - [ ] Kafka consumer for each topic
@@ -83,12 +100,10 @@ Real-time ML platform with incremental learning, featuring:
   - [ ] Periodic model checkpointing to MLflow
   - [ ] Health endpoint for Kubernetes probes
 - [ ] Add Helm templates for ML Training Service
-- [ ] Update FastAPI to load models from MLflow (read-only)
-- [ ] Implement model hot-reloading in FastAPI
 - [ ] Add shared state mechanism (Redis or MinIO)
 - [ ] Test failover scenarios
 
-### Phase 6: Observability Stack (Priority: HIGH)
+### Phase 7: Observability Stack (Priority: HIGH)
 **Goal:** Production-grade monitoring with Prometheus & Grafana
 
 - [ ] Add kube-prometheus-stack Helm dependency
@@ -104,36 +119,6 @@ Real-time ML platform with incremental learning, featuring:
   - [ ] ML Metrics Dashboard (model performance, training samples/sec)
 - [ ] Configure alerting rules (optional)
 - [ ] Update navbar Services dropdown (enable Prometheus & Grafana links)
-
-### Phase 7: AI Assistant Integration (Priority: HIGH - 30-day focus)
-**Goal:** Leverage Claude Opus 4.5 subscription with LangChain/LangGraph
-
-- [ ] Design AI assistant architecture:
-  - [ ] Decide: sidebar panel vs chat modal vs dedicated page
-  - [ ] Define context injection strategy (page state, metrics, predictions)
-- [ ] Backend implementation:
-  - [ ] Add LangChain/LangGraph dependencies to FastAPI
-  - [ ] Create `/chat` endpoint for AI interactions
-  - [ ] Implement tools for AI to query:
-    - Current page state/form data
-    - MLflow metrics and model info
-    - Cluster analytics data
-    - Historical predictions
-  - [ ] Add conversation memory (Redis or in-memory)
-- [ ] Frontend implementation (Reflex):
-  - [ ] Create AI chat component
-  - [ ] Add to each application page
-  - [ ] Stream responses for better UX
-- [ ] Prompt engineering:
-  - [ ] System prompt for page context explanation
-  - [ ] Few-shot examples for common questions
-  - [ ] RAG over codebase documentation (optional)
-
-**Example interactions:**
-- "What does this page show?"
-- "Explain what Cluster 3 represents"
-- "Why was this transaction flagged as fraud?"
-- "What factors contributed to this ETA prediction?"
 
 ### Phase 8: Model A/B Testing (Priority: MEDIUM)
 **Goal:** Allow users to compare different MLflow models in production
@@ -220,10 +205,16 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 │                                                                      │
 │  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐      │
 │  │  Reflex  │◄──►│  FastAPI │◄──►│  Kafka   │◄──►│ Producers│      │
-│  │ Frontend │    │ + River  │    │          │    │ (Python) │      │
-│  └────┬─────┘    └────┬─────┘    └──────────┘    └──────────┘      │
-│       │               │                                              │
-│       │               ▼                                              │
+│  │ Frontend │    │ (predict)│    │          │    │ (Python) │      │
+│  └────┬─────┘    └────┬─────┘    └────┬─────┘    └──────────┘      │
+│       │               │               │                              │
+│       │               │               ▼                              │
+│       │               │          ┌──────────┐                       │
+│       │               │          │ ML Train │                       │
+│       │               │          │ Service  │                       │
+│       │               │          └────┬─────┘                       │
+│       │               │               │                              │
+│       │               ▼               ▼                              │
 │       │          ┌──────────┐    ┌──────────┐                       │
 │       │          │  MLflow  │◄──►│  MinIO   │                       │
 │       │          │          │    │ (S3)     │                       │
@@ -233,14 +224,13 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 │       │                          ┌──────────┐                       │
 │       │                          │  Delta   │                       │
 │       │                          │  Lake    │                       │
-│       │                          └────┬─────┘                       │
-│       │                               │                              │
-│       ▼                               ▼                              │
-│  ┌──────────┐    ┌──────────┐    ┌──────────┐                       │
-│  │  Claude  │    │Prometheus│◄──►│ Grafana  │                       │
-│  │   AI     │    │          │    │          │                       │
-│  │ (LangG.) │    └──────────┘    └──────────┘                       │
-│  └──────────┘                                                        │
+│       │                          └──────────┘                       │
+│       │                                                              │
+│       ▼                                                              │
+│  ┌──────────┐    ┌──────────┐                                       │
+│  │Prometheus│◄──►│ Grafana  │                                       │
+│  │          │    │          │                                       │
+│  └──────────┘    └──────────┘                                       │
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -252,9 +242,9 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 | Phase | Priority | Effort | Value | Dependencies |
 |-------|----------|--------|-------|--------------|
 | 4. MinIO | HIGH | Medium | High | None |
-| 5. ML Training Service | HIGH | High | Very High | MinIO |
-| 6. Prometheus/Grafana | HIGH | Medium | High | None |
-| 7. AI Assistant | HIGH | High | Very High | Claude API |
+| 5. MLflow Model Integration | HIGH | Medium | Very High | MinIO |
+| 6. ML Training Service | HIGH | High | Very High | MinIO, Phase 5 |
+| 7. Prometheus/Grafana | HIGH | Medium | High | None |
 | 8. A/B Testing | MEDIUM | Medium | High | MLflow, MinIO |
 | 9. Delta Lake | MEDIUM | High | Medium | MinIO |
 | 10. Batch ML | LOW | Medium | Low | Delta Lake |
@@ -263,21 +253,20 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 
 ## Notes
 
-- **30-Day Focus:** AI Assistant integration (Phase 7) to maximize Claude Opus 4.5 subscription
-- **Critical Architecture:** Phase 5 (ML Training Service) solves FastAPI crash issues - high priority
-- **Quick Wins:** MinIO (Phase 4) and Prometheus (Phase 6) can be added in parallel
+- **Critical Architecture:** Phase 6 (ML Training Service) solves FastAPI crash issues - high priority
+- **MLflow Integration:** Phase 5 enables production-ready model serving from MLflow registry
+- **Quick Wins:** MinIO (Phase 4) and Prometheus (Phase 7) can be added in parallel
 - **Dependencies:** Delta Lake and A/B Testing require MinIO to be set up first
-- **Study vs Production:** Batch ML is study phase, defer until AI integration is complete
-- **A/B Testing:** Great for comparing model versions and getting user feedback
+- **Study vs Production:** Batch ML is study phase, lower priority
 
 ---
 
 ## Original Todo Items (from /todo file)
 - [x] ~~Transfer saved models and encoders to MLflow or to MinIO~~ → Phase 4
 - [x] ~~Configure MLflow to use MinIO as backend~~ → Phase 4
-- [x] ~~Create a separated service to process ML training in real-time~~ → Phase 5
+- [x] ~~Create a separated service to process ML training in real-time~~ → Phase 6
 - [x] ~~Give users options to choose different MLflow models (A/B test)~~ → Phase 8
 
 ---
 
-*Last updated: 2025-12-15*
+*Last updated: 2025-12-16*

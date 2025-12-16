@@ -2,6 +2,35 @@ import reflex as rx
 from .state import State
 
 
+## MAP COMPONENTS (using Folium embedded via rx.html)
+def eta_map() -> rx.Component:
+    """
+    Map component for ETA page showing origin and destination.
+    Uses Folium with OpenStreetMap tiles embedded via iframe.
+    """
+    return rx.box(
+        rx.html(State.eta_folium_map_html),
+        width="100%",
+        height="300px",
+        overflow="hidden",
+        border_radius="8px",
+    )
+
+
+def ecci_map() -> rx.Component:
+    """
+    Map component for ECCI page showing customer location.
+    Uses Folium with OpenStreetMap tiles embedded via iframe.
+    """
+    return rx.box(
+        rx.html(State.ecci_folium_map_html),
+        width="100%",
+        height="250px",
+        overflow="hidden",
+        border_radius="8px",
+    )
+
+
 ## COMPONENTS
 def ml_training_switch(model_key: str, project_name: str) -> rx.Component:
     """
@@ -54,20 +83,6 @@ def ml_training_switch(model_key: str, project_name: str) -> rx.Component:
         variant = "surface",
         size = "2",
         width = "100%"
-    )
-
-
-def navbar_link(text: str, url: str) -> rx.Component:
-    return rx.link(
-        rx.text(
-            text,
-            size = "3",
-            weight = "medium"
-        ),
-        href = url,
-        underline = "hover",
-        color_scheme = "gray",
-        high_contrast = True
     )
 
 
@@ -1158,7 +1173,7 @@ def estimated_time_of_arrival_form() -> rx.Component:
                             spacing = "2",
                             align_items = "center"
                         ),
-                        rx.plotly(data = State.eta_map_figure, width = "100%"),
+                        eta_map(),
                         rx.text(
                             f"Estimated Distance: {State.eta_estimated_distance_km} km",
                             size = "2",
@@ -1608,7 +1623,7 @@ def e_commerce_customer_interactions_form() -> rx.Component:
                                     spacing = "2",
                                     align_items = "center"
                                 ),
-                                rx.plotly(data = State.ecci_location_figure, width = "100%"),
+                                ecci_map(),
                                 spacing = "2",
                                 width = "100%"
                             ),
