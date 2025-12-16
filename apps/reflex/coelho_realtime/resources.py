@@ -104,7 +104,17 @@ def coelho_realtime_navbar() -> rx.Component:
                 ),
                 # Right section - Navigation
                 rx.hstack(
-                    navbar_link("Home", "/"),
+                    rx.link(
+                        rx.hstack(
+                            rx.icon("home", size = 16),
+                            rx.text("Home", size = "3", weight = "medium"),
+                            spacing = "2",
+                            align_items = "center"
+                        ),
+                        href = "/",
+                        color = rx.color("gray", 11),
+                        _hover = {"color": rx.color("accent", 11)}
+                    ),
                     rx.menu.root(
                         rx.menu.trigger(
                             rx.button(
@@ -121,13 +131,37 @@ def coelho_realtime_navbar() -> rx.Component:
                         ),
                         rx.menu.content(
                             rx.menu.item(
-                                navbar_link("Transaction Fraud Detection", "/transaction-fraud-detection")
+                                rx.link(
+                                    rx.hstack(
+                                        rx.icon("credit-card", size = 16, color = rx.color("accent", 10)),
+                                        rx.text("Transaction Fraud Detection", size = "3", weight = "medium"),
+                                        spacing = "2",
+                                        align_items = "center"
+                                    ),
+                                    href = "/transaction-fraud-detection"
+                                )
                             ),
                             rx.menu.item(
-                                navbar_link("Estimated Time of Arrival", "/estimated-time-of-arrival")
+                                rx.link(
+                                    rx.hstack(
+                                        rx.icon("clock", size = 16, color = rx.color("accent", 10)),
+                                        rx.text("Estimated Time of Arrival", size = "3", weight = "medium"),
+                                        spacing = "2",
+                                        align_items = "center"
+                                    ),
+                                    href = "/estimated-time-of-arrival"
+                                )
                             ),
                             rx.menu.item(
-                                navbar_link("E-Commerce Customer Interactions", "/e-commerce-customer-interactions")
+                                rx.link(
+                                    rx.hstack(
+                                        rx.icon("shopping-cart", size = 16, color = rx.color("accent", 10)),
+                                        rx.text("E-Commerce Customer Interactions", size = "3", weight = "medium"),
+                                        spacing = "2",
+                                        align_items = "center"
+                                    ),
+                                    href = "/e-commerce-customer-interactions"
+                                )
                             ),
                             size = "2"
                         )
@@ -150,7 +184,11 @@ def coelho_realtime_navbar() -> rx.Component:
                             rx.menu.item(
                                 rx.link(
                                     rx.hstack(
-                                        rx.icon("zap", size = 16, color = rx.color("green", 9)),
+                                        rx.image(
+                                            src = "https://cdn.jsdelivr.net/gh/devicons/devicon/icons/fastapi/fastapi-original.svg",
+                                            width = "16px",
+                                            height = "16px"
+                                        ),
                                         rx.text("FastAPI", size = "3", weight = "medium"),
                                         spacing = "2",
                                         align_items = "center"
@@ -162,7 +200,11 @@ def coelho_realtime_navbar() -> rx.Component:
                             rx.menu.item(
                                 rx.link(
                                     rx.hstack(
-                                        rx.icon("flask-conical", size = 16, color = rx.color("blue", 9)),
+                                        rx.image(
+                                            src = "https://cdn.simpleicons.org/mlflow/0194E2",
+                                            width = "16px",
+                                            height = "16px"
+                                        ),
                                         rx.text("MLflow", size = "3", weight = "medium"),
                                         spacing = "2",
                                         align_items = "center"
@@ -175,7 +217,12 @@ def coelho_realtime_navbar() -> rx.Component:
                             rx.menu.item(
                                 rx.link(
                                     rx.hstack(
-                                        rx.icon("activity", size = 16, color = rx.color("orange", 9)),
+                                        rx.image(
+                                            src = "https://cdn.jsdelivr.net/gh/devicons/devicon/icons/prometheus/prometheus-original.svg",
+                                            width = "16px",
+                                            height = "16px",
+                                            opacity = "0.5"
+                                        ),
                                         rx.text("Prometheus", size = "3", weight = "medium", color = "gray"),
                                         rx.badge("Soon", color_scheme = "gray", size = "1"),
                                         spacing = "2",
@@ -189,7 +236,12 @@ def coelho_realtime_navbar() -> rx.Component:
                             rx.menu.item(
                                 rx.link(
                                     rx.hstack(
-                                        rx.icon("bar-chart-3", size = 16, color = rx.color("yellow", 9)),
+                                        rx.image(
+                                            src = "https://cdn.jsdelivr.net/gh/devicons/devicon/icons/grafana/grafana-original.svg",
+                                            width = "16px",
+                                            height = "16px",
+                                            opacity = "0.5"
+                                        ),
                                         rx.text("Grafana", size = "3", weight = "medium", color = "gray"),
                                         rx.badge("Soon", color_scheme = "gray", size = "1"),
                                         spacing = "2",
