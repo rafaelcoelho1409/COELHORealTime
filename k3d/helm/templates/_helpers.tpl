@@ -46,7 +46,7 @@ Deployment settings
 {{- define "coelho-realtime.DeploymentSettings" -}}
 kind: Deployment
 metadata:
-  name: coelho-realtime-{{ .appName }}-deployment
+  name: coelho-realtime-{{ .appName }}
   namespace: {{ .root.Release.Namespace }}
   labels:
     app.kubernetes.io/name: {{ .root.Chart.Name }}
@@ -66,10 +66,10 @@ metadata:
   name: coelho-realtime-{{ .appName }}-service
   namespace: {{ .root.Release.Namespace }}
   labels:
-    app: coelho-realtime-{{ .appName }}-deployment
+    app: coelho-realtime-{{ .appName }}
 spec:
   selector:
-    app: coelho-realtime-{{ .appName }}-deployment
+    app: coelho-realtime-{{ .appName }}
 {{- end -}}
 
 
@@ -97,11 +97,11 @@ Deployment spec settings
 {{- define "coelho-realtime.DeploymentSpecSettings" -}}
 selector:
   matchLabels:
-    app: coelho-realtime-{{ .appName }}-deployment
+    app: coelho-realtime-{{ .appName }}
 template:
   metadata:
     labels:
-      app: coelho-realtime-{{ .appName }}-deployment
+      app: coelho-realtime-{{ .appName }}
   spec:
     {{- if and (eq .root.Values.environment "production") (.root.Values.registry.imagePullSecret) }}
     imagePullSecrets:

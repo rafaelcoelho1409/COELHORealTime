@@ -96,7 +96,10 @@ kafka:
       failureThreshold: 6
 
 
+# DEPRECATED: Streamlit has been replaced by Reflex
+# Set enabled: true to re-enable if needed for reference
 streamlit:
+  enabled: false
   image: coelho-realtime-streamlit:latest
   imagePullPolicy: IfNotPresent
   replicas: 1

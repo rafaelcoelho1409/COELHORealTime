@@ -330,10 +330,14 @@ class State(rx.State):
         """Calculate estimated distance using Haversine formula."""
         import math
         form_data = self.form_data.get("Estimated Time of Arrival", {})
-        origin_lat = float(form_data.get("origin_lat", 0))
-        origin_lon = float(form_data.get("origin_lon", 0))
-        dest_lat = float(form_data.get("destination_lat", 0))
-        dest_lon = float(form_data.get("destination_lon", 0))
+        # Safely convert coordinates (handles empty strings and None)
+        try:
+            origin_lat = float(form_data.get("origin_lat") or 0)
+            origin_lon = float(form_data.get("origin_lon") or 0)
+            dest_lat = float(form_data.get("destination_lat") or 0)
+            dest_lon = float(form_data.get("destination_lon") or 0)
+        except (ValueError, TypeError):
+            return 0.0
 
         # Haversine formula
         lon1, lat1, lon2, lat2 = map(math.radians, [origin_lon, origin_lat, dest_lon, dest_lat])
@@ -356,16 +360,26 @@ class State(rx.State):
 
     @rx.var
     def eta_map_figure(self) -> go.Figure:
-        """Generate Plotly Scattermapbox figure for origin/destination display."""
+        """Generate Plotly Scattermapbox figure for origin/destination display.
+
+        Note: Using Scattermapbox (not Scattermap) for compatibility with react-plotly.js
+        which may bundle Plotly.js < 2.35.0. Scattermap requires MapLibre (Plotly.js 2.35+).
+        """
         form_data = self.form_data.get("Estimated Time of Arrival", {})
-        origin_lat = float(form_data.get("origin_lat", 29.8))
-        origin_lon = float(form_data.get("origin_lon", -95.4))
-        destination_lat = float(form_data.get("destination_lat", 29.8))
-        destination_lon = float(form_data.get("destination_lon", -95.4))
+        # Safely convert coordinates (handles empty strings and None)
+        try:
+            origin_lat = float(form_data.get("origin_lat") or 29.8)
+            origin_lon = float(form_data.get("origin_lon") or -95.4)
+            destination_lat = float(form_data.get("destination_lat") or 29.8)
+            destination_lon = float(form_data.get("destination_lon") or -95.4)
+        except (ValueError, TypeError):
+            # Default to Houston coordinates if conversion fails
+            origin_lat, origin_lon = 29.8, -95.4
+            destination_lat, destination_lon = 29.8, -95.4
 
         fig = go.Figure()
 
-        # Add markers for origin and destination
+        # Add markers for origin and destination (using Scattermapbox for compatibility)
         fig.add_trace(
             go.Scattermapbox(
                 lat=[origin_lat, destination_lat],
@@ -408,12 +422,12 @@ class State(rx.State):
             autosize=True,
             showlegend=False,
             hovermode='closest',
-            mapbox=dict(
+            mapbox=dict(  # Using mapbox (not map) for Scattermapbox compatibility
                 bearing=0,
                 center=dict(lat=center_lat, lon=center_lon),
                 pitch=0,
                 zoom=zoom,
-                style='open-street-map'
+                style='open-street-map'  # Free style, no Mapbox token required
             ),
             margin={"r": 0, "t": 30, "l": 0, "b": 0},
             height=300
@@ -476,14 +490,23 @@ class State(rx.State):
 
     @rx.var
     def ecci_location_figure(self) -> go.Figure:
-        """Generate Plotly Scattermapbox figure for ECCI location display."""
+        """Generate Plotly Scattermapbox figure for ECCI location display.
+
+        Note: Using Scattermapbox (not Scattermap) for compatibility with react-plotly.js
+        which may bundle Plotly.js < 2.35.0. Scattermap requires MapLibre (Plotly.js 2.35+).
+        """
         form_data = self.form_data.get("E-Commerce Customer Interactions", {})
-        lat = float(form_data.get("lat", 29.8))
-        lon = float(form_data.get("lon", -95.4))
+        # Safely convert coordinates (handles empty strings and None)
+        try:
+            lat = float(form_data.get("lat") or 29.8)
+            lon = float(form_data.get("lon") or -95.4)
+        except (ValueError, TypeError):
+            # Default to Houston coordinates if conversion fails
+            lat, lon = 29.8, -95.4
 
         fig = go.Figure()
 
-        # Add marker for location
+        # Add marker for location (using Scattermapbox for compatibility)
         fig.add_trace(
             go.Scattermapbox(
                 lat=[lat],
@@ -503,12 +526,12 @@ class State(rx.State):
             autosize=True,
             showlegend=False,
             hovermode='closest',
-            mapbox=dict(
+            mapbox=dict(  # Using mapbox (not map) for Scattermapbox compatibility
                 bearing=0,
                 center=dict(lat=lat, lon=lon),
                 pitch=0,
                 zoom=10,
-                style='open-street-map'
+                style='open-street-map'  # Free style, no Mapbox token required
             ),
             margin={"r": 0, "t": 30, "l": 0, "b": 0},
             height=300

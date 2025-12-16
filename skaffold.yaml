@@ -33,19 +33,6 @@ build:
             dest: /producer
           - src: "requirements.txt"
             dest: /producer
-    # Streamlit service
-    - image: coelho-realtime-streamlit
-      context: ./apps/streamlit
-      docker:
-        dockerfile: Dockerfile.streamlit
-      sync:
-        manual:
-          - src: "**/*.py"
-            dest: /app
-          - src: "requirements.txt"
-            dest: /app
-          - src: "**/*.json"
-            dest: /app
     # Reflex service
     - image: coelho-realtime-reflex
       context: ./apps/reflex
@@ -59,6 +46,19 @@ build:
             dest: /app
           - src: "**/*.json"
             dest: /app
+    # Streamlit service (DEPRECATED)
+    #- image: coelho-realtime-streamlit
+    #  context: ./apps/streamlit
+    #  docker:
+    #    dockerfile: Dockerfile.streamlit
+    #  sync:
+    #    manual:
+    #      - src: "**/*.py"
+    #        dest: /app
+    #      - src: "requirements.txt"
+    #        dest: /app
+    #      - src: "**/*.json"
+    #        dest: /app
   local:
     push: true  # Push to localhost:5000, K3d registry mirrors handle the rest
     useBuildkit: false
@@ -76,7 +76,7 @@ manifests:
           # Skaffold will automatically replace these with built image tags
           fastapi.image: "{{.IMAGE_NAME_coelho_realtime_fastapi}}:{{.IMAGE_TAG_coelho_realtime_fastapi}}"
           kafka.image: "{{.IMAGE_NAME_coelho_realtime_kafka}}:{{.IMAGE_TAG_coelho_realtime_kafka}}"
-          streamlit.image: "{{.IMAGE_NAME_coelho_realtime_streamlit}}:{{.IMAGE_TAG_coelho_realtime_streamlit}}"
+          #streamlit.image: "{{.IMAGE_NAME_coelho_realtime_streamlit}}:{{.IMAGE_TAG_coelho_realtime_streamlit}}"
           reflex.image: "{{.IMAGE_NAME_coelho_realtime_reflex}}:{{.IMAGE_TAG_coelho_realtime_reflex}}"
 
 deploy:
@@ -96,12 +96,6 @@ portForward:
     localPort: 5001
     address: 0.0.0.0
   - resourceType: service
-    resourceName: coelho-realtime-streamlit-service
-    namespace: coelho-realtime
-    port: 8501
-    localPort: 8501
-    address: 0.0.0.0
-  - resourceType: service
     resourceName: coelho-realtime-reflex-service
     namespace: coelho-realtime
     port: 3000
@@ -113,6 +107,12 @@ portForward:
     port: 8000
     localPort: 8000
     address: 0.0.0.0
+  #- resourceType: service
+  #  resourceName: coelho-realtime-streamlit-service
+  #  namespace: coelho-realtime
+  #  port: 8501
+  #  localPort: 8501
+  #  address: 0.0.0.0
 
 
 profiles:
@@ -143,16 +143,6 @@ profiles:
                 dest: /producer
               - src: "requirements.txt"
                 dest: /producer
-        # Streamlit - Use infer for automatic detection  
-        - image: coelho-realtime-streamlit
-          context: ./apps/streamlit
-          docker:
-            dockerfile: Dockerfile.streamlit
-          sync:
-            infer:
-              - "**/*.py"
-              - "requirements.txt"
-              - "**/*.json"
         # Reflex - Use infer for automatic detection  
         - image: coelho-realtime-reflex
           context: ./apps/reflex
@@ -163,6 +153,16 @@ profiles:
               - "**/*.py"
               - "requirements.txt"
               - "**/*.json"
+        ## Streamlit - Use infer for automatic detection  (DEPRECATED)
+        #- image: coelho-realtime-streamlit
+        #  context: ./apps/streamlit
+        #  docker:
+        #    dockerfile: Dockerfile.streamlit
+        #  sync:
+        #    infer:
+        #      - "**/*.py"
+        #      - "requirements.txt"
+        #      - "**/*.json"
     # Profile-specific manifests override (if needed)
     manifests:
       helm:
@@ -174,7 +174,7 @@ profiles:
             setValueTemplates:
               fastapi.image: "{{.IMAGE_NAME_coelho_realtime_fastapi}}:{{.IMAGE_TAG_coelho_realtime_fastapi}}"
               kafka.image: "{{.IMAGE_NAME_coelho_realtime_kafka}}:{{.IMAGE_TAG_coelho_realtime_kafka}}"
-              streamlit.image: "{{.IMAGE_NAME_coelho_realtime_streamlit}}:{{.IMAGE_TAG_coelho_realtime_streamlit}}"
+              #streamlit.image: "{{.IMAGE_NAME_coelho_realtime_streamlit}}:{{.IMAGE_TAG_coelho_realtime_streamlit}}"
               reflex.image: "{{.IMAGE_NAME_coelho_realtime_reflex}}:{{.IMAGE_TAG_coelho_realtime_reflex}}"
     deploy:
       helm: {}
