@@ -10,8 +10,8 @@ source .venv/bin/activate
 # Install dependencies
 uv pip install -r requirements.txt
 
-# Start FastAPI data service
-# NOTE: ML training moved to River app
-uvicorn app:app --host 0.0.0.0 --port 8001 --reload &
+mkdir -p /app/logs
 
-wait
+# Start River ML Training API
+# Training scripts are spawned on-demand via /switch_model endpoint
+uvicorn app:app --host 0.0.0.0 --port 8002

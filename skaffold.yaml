@@ -46,6 +46,17 @@ build:
             dest: /app
           - src: "**/*.json"
             dest: /app
+    # River ML Training service
+    - image: coelho-realtime-river
+      context: ./apps/river
+      docker:
+        dockerfile: Dockerfile.river
+      sync:
+        manual:
+          - src: "**/*.py"
+            dest: /app
+          - src: "requirements.txt"
+            dest: /app
     # Streamlit service (DEPRECATED)
     #- image: coelho-realtime-streamlit
     #  context: ./apps/streamlit
@@ -78,6 +89,7 @@ manifests:
           kafka.image: "{{.IMAGE_NAME_coelho_realtime_kafka}}:{{.IMAGE_TAG_coelho_realtime_kafka}}"
           #streamlit.image: "{{.IMAGE_NAME_coelho_realtime_streamlit}}:{{.IMAGE_TAG_coelho_realtime_streamlit}}"
           reflex.image: "{{.IMAGE_NAME_coelho_realtime_reflex}}:{{.IMAGE_TAG_coelho_realtime_reflex}}"
+          river.image: "{{.IMAGE_NAME_coelho_realtime_river}}:{{.IMAGE_TAG_coelho_realtime_river}}"
 
 deploy:
   helm: {}
@@ -125,6 +137,13 @@ portForward:
     port: 9001
     localPort: 9001
     address: 0.0.0.0
+  # River ML Training
+  - resourceType: service
+    resourceName: coelho-realtime-river
+    namespace: coelho-realtime
+    port: 8002
+    localPort: 8002
+    address: 0.0.0.0
   #- resourceType: service
   #  resourceName: coelho-realtime-streamlit
   #  namespace: coelho-realtime
@@ -161,7 +180,7 @@ profiles:
                 dest: /producer
               - src: "requirements.txt"
                 dest: /producer
-        # Reflex - Use infer for automatic detection  
+        # Reflex - Use infer for automatic detection
         - image: coelho-realtime-reflex
           context: ./apps/reflex
           docker:
@@ -171,6 +190,15 @@ profiles:
               - "**/*.py"
               - "requirements.txt"
               - "**/*.json"
+        # River ML Training - Use infer for automatic detection
+        - image: coelho-realtime-river
+          context: ./apps/river
+          docker:
+            dockerfile: Dockerfile.river
+          sync:
+            infer:
+              - "**/*.py"
+              - "requirements.txt"
         ## Streamlit - Use infer for automatic detection  (DEPRECATED)
         #- image: coelho-realtime-streamlit
         #  context: ./apps/streamlit
@@ -194,5 +222,6 @@ profiles:
               kafka.image: "{{.IMAGE_NAME_coelho_realtime_kafka}}:{{.IMAGE_TAG_coelho_realtime_kafka}}"
               #streamlit.image: "{{.IMAGE_NAME_coelho_realtime_streamlit}}:{{.IMAGE_TAG_coelho_realtime_streamlit}}"
               reflex.image: "{{.IMAGE_NAME_coelho_realtime_reflex}}:{{.IMAGE_TAG_coelho_realtime_reflex}}"
+              river.image: "{{.IMAGE_NAME_coelho_realtime_river}}:{{.IMAGE_TAG_coelho_realtime_river}}"
     deploy:
       helm: {}

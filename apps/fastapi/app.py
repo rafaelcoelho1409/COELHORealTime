@@ -11,7 +11,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from pydantic import (
     BaseModel,
-    Field,
     field_validator
 )
 import sys
@@ -24,7 +23,6 @@ from typing import (
 import math
 from pprint import pprint
 import json
-import subprocess
 import os
 import numpy as np
 import pandas as pd
@@ -106,89 +104,14 @@ PROJECT_NAMES = [
     "E-Commerce Customer Interactions",
     #"Sales Forecasting"
 ]
-MODEL_SCRIPTS = {
-    f"{project_name} - River": f"{project_name.replace(' ', '_').replace('-', '_').lower()}_river.py"
-    for project_name in PROJECT_NAMES
-} | {
-    f"{project_name} - Scikit Learn": f"{project_name.replace(' ', '_').replace('-', '_').lower()}_sklearn.py"
-    for project_name in PROJECT_NAMES
-}
+# NOTE: MODEL_SCRIPTS removed - training moved to River app
 ENCODER_LIBRARIES = [
     "river",
     "sklearn"
 ]
 
 
-def stop_current_model():
-    """
-    Stops the currently running model process using Popen.terminate() (SIGTERM),
-    then Popen.kill() (SIGKILL) if necessary.
-    Manages state via the global healthcheck object.
-    Returns True if the process is confirmed stopped or was already stopped.
-    """
-    global healthcheck
-    if not healthcheck.current_training_process:
-        healthcheck.current_training_status = "No model was active to stop."
-        return True
-    active_model_name = healthcheck.current_model_name
-    process_to_stop = healthcheck.current_training_process # This is the Popen object
-    if not hasattr(process_to_stop, 'pid') or process_to_stop.pid is None:
-        print(f"Model '{active_model_name}' has invalid/stale process object. Cleaning up.")
-        healthcheck.current_training_status = f"Model '{active_model_name}' had invalid process object. State cleared."
-        healthcheck.current_training_process = None
-        healthcheck.current_model_name = None
-        return True
-    pid_to_stop = process_to_stop.pid
-    print(f"Attempting to stop model: '{active_model_name}' (PID: {pid_to_stop}) using Popen.terminate() (SIGTERM).")
-    healthcheck.current_training_status = f"Sending SIGTERM to model '{active_model_name}' (PID: {pid_to_stop}). Waiting for graceful shutdown (60s)..."
-    try:
-        process_to_stop.terminate() # Sends SIGTERM
-        process_to_stop.wait(timeout = 60) # Wait for process to terminate
-        if process_to_stop.poll() is not None: # Check if process has terminated
-            print(f"Model '{active_model_name}' (PID: {pid_to_stop}) terminated gracefully after SIGTERM (exit code: {process_to_stop.returncode}).")
-            healthcheck.current_training_status = f"Model '{active_model_name}' stopped gracefully (SIGTERM)."
-        else:
-            # This case should ideally not be reached if wait() returned without TimeoutExpired
-            # and poll() is still None, but we handle it defensively.
-            print(f"Model '{active_model_name}' (PID: {pid_to_stop}) did not terminate after SIGTERM and wait(). Status unclear. Proceeding to SIGKILL.")
-            healthcheck.current_training_status = f"Model '{active_model_name}' SIGTERM sent, status unclear. Proceeding to SIGKILL."
-            # Fall through to SIGKILL logic below (implicitly, as poll() will be None)
-    except subprocess.TimeoutExpired:
-        print(f"Model '{active_model_name}' (PID: {pid_to_stop}) timed out (60s) after SIGTERM. Sending SIGKILL.")
-        healthcheck.current_training_status = f"Model '{active_model_name}' timed out after SIGTERM, will send SIGKILL."
-        # Fall through to SIGKILL logic
-    except Exception as e_terminate: # Catch other errors during terminate/wait
-        print(f"Error during SIGTERM/wait for model '{active_model_name}' (PID: {pid_to_stop}): {e_terminate}")
-        healthcheck.current_training_status = f"Error during SIGTERM/wait for '{active_model_name}': {e_terminate}. Proceeding to SIGKILL."
-        # Fall through to SIGKILL logic
-    # If process is still running (poll() is None after SIGTERM attempt or if an error occurred)
-    if process_to_stop.poll() is None:
-        try:
-            print(f"Sending SIGKILL to model '{active_model_name}' (PID: {pid_to_stop}).")
-            healthcheck.current_training_status = f"Sending SIGKILL to model '{active_model_name}' (PID: {pid_to_stop})."
-            process_to_stop.kill() # Sends SIGKILL
-            process_to_stop.wait(timeout = 10) # Wait for SIGKILL to take effect
-            if process_to_stop.poll() is not None:
-                print(f"Model '{active_model_name}' (PID: {pid_to_stop}) terminated after SIGKILL (exit code: {process_to_stop.returncode}).")
-                healthcheck.current_training_status = f"Model '{active_model_name}' stopped via SIGKILL."
-            else:
-                print(f"ERROR: Model '{active_model_name}' (PID: {pid_to_stop}) did NOT terminate after SIGKILL and wait. Process may be unkillable.")
-                healthcheck.current_training_status = f"ERROR: Model '{active_model_name}' failed to stop even after SIGKILL."
-                # Do not clear process/model name if we failed to kill it, to reflect this state.
-                return False # Indicate stop failed
-        except Exception as e_kill:
-            print(f"Error during SIGKILL/wait for model '{active_model_name}' (PID: {pid_to_stop}): {e_kill}")
-            healthcheck.current_training_status = f"Error during SIGKILL for '{active_model_name}': {e_kill}"
-            # Do not clear process/model name if we failed to kill it.
-            return False # Indicate stop failed
-    elif process_to_stop.poll() is not None and not healthcheck.current_training_status.startswith(f"Model '{active_model_name}' stopped gracefully"):
-         # Process already stopped before SIGKILL attempt, and not by successful SIGTERM
-         print(f"Model '{active_model_name}' was already stopped before SIGKILL stage (exit code: {process_to_stop.returncode}).")
-         healthcheck.current_training_status = f"Model '{active_model_name}' confirmed stopped before SIGKILL stage."
-    # Final state cleanup if process is confirmed stopped or we've exhausted attempts and it's considered "done"
-    healthcheck.current_training_process = None
-    healthcheck.current_model_name = None
-    return True # Signifies completion of the stop sequence.
+# NOTE: stop_current_model() removed - training moved to River app
 
 
 # Initialize global variables as None or placeholder BEFORE startup
@@ -208,15 +131,7 @@ class Healthcheck(BaseModel):
     data_message: dict[str, str] | dict[str, None] = {x: None for x in PROJECT_NAMES} # Added data load message
     initial_data_sample_loaded: dict[str, bool] | dict[str, None] = {x: None for x in PROJECT_NAMES} # Added sample status
     initial_data_sample_message: dict[str, str] | dict[str, None] = {x: None for x in PROJECT_NAMES}
-    current_training_process: Optional[Any] = None
-    current_model_name: Optional[str] = None
-    current_training_status: Optional[str] = Field(
-        "Initializing",
-        description = "Describes the current state of the managed training process."
-    )
-    model_config = {
-        "arbitrary_types_allowed": True
-    }
+    # NOTE: Training-related fields removed - training moved to River app
 
 # Initialize healthcheck with default state
 healthcheck = Healthcheck(
@@ -480,10 +395,8 @@ async def lifespan(app: FastAPI):
         print(f"Error loading MLflow: {e}", file = sys.stderr)
     print("Application setup finished. Yielding control...")
     yield # <-- Application is now ready to serve requests
-    # --- Shutdown Logic (Equivalent to @app.on_event("shutdown")) ---
-    print("FastAPI application shutting down. Stopping any active model...")
-    stop_current_model()
-    print("Starting application shutdown (lifespan)...")
+    # --- Shutdown Logic ---
+    print("FastAPI application shutting down...")
     print("Application shutdown finished.")
 
 
@@ -511,16 +424,16 @@ async def health_check(request: Request):
 
 
 # IMPORTANT OBSERVATION: you can put the PUT only after the GET
-@app.get("/healthcheck", response_model = Healthcheck, response_model_exclude = {"current_training_process"})
+@app.get("/healthcheck", response_model = Healthcheck)
 async def get_healthcheck():
     # You can add more detailed checks here if needed, e.g., if model is None
     if ("failed" in healthcheck.model_load.values()) or ("failed" in healthcheck.data_load.values()):
         raise HTTPException(
-            status_code = 503, 
+            status_code = 503,
             detail = "Service Unavailable: Core components failed to load.")
     return healthcheck
 
-@app.put("/healthcheck", response_model = Healthcheck, response_model_exclude = {"current_training_process"})
+@app.put("/healthcheck", response_model = Healthcheck)
 async def update_healthcheck(update_data: Healthcheck):
     global healthcheck # Declare that you intend to modify the global variable
     update_dict = update_data.model_dump(exclude_unset = True)
@@ -603,108 +516,10 @@ async def get_initial_sample(request: InitialSampleRequest):
         return initial_sample_dict[request.project_name]
 
 
-@app.post("/predict")
-async def predict(payload: dict):
-    """
-    Make predictions using the latest model from disk.
-    Reloads model before each prediction to stay synchronized with training.
-    Payload format: {project_name, model_name, ...feature_data}
-    """
-    global encoders_dict, model_dict
-    project_name = payload.get("project_name")
-    model_name = payload.get("model_name")
-    if not project_name or not model_name:
-        raise HTTPException(
-            status_code = 400,
-            detail = "Missing required fields: project_name and model_name"
-        )
-    # Reload model from disk to get the latest trained version
-    model_folder_name = project_name.lower().replace(' ', '_').replace("-", "_")
-    model_folder = f"models/{model_folder_name}"
-    try:
-        model = load_or_create_model(project_name, model_name, model_folder)
-        # Update in-memory cache
-        if project_name not in model_dict:
-            model_dict[project_name] = {}
-        model_dict[project_name][model_name] = model
-    except Exception as e:
-        print(f"Error reloading model from disk: {e}", file=sys.stderr)
-        # Fall back to cached model if available
-        if project_name in model_dict and model_name in model_dict.get(project_name, {}):
-            model = model_dict[project_name][model_name]
-            print(f"Using cached model for {project_name}/{model_name}")
-        else:
-            raise HTTPException(
-                status_code = 503,
-                detail = f"Model '{model_name}' for project '{project_name}' could not be loaded: {e}"
-            )
-    # Reload encoders from disk to stay synchronized with training
-    try:
-        for library in ENCODER_LIBRARIES:
-            encoders_dict[project_name][library] = load_or_create_encoders(project_name, library)
-    except Exception as e:
-        print(f"Error reloading encoders: {e}", file=sys.stderr)
-        if project_name not in encoders_dict:
-            raise HTTPException(
-                status_code = 503,
-                detail = f"Encoders for project '{project_name}' could not be loaded: {e}"
-            )
-    # Extract feature data (remove metadata fields)
-    x = {k: v for k, v in payload.items() if k not in ["project_name", "model_name"]}
-    if model_name in ["ARFClassifier", "ARFRegressor", "DBSTREAM"]:
-        try:
-            # Use pre-loaded encoders
-            encoders = encoders_dict[project_name].get("river", {})
-            processed_x, _ = process_sample(x, encoders, project_name)
-            if project_name == "Transaction Fraud Detection":
-                y_pred_proba = model.predict_proba_one(processed_x)
-                fraud_probability = y_pred_proba.get(1, 0.0)
-                binary_prediction = 1 if fraud_probability >= 0.5 else 0
-                return {
-                    "fraud_probability": fraud_probability,
-                    "prediction": binary_prediction,
-                }
-            elif project_name == "Estimated Time of Arrival":
-                y_pred = model.predict_one(processed_x)
-                return {"Estimated Time of Arrival": y_pred}
-            elif project_name == "E-Commerce Customer Interactions":
-                y_pred = model.predict_one(processed_x)
-                return {"cluster": y_pred}
-        except Exception as e:
-            print(f"Error during prediction: {e}", file=sys.stderr)
-            raise HTTPException(
-                status_code = 500, 
-                detail = f"Prediction failed: {e}")
-    elif model_name in ["XGBClassifier"]:
-        try:
-            # Use pre-loaded encoders
-            encoders = encoders_dict[project_name].get("sklearn", {})
-            if project_name == "Transaction Fraud Detection":
-                processed_x = process_sample(x, ..., project_name, library="sklearn")
-                preprocessor = encoders.get("preprocessor")
-                if preprocessor is None:
-                    raise HTTPException(
-                        status_code = 503, 
-                        detail = "Preprocessor not loaded")
-                processed_x = pd.DataFrame({k: [v] for k, v in processed_x.items()})
-                processed_x = preprocessor.transform(processed_x)
-                y_pred_proba = model.predict_proba(processed_x).tolist()[0]
-                fraud_probability = y_pred_proba[1]
-                binary_prediction = 1 if fraud_probability >= 0.5 else 0
-                return {
-                    "fraud_probability": fraud_probability,
-                    "prediction": binary_prediction,
-                }
-        except Exception as e:
-            print(f"Error during prediction: {e}", file=sys.stderr)
-            raise HTTPException(
-                status_code = 500, 
-                detail = f"Prediction failed: {e}")
-    raise HTTPException(
-        status_code = 400, 
-        detail = f"Unknown model: {model_name}")
-        
-        
+# NOTE: /predict endpoint moved to River app
+# Predictions are now handled by the River ML Training Service
+
+
 class OrdinalEncoderRequest(BaseModel):
     project_name: str
 
@@ -803,72 +618,8 @@ async def get_cluster_counts(request: ClusterFeatureCountsRequest):
         return {}
     
 
-@app.post("/switch_model")
-async def switch_model(payload: dict):
-    global healthcheck
-    if payload["model_key"] == healthcheck.current_model_name:
-        return {"message": f"Model {payload["model_key"]} is already running."}
-    # Stop any currently running model
-    if healthcheck.current_training_process:
-        print(f"Switching from {healthcheck.current_model_name} to {payload["model_key"]}")
-        stop_current_model()
-    else:
-        print(f"No model running, attempting to start {payload["model_key"]}")
-    if payload["model_key"] == "none" or payload["model_key"] not in MODEL_SCRIPTS.values():
-        if payload["model_key"] == "none":
-            return {"message": "All models stopped."}
-        else:
-            raise HTTPException(
-                status_code = 404, 
-                detail = f"Model key '{payload["model_key"]}' not found.")
-    script_to_run = payload["model_key"]
-    command = ["/app/.venv/bin/python3", "-u", script_to_run]
-    try:
-        print(f"Starting model: {payload["model_key"]} with script: {script_to_run}")
-        # Start the new training script
-        # Make sure logs from these scripts go somewhere, or capture stdout/stderr
-        # For simplicity, letting them log to their own files or stdout for now.
-        # If you redirect stdout/stderr, ensure non-blocking reads or use tempfiles.
-        log_file_path = f"/app/logs/{payload["model_key"]}.log" # Ensure /app/logs exists
-        os.makedirs(
-            os.path.dirname(log_file_path), 
-            exist_ok = True)
-        with open(log_file_path, 'ab') as log_file: # Append mode, binary
-            # `start_new_session=True` or `preexec_fn=os.setsid` can be useful if you need to kill process groups
-            # For SIGTERM on the direct child, it's usually not strictly necessary but good practice.
-            process = subprocess.Popen(
-                command,
-                stdout = log_file,
-                stderr = subprocess.STDOUT, # Redirect stderr to stdout (goes to same log_file)
-                cwd = "/app" # Assuming scripts are in /app and paths are relative to it
-                          # or use absolute paths for scripts
-            )
-        healthcheck.current_training_process = process
-        healthcheck.current_model_name = payload["model_key"]
-        print(f"Model {payload["model_key"]} started with PID: {process.pid}. Logs at {log_file_path}")
-        if payload["model_key"].endswith("sklearn.py"):
-            data_manager.load_data(payload["project_name"])
-        return {"message": f"Switched to model: {payload["model_key"]}"}
-    except Exception as e:
-        print(f"Failed to start model {payload["model_key"]}: {e}")
-        healthcheck.current_training_process = None # Ensure state is clean
-        healthcheck.current_model_name = None
-        raise HTTPException(
-            status_code = 500, 
-            detail = f"Failed to start model {payload["model_key"]}: {str(e)}")
-    
-
-@app.get("/current_model")
-async def get_current_model():
-    if healthcheck.current_model_name and healthcheck.current_training_process:
-        # Check if process is still alive
-        if healthcheck.current_training_process.poll() is None: # None means still running
-            return {"current_model": healthcheck.current_model_name, "status": "running", "pid": healthcheck.current_training_process.pid}
-        else: # Process has terminated
-            return_code = healthcheck.current_training_process.returncode
-            stop_current_model() # Clean up state
-            return {"current_model": healthcheck.current_model_name, "status": f"stopped (exit code: {return_code})", "pid": None }
-    return {"current_model": None, "status": "none running"}
+# NOTE: /switch_model and /current_model endpoints moved to River app
+# Training is now handled by the River ML Training Service
 
 
 def _sync_generate_yellowbrick_plot(

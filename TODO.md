@@ -26,7 +26,7 @@ Real-time ML platform with incremental learning, featuring:
 - [x] Real-time training toggle
 - [x] Prediction forms and visualizations
 
-### Phase 3: Reflex Migration (Current - COMPLETED)
+### Phase 3: Reflex Migration (COMPLETED)
 - [x] Migrate TFD page to Reflex
 - [x] Migrate ETA page to Reflex
 - [x] Migrate ECCI page to Reflex
@@ -35,6 +35,25 @@ Real-time ML platform with incremental learning, featuring:
 - [x] Fix form field display issues (0 values, None handling)
 - [x] Update navbar with official service logos
 - [x] Improve page layouts (always-visible maps)
+
+### Phase 6: ML Training Service Separation (COMPLETED)
+- [x] Design new service architecture (River ML Training Service)
+- [x] Create River FastAPI service with endpoints:
+  - [x] `/switch_model` - Start/stop ML training
+  - [x] `/predict` - Model predictions (River + sklearn)
+  - [x] `/status`, `/health` - Service monitoring
+- [x] Add Helm templates for River service (deployment, service, configmap)
+- [x] Update Reflex to call River directly for training and predictions
+- [x] Clean up FastAPI (removed training code, now Analytics-only)
+- [x] Update navbar with nested FastAPI submenu (Analytics, River, Scikit-Learn)
+
+**Current Architecture:**
+```
+Reflex → River (training + predictions)
+      → FastAPI Analytics (data queries, yellowbrick)
+
+Kafka → River ML Training Scripts → MLflow
+```
 
 ---
 
@@ -76,32 +95,17 @@ Real-time ML platform with incremental learning, featuring:
   - [ ] Display current model version on each page
   - [ ] Show last model update timestamp
 
-### Phase 6: ML Training Service Separation (Priority: HIGH)
-**Goal:** Isolate ML training from FastAPI to prevent crashes and improve stability
+### Phase 6: Scikit-Learn Service (Priority: LOW)
+**Goal:** Create dedicated Scikit-Learn FastAPI service for batch ML
 
-**Problem:** Currently, real-time ML training runs inside FastAPI, which can cause:
-- Memory pressure and crashes under high load
-- Training blocking API response times
-- Difficulty scaling training independently
-
-**Solution:** Create dedicated ML Training Service
-
-- [ ] Design new service architecture:
-  ```
-  Kafka → ML Training Service → MLflow (models)
-               ↓
-           Redis/MinIO (state sync)
-               ↓
-         FastAPI (predictions only)
-  ```
-- [ ] Create new Python service for ML training:
-  - [ ] Kafka consumer for each topic
-  - [ ] River ML model training loop
-  - [ ] Periodic model checkpointing to MLflow
-  - [ ] Health endpoint for Kubernetes probes
-- [ ] Add Helm templates for ML Training Service
-- [ ] Add shared state mechanism (Redis or MinIO)
-- [ ] Test failover scenarios
+- [ ] Create Scikit-Learn FastAPI service with endpoints:
+  - [ ] `/train` - Trigger batch model training
+  - [ ] `/predict` - Batch ML predictions
+  - [ ] `/status`, `/health` - Service monitoring
+- [ ] Add Helm templates for Scikit-Learn service (deployment, service, configmap)
+- [ ] Migrate Batch ML Streamlit pages to Reflex
+- [ ] Update Reflex to call Scikit-Learn service for batch predictions
+- [ ] Enable Scikit-Learn option in navbar (remove "Soon" badge)
 
 ### Phase 7: Observability Stack (Priority: HIGH)
 **Goal:** Production-grade monitoring with Prometheus & Grafana
@@ -176,6 +180,11 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 
 ## Technical Debt & Improvements
 
+### Bug Fixes
+- [ ] Fix Reflex form field display errors (some fields not showing values correctly)
+  - Revisit 0 values, None handling, and edge cases
+  - Test all three project pages (TFD, ETA, ECCI)
+
 ### Code Quality
 - [ ] Add unit tests for FastAPI endpoints
 - [ ] Add integration tests for Reflex pages
@@ -199,10 +208,16 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
   - Implemented in `k3d/terraform/main.tf` using `locals.project_root = abspath("${path.module}/../..")`
   - Data directory: `data/minio/` in project root
   - Added `.gitkeep` file and `.gitignore` rules to track directory but ignore data
+- [ ] Add PostgreSQL for MLflow metadata persistence (instead of SQLite)
+  - PostgreSQL is production-ready and supports concurrency
+  - Required for Airflow in future projects (SQLite is dev-only for Airflow)
+  - One PostgreSQL instance can serve multiple services (MLflow, Airflow, Superset, etc.)
+  - Use Bitnami PostgreSQL Helm chart with hostPath persistence
+  - Configure MLflow to use `postgresql://` backend store
 
 ---
 
-## Architecture Diagram (Target State)
+## Architecture Diagram (Current State)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -210,31 +225,30 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                      │
 │  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐      │
-│  │  Reflex  │◄──►│  FastAPI │◄──►│  Kafka   │◄──►│ Producers│      │
-│  │ Frontend │    │ (predict)│    │          │    │ (Python) │      │
-│  └────┬─────┘    └────┬─────┘    └────┬─────┘    └──────────┘      │
-│       │               │               │                              │
-│       │               │               ▼                              │
-│       │               │          ┌──────────┐                       │
-│       │               │          │ ML Train │                       │
-│       │               │          │ Service  │                       │
-│       │               │          └────┬─────┘                       │
-│       │               │               │                              │
-│       │               ▼               ▼                              │
-│       │          ┌──────────┐    ┌──────────┐                       │
-│       │          │  MLflow  │◄──►│  MinIO   │                       │
-│       │          │          │    │ (S3)     │                       │
-│       │          └──────────┘    └────┬─────┘                       │
+│  │  Reflex  │◄──►│  FastAPI │    │  Kafka   │◄──►│ Producers│      │
+│  │ Frontend │    │(Analytics)    │          │    │ (Python) │      │
+│  └────┬─────┘    └──────────┘    └────┬─────┘    └──────────┘      │
 │       │                               │                              │
-│       │                               ▼                              │
-│       │                          ┌──────────┐                       │
-│       │                          │  Delta   │                       │
-│       │                          │  Lake    │                       │
-│       │                          └──────────┘                       │
+│       │    ┌──────────┐               │                              │
+│       ├───►│  River   │◄──────────────┘                              │
+│       │    │(ML Train)│                                              │
+│       │    └────┬─────┘                                              │
+│       │         │                                                    │
+│       │         ▼                                                    │
+│       │    ┌──────────┐    ┌──────────┐                             │
+│       │    │  MLflow  │◄──►│  MinIO   │                             │
+│       │    │          │    │ (S3)     │                             │
+│       │    └──────────┘    └────┬─────┘                             │
+│       │                         │                                    │
+│       │                         ▼                                    │
+│       │                    ┌──────────┐                             │
+│       │                    │  Delta   │ (future)                    │
+│       │                    │  Lake    │                             │
+│       │                    └──────────┘                             │
 │       │                                                              │
 │       ▼                                                              │
 │  ┌──────────┐    ┌──────────┐                                       │
-│  │Prometheus│◄──►│ Grafana  │                                       │
+│  │Prometheus│◄──►│ Grafana  │ (future)                              │
 │  │          │    │          │                                       │
 │  └──────────┘    └──────────┘                                       │
 │                                                                      │
@@ -249,7 +263,7 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 |-------|----------|--------|-------|--------------|
 | 4. MinIO | HIGH | Medium | High | None |
 | 5. MLflow Model Integration | HIGH | Medium | Very High | MinIO |
-| 6. ML Training Service | HIGH | High | Very High | MinIO, Phase 5 |
+| 6. Scikit-Learn Service | LOW | Medium | Medium | Phase 10 |
 | 7. Prometheus/Grafana | HIGH | Medium | High | None |
 | 8. A/B Testing | MEDIUM | Medium | High | MLflow, MinIO |
 | 9. Delta Lake | MEDIUM | High | Medium | MinIO |
@@ -259,11 +273,11 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 
 ## Notes
 
-- **Critical Architecture:** Phase 6 (ML Training Service) solves FastAPI crash issues - high priority
+- **ML Training Service (DONE):** River service now handles real-time ML training separately from FastAPI
 - **MLflow Integration:** Phase 5 enables production-ready model serving from MLflow registry
 - **Quick Wins:** MinIO (Phase 4) and Prometheus (Phase 7) can be added in parallel
 - **Dependencies:** Delta Lake and A/B Testing require MinIO to be set up first
-- **Study vs Production:** Batch ML is study phase, lower priority
+- **Scikit-Learn Service:** Create when Batch ML studies (Phase 10) are ready
 
 ---
 
@@ -275,4 +289,4 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 
 ---
 
-*Last updated: 2025-12-16*
+*Last updated: 2025-12-17*

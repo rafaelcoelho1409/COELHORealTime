@@ -9,6 +9,9 @@ from .utils import httpx_client_post, httpx_client_get
 FASTAPI_HOST = os.getenv("FASTAPI_HOST", "localhost")
 FASTAPI_BASE_URL = f"http://{FASTAPI_HOST}:8001"
 
+RIVER_HOST = os.getenv("RIVER_HOST", "localhost")
+RIVER_BASE_URL = f"http://{RIVER_HOST}:8002"
+
 
 # =============================================================================
 # Form Value Helpers
@@ -739,7 +742,7 @@ class State(rx.State):
                 return
             try:
                 response = await httpx_client_post(
-                    url = f"{FASTAPI_BASE_URL}/switch_model",
+                    url = f"{RIVER_BASE_URL}/switch_model",
                     json = {
                         "model_key": model_key,
                         "project_name": project_name
@@ -781,7 +784,7 @@ class State(rx.State):
                 return
             try:
                 await httpx_client_post(
-                    url = f"{FASTAPI_BASE_URL}/switch_model",
+                    url = f"{RIVER_BASE_URL}/switch_model",
                     json = {
                         "model_key": "none",
                         "project_name": ""
@@ -816,7 +819,7 @@ class State(rx.State):
             if self.activated_model == self._current_page_model_key:
                 try:
                     await httpx_client_post(
-                        url = f"{FASTAPI_BASE_URL}/switch_model",
+                        url = f"{RIVER_BASE_URL}/switch_model",
                         json = {
                             "model_key": "none",
                             "project_name": ""
@@ -1039,7 +1042,7 @@ class State(rx.State):
         try:
             print(f"Making prediction with payload: {payload}")
             response = await httpx_client_post(
-                url = f"{FASTAPI_BASE_URL}/predict",
+                url = f"{RIVER_BASE_URL}/predict",
                 json = payload,
                 timeout = 30.0
             )
@@ -1368,7 +1371,7 @@ class State(rx.State):
         try:
             print(f"Making ETA prediction with payload: {payload}")
             response = await httpx_client_post(
-                url = f"{FASTAPI_BASE_URL}/predict",
+                url = f"{RIVER_BASE_URL}/predict",
                 json = payload,
                 timeout = 30.0
             )
@@ -1578,7 +1581,7 @@ class State(rx.State):
         try:
             print(f"Making ECCI prediction with payload: {payload}")
             response = await httpx_client_post(
-                url=f"{FASTAPI_BASE_URL}/predict",
+                url=f"{RIVER_BASE_URL}/predict",
                 json=payload,
                 timeout=30.0
             )

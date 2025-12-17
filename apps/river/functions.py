@@ -1,3 +1,8 @@
+"""
+River ML Training Helper Functions
+
+Functions for incremental machine learning training using River library.
+"""
 import pickle
 import os
 import sys
@@ -7,39 +12,18 @@ from kafka import KafkaConsumer
 from kafka.errors import NoBrokersAvailable
 import json
 import pandas as pd
-import numpy as np
 import datetime as dt
 from river import (
     base,
-    compose, 
-    metrics, 
+    compose,
+    metrics,
     drift,
     forest,
     cluster,
     preprocessing,
     time_series,
     linear_model,
-    optim,
-    bandit,
-    model_selection
 )
-from sklearn.preprocessing import (
-    StandardScaler,
-    OneHotEncoder,
-)
-from sklearn.compose import ColumnTransformer
-from sklearn.model_selection import (
-    train_test_split,
-    StratifiedKFold
-)
-from xgboost import XGBClassifier
-from yellowbrick import (
-    classifier,
-    features,
-    target,
-    model_selection
-)
-import matplotlib.pyplot as plt
 
 
 KAFKA_HOST = os.environ["KAFKA_HOST"]
@@ -173,13 +157,6 @@ def extract_device_info(x):
         'browser': x_['browser'],
     }
 
-def extract_device_info_sklearn(data):
-    data = data.copy()
-    data_to_join = pd.json_normalize(data["device_info"])
-    data = data.drop("device_info", axis = 1)
-    data = data.join(data_to_join)
-    return data
-
 def extract_timestamp_info(x):
     x_ = dt.datetime.strptime(
         x['timestamp'],
@@ -193,20 +170,6 @@ def extract_timestamp_info(x):
         'second': x_.second
     }
 
-def extract_timestamp_info_sklearn(data):
-    data = data.copy()
-    data["timestamp"] = pd.to_datetime(
-        data["timestamp"],
-        format = 'ISO8601')
-    data["year"] = data["timestamp"].dt.year
-    data["month"] = data["timestamp"].dt.month
-    data["day"] = data["timestamp"].dt.day
-    data["hour"] = data["timestamp"].dt.hour
-    data["minute"] = data["timestamp"].dt.minute
-    data["second"] = data["timestamp"].dt.second
-    data = data.drop("timestamp", axis = 1)
-    return data
-
 def extract_coordinates(x):
     x_ = x['location']
     return {
@@ -214,81 +177,52 @@ def extract_coordinates(x):
         'lon': x_['lon'],
     }
 
-def extract_coordinates_sklearn(data):
-    data = data.copy()
-    data_to_join = pd.json_normalize(data["location"])
-    data = data.drop("location", axis = 1)
-    data = data.join(data_to_join)
-    return data
-
-def load_or_create_encoders(project_name, library):
-    encoders_folders_river = {
+def load_or_create_encoders(project_name, library="river"):
+    """Load encoders from disk or create new ones for River incremental learning."""
+    encoders_folders = {
         "Transaction Fraud Detection": "encoders/river/transaction_fraud_detection.pkl",
         "Estimated Time of Arrival": "encoders/river/estimated_time_of_arrival.pkl",
         "E-Commerce Customer Interactions": "encoders/river/e_commerce_customer_interactions.pkl",
-        #"Sales Forecasting": "encoders/river/sales_forecasting.pkl"
+        "Sales Forecasting": "encoders/river/sales_forecasting.pkl"
     }
-    encoders_folders_sklearn = {
-        "Transaction Fraud Detection": "encoders/sklearn/transaction_fraud_detection.pkl",
-        "Estimated Time of Arrival": "encoders/sklearn/estimated_time_of_arrival.pkl",
-        "E-Commerce Customer Interactions": "encoders/sklearn/e_commerce_customer_interactions.pkl",
-        #"Sales Forecasting": "encoders/sklearn/sales_forecasting.pkl"
-    }
-    if library == "river":
-        encoder_path = encoders_folders_river[project_name]
-        try:
-            with open(encoder_path, 'rb') as f:
-                encoders = pickle.load(f)
-            print("Ordinal encoder loaded from disk.")
-        except FileNotFoundError as e:
-            if project_name in ["Transaction Fraud Detection", "Estimated Time of Arrival"]:
-                encoders = {
-                    "ordinal_encoder": CustomOrdinalEncoder()
-                }
-            elif project_name in ["E-Commerce Customer Interactions"]:
-                encoders = {
-                    "standard_scaler": preprocessing.StandardScaler(),
-                    "feature_hasher": preprocessing.FeatureHasher()
-                }
-            elif project_name in ["Sales Forecasting"]:
-                encoders = {
-                    "one_hot_encoder": preprocessing.OneHotEncoder(),
-                    "standard_scaler": preprocessing.StandardScaler(),
-                } #remove after developing the right model strategy
-            print(f"Creating encoders: {e}", file = sys.stderr)
-        except Exception as e:
-            if project_name in ["Transaction Fraud Detection", "Estimated Time of Arrival"]:
-                encoders = {
-                    "ordinal_encoder": CustomOrdinalEncoder()
-                }
-            elif project_name in ["E-Commerce Customer Interactions"]:
-                encoders = {
-                    "standard_scaler": preprocessing.StandardScaler(),
-                    "feature_hasher": preprocessing.FeatureHasher()
-                }
-            elif project_name in ["Sales Forecasting"]:
-                encoders = {
-                    "one_hot_encoder": preprocessing.OneHotEncoder(),
-                    "standard_scaler": preprocessing.StandardScaler(),
-                } #remove after developing the right model strategy
-            print(f"Creating encoders: {e}", file = sys.stderr)
-        return encoders
-    elif library == "sklearn":
-        #Sklearn encoders must be only loaded from disk
-        encoder_path = encoders_folders_sklearn[project_name]
-        try:
-            with open(encoder_path, 'rb') as f:
-                encoders = pickle.load(f)
-            print("Scikit-Learn encoders loaded from disk.")
-        except FileNotFoundError as e:
-            raise FileNotFoundError(f"Scikit-Learn encoders not found for project {project_name}.") from e
-        except Exception as e:
-            raise Exception(f"Error loading Scikit-Learn encoders for project {project_name}: {e}") from e
-        return encoders
+    encoder_path = encoders_folders.get(project_name)
+    if not encoder_path:
+        raise ValueError(f"Unknown project: {project_name}")
+
+    try:
+        with open(encoder_path, 'rb') as f:
+            encoders = pickle.load(f)
+        print(f"Encoders loaded from disk for {project_name}.")
+    except FileNotFoundError as e:
+        encoders = _create_default_encoders(project_name)
+        print(f"Creating new encoders for {project_name}: {e}", file=sys.stderr)
+    except Exception as e:
+        encoders = _create_default_encoders(project_name)
+        print(f"Error loading encoders, creating new: {e}", file=sys.stderr)
+    return encoders
+
+
+def _create_default_encoders(project_name):
+    """Create default encoders based on project type."""
+    if project_name in ["Transaction Fraud Detection", "Estimated Time of Arrival"]:
+        return {"ordinal_encoder": CustomOrdinalEncoder()}
+    elif project_name == "E-Commerce Customer Interactions":
+        return {
+            "standard_scaler": preprocessing.StandardScaler(),
+            "feature_hasher": preprocessing.FeatureHasher()
+        }
+    elif project_name == "Sales Forecasting":
+        return {
+            "one_hot_encoder": preprocessing.OneHotEncoder(),
+            "standard_scaler": preprocessing.StandardScaler(),
+        }
+    else:
+        raise ValueError(f"Unknown project: {project_name}")
 
 
 
-def process_sample(x, encoders, project_name, library = "river"):
+def process_sample(x, encoders, project_name):
+    """Process a single sample for River incremental learning."""
     if project_name == "Transaction Fraud Detection":
         pipe1 = compose.Select(
             "amount",
@@ -304,39 +238,26 @@ def process_sample(x, encoders, project_name, library = "river"):
             "payment_method",
             "product_category",
             "transaction_type",
-            #"user_agent"
         )
         pipe2.learn_one(x)
         x_pipe_2 = pipe2.transform_one(x)
-        pipe3a = compose.Select(
-            "device_info"
-        )
+        pipe3a = compose.Select("device_info")
         pipe3a.learn_one(x)
         x_pipe_3 = pipe3a.transform_one(x)
-        pipe3b = compose.FuncTransformer(
-            extract_device_info,
-        )
+        pipe3b = compose.FuncTransformer(extract_device_info)
         pipe3b.learn_one(x_pipe_3)
         x_pipe_3 = pipe3b.transform_one(x_pipe_3)
-        pipe4a = compose.Select(
-            "timestamp",
-        )
+        pipe4a = compose.Select("timestamp")
         pipe4a.learn_one(x)
         x_pipe_4 = pipe4a.transform_one(x)
-        pipe4b = compose.FuncTransformer(
-            extract_timestamp_info,
-        )
+        pipe4b = compose.FuncTransformer(extract_timestamp_info)
         pipe4b.learn_one(x_pipe_4)
         x_pipe_4 = pipe4b.transform_one(x_pipe_4)
         x_to_encode = x_pipe_2 | x_pipe_3 | x_pipe_4
-        if library == "river":
-            encoders["ordinal_encoder"].learn_one(x_to_encode)
-            x2 = encoders["ordinal_encoder"].transform_one(x_to_encode)
-            return x1 | x2, {
-                "ordinal_encoder": encoders["ordinal_encoder"]
-            }
-        elif library == "sklearn":
-            return x1 | x_to_encode
+        encoders["ordinal_encoder"].learn_one(x_to_encode)
+        x2 = encoders["ordinal_encoder"].transform_one(x_to_encode)
+        return x1 | x2, {"ordinal_encoder": encoders["ordinal_encoder"]}
+
     elif project_name == "Estimated Time of Arrival":
         pipe1 = compose.Select(
             'estimated_distance_km',
@@ -642,425 +563,15 @@ def load_or_create_data(consumer, project_name):
     # Fall back to Kafka consumer if available
     if consumer is not None:
         try:
-            transaction = None
             for message in consumer:
                 transaction = message.value
                 break
-            if transaction is not None:
-                data_df = pd.DataFrame([transaction])
-                print(f"Creating data from Kafka: {project_name}", file=sys.stderr)
-                return data_df
-            else:
-                print(f"No messages received from Kafka for {project_name}")
+            data_df = pd.DataFrame([transaction])
+            print(f"Creating data from Kafka: {project_name}", file=sys.stderr)
+            return data_df
         except Exception as e:
             print(f"Error loading data from Kafka: {e}")
 
     # Return empty DataFrame if all else fails
     print(f"Warning: No data available for {project_name}, returning empty DataFrame")
     return pd.DataFrame()
-
-
-def process_batch_data(data, project_name):
-    data = data.copy()
-    os.makedirs("encoders/sklearn", exist_ok = True)
-    filename = "encoders/sklearn/" + project_name.lower().replace(' ', '_').replace("-", "_") + ".pkl"
-    if project_name == "Transaction Fraud Detection":
-        data = data.copy()
-        data = extract_device_info_sklearn(data)
-        data = extract_timestamp_info_sklearn(data)
-        numerical_features = [
-            "amount",
-            "account_age_days",
-            "cvv_provided",
-            "billing_address_match"
-        ]
-        binary_features = [
-            "cvv_provided",
-            "billing_address_match"
-        ]
-        categorical_features = [
-            "currency",
-            "merchant_id",
-            "payment_method",
-            "product_category",
-            "transaction_type",
-            "browser",
-            "os",
-            "year",
-            "month",
-            "day",
-            "hour",
-            "minute",
-            "second",
-        ]
-        numerical_transformer = StandardScaler()
-        categorical_transformer = OneHotEncoder(
-            handle_unknown = 'ignore',
-            sparse_output = False)
-        preprocessor = ColumnTransformer(
-            transformers = [
-                ("numerical", numerical_transformer, numerical_features),
-                ("binary", "passthrough", binary_features),
-                ("categorical", categorical_transformer, categorical_features),
-            ]
-        )
-        preprocessor.set_output(transform = "pandas") # Output pandas DataFrame
-        X = data.drop('is_fraud', axis = 1)
-        y = data['is_fraud']
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y,
-            test_size = 0.2,       # 20% for testing
-            stratify = y,           # Crucial for imbalanced data
-            random_state = 42
-        )
-        preprocessor.fit(X_train)
-        preprocessor_dict = {
-            "preprocessor": preprocessor
-        }
-        with open(filename, 'wb') as f:
-            pickle.dump(preprocessor_dict, f)
-        #Don't apply preprocessor directly on X (it characterizes data leakage)
-        X_train = preprocessor.transform(X_train)
-        X_test = preprocessor.transform(X_test)
-    return X_train, X_test, y_train, y_test
-
-
-def process_sklearn_sample(x, project_name):
-    filename = "encoders/sklearn/" + project_name.lower().replace(' ', '_').replace("-", "_") + ".pkl"
-    if project_name == "Transaction Fraud Detection":
-        x = pd.DataFrame(x.copy())
-        x = extract_device_info_sklearn(x)
-        x = extract_timestamp_info_sklearn(x)
-        with open(filename, 'rb') as f:
-            preprocessor_dict = pickle.load(f)
-        preprocessor = preprocessor_dict["preprocessor"]
-        x = preprocessor.transform(x)
-    return x
-
-
-def create_batch_model(project_name, **kwargs):
-    if project_name == "Transaction Fraud Detection":
-        neg_samples = sum(kwargs["y_train"] == 0)
-        pos_samples = sum(kwargs["y_train"] == 1)
-        if pos_samples > 0:
-            calculated_scale_pos_weight = neg_samples / pos_samples
-        else:
-            calculated_scale_pos_weight = 1 # Default or handle as error if no positive samples
-        model = XGBClassifier(
-            objective = 'binary:logistic',  # For binary classification
-            eval_metric = 'auc',            # Primary metric to monitor (aligns with River's ROCAUC)
-                                            # Consider 'aucpr' (PR AUC) as well, often better for severe imbalance.
-            enable_categorical = True,
-            use_label_encoder = False,      # Suppresses a warning with newer XGBoost versions
-            random_state = 42,              # For reproducibility
-            n_jobs = -1,                    # Use all available CPU cores
-            # --- Parameters to TUNE ---
-            n_estimators = 200,             # Start: 100-500. Tune with early stopping.
-            learning_rate = 0.05,           # Start: 0.01, 0.05, 0.1. Smaller values need more n_estimators.
-            max_depth = 5,                  # Start: 3-7. Deeper trees can overfit.
-            subsample = 0.8,                # Start: 0.6-0.9.
-            colsample_bytree = 0.8,         # Start: 0.6-0.9.
-            gamma = 0,                      # Start: 0-0.2. Higher values make the algorithm more conservative.
-            # reg_alpha=0,                # Consider tuning if many features (e.g., 0, 0.01, 0.1, 1)
-            # reg_lambda=1,               # Consider tuning (e.g., 0.1, 1, 10)
-            # --- CRITICAL for Imbalance ---
-            scale_pos_weight = calculated_scale_pos_weight # Use your calculated value here!
-        )
-    return model
-
-
-def yellowbrick_classification_kwargs(
-    PROJECT_NAME,
-    METRIC_NAME,
-    y_train,
-    binary_classes
-):
-    kwargs = {
-        "ClassificationReport": {
-            "estimator": create_batch_model(
-                PROJECT_NAME,
-                y_train = y_train),
-            "classes": binary_classes,
-            "support": True,
-        },
-        "ConfusionMatrix": {
-            "estimator": create_batch_model(
-                PROJECT_NAME,
-                y_train = y_train),
-            "classes": binary_classes,
-        },
-        "ROCAUC": {
-            "estimator": create_batch_model(
-                PROJECT_NAME,
-                y_train = y_train),
-            "classes": binary_classes,
-        },
-        "PrecisionRecallCurve": {
-            "estimator": create_batch_model(
-                PROJECT_NAME,
-                y_train = y_train),
-        },
-        "ClassPredictionError": {
-            "estimator": create_batch_model(
-                PROJECT_NAME,
-                y_train = y_train),
-            "classes": binary_classes,
-        },
-        #"DiscriminationThreshold": {
-        #    "estimator": create_batch_model(
-        #        PROJECT_NAME,
-        #        y_train = y_train),
-        #}
-    }
-    return {
-        METRIC_NAME: kwargs[METRIC_NAME]
-    }
-
-
-def yellowbrick_classification_visualizers(
-    yb_classification_kwargs,
-    X_train,
-    X_test,
-    y_train,
-    y_test,
-):
-    for visualizer_name in yb_classification_kwargs.keys():
-        print(visualizer_name)
-        visualizer = getattr(classifier, visualizer_name)(**yb_classification_kwargs[visualizer_name])
-        if visualizer_name in ["DiscriminationThreshold"]:
-            X = pd.concat([X_train, X_test])
-            y = pd.concat([y_train, y_test])
-            visualizer.fit(X, y)
-        else:
-            visualizer.fit(X_train, y_train)
-            visualizer.score(X_test, y_test)
-        visualizer.show();
-        return visualizer
-
-
-def yellowbrick_feature_analysis_kwargs(
-    PROJECT_NAME,
-    METRIC_NAME,
-    classes,
-    features = None
-):
-    kwargs = {
-        #"RadViz": {
-        #    "classes": classes,
-        #},
-        #"Rank1D": {
-        #    "algorithm": "shapiro",
-        #},
-        #"Rank2D": {
-        #    "algorithm": "pearson",
-        #},
-        "ParallelCoordinates": {
-            "classes": classes,
-            "features": features,
-            "sample": 0.05,
-            "shuffle": True,
-            #"fast": True,
-            "n_jobs": 1,
-        },
-        "PCA": {
-            "classes": classes,
-            "scale": True,
-            #"projection": 3,
-            #"proj_features": True,
-            "n_jobs": 1,
-        },
-        #"Manifold": {
-        #    "classes": classes,
-        #    "manifold": "tsne",
-        #},
-        #JointPlotVisualizer
-    }
-    return {
-        METRIC_NAME: kwargs[METRIC_NAME]
-    }
-
-
-def yellowbrick_feature_analysis_visualizers(
-    yb_feature_analysis_kwargs,
-    X,
-    y,
-):
-    for visualizer_name in yb_feature_analysis_kwargs.keys():
-        print(visualizer_name)
-        visualizer = getattr(features, visualizer_name)(**yb_feature_analysis_kwargs[visualizer_name])
-        if visualizer_name in [
-            "ParallelCoordinates",
-            "PCA",
-            "Manifold"]:
-            visualizer.fit_transform(X, y)
-        else:
-            visualizer.fit(X, y)
-            visualizer.transform(X)
-        visualizer.show();
-        return visualizer
-
-
-def yellowbrick_target_kwargs(
-    PROJECT_NAME,
-    METRIC_NAME,
-    labels = None,
-    features = None
-):
-    kwargs = {
-        "BalancedBinningReference": {
-        },
-        "ClassBalance": {
-            "labels": labels,
-        },
-        #"FeatureCorrelation": {
-        #    "labels": features,
-        #}
-    }
-    return {
-        METRIC_NAME: kwargs[METRIC_NAME]
-    }
-
-
-def yellowbrick_target_visualizers(
-    yb_target_kwargs,
-    X,
-    y,
-):
-    for visualizer_name in yb_target_kwargs.keys():
-        print(visualizer_name)
-        visualizer = getattr(target, visualizer_name)(**yb_target_kwargs[visualizer_name])
-        if visualizer_name in [
-            "BalancedBinningReference",
-            "ClassBalance"
-            ]:
-            visualizer.fit(y)
-        else:
-            visualizer.fit(X, y)
-        visualizer.show();
-        return visualizer
-
-
-def yellowbrick_model_selection_kwargs(
-    PROJECT_NAME,
-    METRIC_NAME,
-    y_train
-    ):
-    kwargs = {
-        "ValidationCurve": {
-            "estimator": create_batch_model(
-                PROJECT_NAME,
-                y_train = y_train),
-            "param_name": "gamma",
-            "param_range": np.logspace(-6, -1, 10),
-            "logx": True,
-            "cv": StratifiedKFold(
-                n_splits = 5,
-                shuffle = True, 
-                random_state = 42
-            ),
-            "scoring": "average_precision",
-            "n_jobs": 1,
-        },
-        "LearningCurve": {
-            "estimator": create_batch_model(
-                PROJECT_NAME,
-                y_train = y_train),
-            "cv": StratifiedKFold(
-                n_splits = 5,
-                shuffle = True, 
-                random_state = 42
-            ),
-            "scoring": "average_precision",
-            "train_sizes": np.linspace(0.3, 1.0, 8),
-            "n_jobs": 1,
-        },
-        "CVScores": {
-            "estimator": create_batch_model(
-                PROJECT_NAME,
-                y_train = y_train),
-            "cv": StratifiedKFold(
-                n_splits = 5,
-                shuffle = True, 
-                random_state = 42
-            ),
-            "scoring": "average_precision",
-            "n_jobs": 1,
-        },
-        "FeatureImportances": {
-            "estimator": create_batch_model(
-                PROJECT_NAME,
-                y_train = y_train),
-            "n_jobs": 1,
-        },
-        #"RFECV": {
-        #    "estimator": create_batch_model(
-        #        PROJECT_NAME,
-        #        y_train = y_train),
-        #    "cv": StratifiedKFold(
-        #        n_splits = 5,
-        #        shuffle = True, 
-        #        random_state = 42
-        #    ),
-        #    "scoring": "average_precision",
-        #    "n_jobs": 1,
-        #}, #Take too long to process, don't use
-        "DroppingCurve": {
-            "estimator": create_batch_model(
-                PROJECT_NAME,
-                y_train = y_train),
-            "n_jobs": 1,
-        }
-    }
-    return {
-        METRIC_NAME: kwargs[METRIC_NAME]
-    }
-
-
-def yellowbrick_model_selection_visualizers(
-    yb_model_selection_kwargs,
-    X,
-    y,
-):
-    for visualizer_name in yb_model_selection_kwargs.keys():
-        print(visualizer_name)
-        visualizer = getattr(model_selection, visualizer_name)(**yb_model_selection_kwargs[visualizer_name])
-        if visualizer_name in ["ValidationCurve", "RFECV"]:
-            X_stratified, _, y_stratified, _ = train_test_split(
-                X, y,
-                train_size = 50000,
-                shuffle = True,
-                stratify = y,
-                random_state = 42
-            )
-            visualizer.fit(X_stratified, y_stratified)
-        else:
-            visualizer.fit(X, y)
-        visualizer.show();
-        return visualizer
-
-
-class ModelDataManager:
-    def __init__(self):
-        self.X_train: pd.DataFrame | None = None
-        self.X_test: pd.DataFrame | None = None
-        self.y_train: pd.Series | None = None
-        self.y_test: pd.Series | None = None
-        self.X: pd.DataFrame | None = None
-        self.y: pd.Series | None = None
-        self.project_name: str | None = None
-    def load_data(self, project_name: str):
-        # If data for the correct project is already loaded, do nothing.
-        if self.project_name == project_name and self.y_train is not None:
-            print(f"Data for {project_name} is already loaded.")
-            return
-        print(f"Loading data for project: {project_name}")
-        # Your data loading logic from switch_model goes here
-        consumer = create_consumer(project_name)
-        data_df = load_or_create_data(consumer, project_name)
-        self.X_train, self.X_test, self.y_train, self.y_test = process_batch_data(
-            data_df, project_name
-        )
-        self.X = pd.concat([self.X_train, self.X_test])
-        self.y = pd.concat([self.y_train, self.y_test])
-        self.project_name = project_name
-        print("Data loaded successfully.")

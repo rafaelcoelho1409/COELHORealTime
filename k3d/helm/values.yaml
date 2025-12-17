@@ -223,6 +223,46 @@ reflex:
       periodSeconds: 10
       failureThreshold: 6
 
+
+# River ML Training Service
+# Handles incremental ML model training using River library
+river:
+  image: coelho-realtime-river:latest
+  imagePullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+  portsSettings:
+    ports:
+      - name: http
+        port: 8002
+        targetPort: 8002
+        nodePort: 30006
+        protocol: TCP
+    type: LoadBalancer
+  livenessProbeSettings:
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: 8002
+      initialDelaySeconds: 60
+      periodSeconds: 30
+      failureThreshold: 5
+  readinessProbeSettings:
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: 8002
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      failureThreshold: 3
+
+
 # Redis configuration (Bitnami Redis chart)
 # Used by Reflex for state management in production
 redis:

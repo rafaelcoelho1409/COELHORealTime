@@ -1,0 +1,12 @@
+# River ML Training Service
+# HTTP API
+fastapi
+uvicorn
+
+# ML Training
+pandas
+mlflow
+kafka-python
+river
+boto3
+pyarrow

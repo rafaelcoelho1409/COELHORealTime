@@ -196,8 +196,8 @@ def coelho_realtime_navbar() -> rx.Component:
                             )
                         ),
                         rx.menu.content(
-                            rx.menu.item(
-                                rx.link(
+                            rx.menu.sub(
+                                rx.menu.sub_trigger(
                                     rx.hstack(
                                         rx.image(
                                             src = "https://cdn.jsdelivr.net/gh/devicons/devicon/icons/fastapi/fastapi-original.svg",
@@ -207,9 +207,56 @@ def coelho_realtime_navbar() -> rx.Component:
                                         rx.text("FastAPI", size = "3", weight = "medium"),
                                         spacing = "2",
                                         align_items = "center"
+                                    )
+                                ),
+                                rx.menu.sub_content(
+                                    rx.menu.item(
+                                        rx.link(
+                                            rx.hstack(
+                                                rx.icon("database", size = 14, color = rx.color("accent", 10)),
+                                                rx.text("Analytics", size = "3", weight = "medium"),
+                                                spacing = "2",
+                                                align_items = "center"
+                                            ),
+                                            href = "http://localhost:8001/docs",
+                                            is_external = True
+                                        )
                                     ),
-                                    href = "http://localhost:8001/docs",
-                                    is_external = True
+                                    rx.menu.item(
+                                        rx.link(
+                                            rx.hstack(
+                                                rx.image(
+                                                    src = "https://riverml.xyz/latest/img/icon.png",
+                                                    width = "16px",
+                                                    height = "16px"
+                                                ),
+                                                rx.text("River", size = "3", weight = "medium"),
+                                                spacing = "2",
+                                                align_items = "center"
+                                            ),
+                                            href = "http://localhost:8002/docs",
+                                            is_external = True
+                                        )
+                                    ),
+                                    rx.menu.item(
+                                        rx.link(
+                                            rx.hstack(
+                                                rx.image(
+                                                    src = "https://scikit-learn.org/stable/_static/scikit-learn-logo-without-subtitle.svg",
+                                                    width = "16px",
+                                                    height = "16px",
+                                                    opacity = "0.5"
+                                                ),
+                                                rx.text("Scikit-Learn", size = "3", weight = "medium", color = "gray"),
+                                                rx.badge("Soon", color_scheme = "gray", size = "1"),
+                                                spacing = "2",
+                                                align_items = "center"
+                                            ),
+                                            href = "#",
+                                            is_external = True
+                                        ),
+                                        disabled = True
+                                    )
                                 )
                             ),
                             rx.menu.item(
