@@ -97,3 +97,8 @@ ordinal_encoders/
 .claude/
 **/helm/charts/
 Chart.lock
+
+# Persistent data directories (MinIO)
+# Keep .gitkeep files but ignore actual data
+data/minio/*
+!data/minio/.gitkeep

@@ -70,18 +70,13 @@ variable "rancher_bootstrap_password" {
 }
 
 # Storage Configuration
+# Volume mounts are computed dynamically in main.tf using project_root
 variable "volume_mounts" {
-  description = "Host volumes to mount into the cluster for persistent storage"
+  description = "Host volumes to mount into the cluster for persistent storage (computed from project root)"
   type = list(object({
     host_path      = string
     container_path = string
     node_filters   = list(string)
   }))
-  default = [
-    {
-      host_path      = "/data/minio"
-      container_path = "/data/minio"
-      node_filters   = ["server:*", "agent:*"]
-    }
-  ]
+  default = null  # Will be computed in main.tf if not provided
 }

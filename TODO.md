@@ -195,10 +195,10 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 - [ ] Consider Redis for Reflex state (already configured)
 
 ### Infrastructure
-- [ ] Update MinIO volume mount to use dynamic project path instead of hardcoded `/data/minio`
-  - Current: `host_path = "/data/minio"` in `k3d/terraform/variables.tf`
-  - Goal: Use Terraform `path.module` to dynamically resolve project root (e.g., `${abspath("${path.module}/../..")}/data/minio`)
-  - Benefit: Any user cloning the project will have MinIO data persist in their local project folder
+- [x] Update MinIO volume mount to use dynamic project path instead of hardcoded `/data/minio`
+  - Implemented in `k3d/terraform/main.tf` using `locals.project_root = abspath("${path.module}/../..")`
+  - Data directory: `data/minio/` in project root
+  - Added `.gitkeep` file and `.gitignore` rules to track directory but ignore data
 
 ---
 

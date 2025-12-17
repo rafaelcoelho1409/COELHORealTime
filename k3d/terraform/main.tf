@@ -8,6 +8,23 @@
 #   terraform plan
 #   terraform apply
 
+# Compute project root from module path (k3d/terraform -> project root)
+locals {
+  project_root = abspath("${path.module}/../..")
+
+  # Default volume mounts using project-relative paths
+  default_volume_mounts = [
+    {
+      host_path      = "${local.project_root}/data/minio"
+      container_path = "/data/minio"
+      node_filters   = ["server:*", "agent:*"]
+    }
+  ]
+
+  # Use provided volume_mounts or fall back to defaults
+  volume_mounts = var.volume_mounts != null ? var.volume_mounts : local.default_volume_mounts
+}
+
 # K3D Cluster Module
 module "k3d_cluster" {
   source = "./modules/k3d"
@@ -31,11 +48,25 @@ module "k3d_cluster" {
         container_port = var.rancher_https_node_port
         node_filter    = "loadbalancer"
       }
-    ] : []
+    ] : [],
+    # MinIO port mappings (API and Console)
+    [
+      {
+        host_port      = 9000   # MinIO API
+        container_port = 30900  # MinIO NodePort
+        node_filter    = "loadbalancer"
+      },
+      {
+        host_port      = 9001   # MinIO Console
+        container_port = 30901  # MinIO Console NodePort
+        node_filter    = "loadbalancer"
+      }
+    ]
   )
 
   # Volume mounts for persistent storage (MinIO data)
-  volume_mounts = var.volume_mounts
+  # Uses project-relative paths computed in locals block
+  volume_mounts = local.volume_mounts
 }
 
 
