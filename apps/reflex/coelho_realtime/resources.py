@@ -228,6 +228,22 @@ def coelho_realtime_navbar() -> rx.Component:
                                     is_external = True
                                 )
                             ),
+                            rx.menu.item(
+                                rx.link(
+                                    rx.hstack(
+                                        rx.image(
+                                            src = "https://cdn.simpleicons.org/minio/C72E49",
+                                            width = "16px",
+                                            height = "16px"
+                                        ),
+                                        rx.text("MinIO", size = "3", weight = "medium"),
+                                        spacing = "2",
+                                        align_items = "center"
+                                    ),
+                                    href = "http://localhost:9001",
+                                    is_external = True
+                                )
+                            ),
                             rx.menu.separator(),
                             rx.menu.item(
                                 rx.link(

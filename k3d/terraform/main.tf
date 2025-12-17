@@ -2,11 +2,6 @@
 #
 # This configuration replicates the K3D cluster setup with all services:
 # - K3D cluster with 1 server + 3 agents
-# - ArgoCD
-# - ArgoCD Image Updater
-# - GitLab
-# - Rancher
-# - LocalStack
 #
 # Usage:
 #   terraform init
@@ -38,6 +33,9 @@ module "k3d_cluster" {
       }
     ] : []
   )
+
+  # Volume mounts for persistent storage (MinIO data)
+  volume_mounts = var.volume_mounts
 }
 
 

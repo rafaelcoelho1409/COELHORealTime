@@ -20,11 +20,11 @@ Usage: {{ include "coelho-realtime.imageName" (dict "appName" "fastapi" "root" .
 Common environment variables for all services
 */}}
 {{- define "coelho-realtime.commonEnvVars" -}}
-FASTAPI_HOST: "coelho-realtime-fastapi-service"
-KAFKA_HOST: "coelho-realtime-kafka-service"
+FASTAPI_HOST: "coelho-realtime-fastapi"
+KAFKA_HOST: "coelho-realtime-kafka"
 MLFLOW_HOST: "coelho-realtime-mlflow"
-STREAMLIT_HOST: "coelho-realtime-streamlit-service"
-REFLEX_HOST: "coelho-realtime-reflex-service"
+STREAMLIT_HOST: "coelho-realtime-streamlit"
+REFLEX_HOST: "coelho-realtime-reflex"
 REDIS_HOST: "redis://coelho-realtime-redis-master:6379"
 {{- end -}}
 
@@ -63,7 +63,7 @@ Service settings
 {{- define "coelho-realtime.ServiceSettings" -}}
 kind: Service
 metadata:
-  name: coelho-realtime-{{ .appName }}-service
+  name: coelho-realtime-{{ .appName }}
   namespace: {{ .root.Release.Namespace }}
   labels:
     app: coelho-realtime-{{ .appName }}

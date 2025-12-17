@@ -1,7 +1,9 @@
+# MLflow PVC for SQLite metadata storage
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: mlflow-data-pvc
+  name: coelho-realtime-mlflow-pvc
+  namespace: {{ .Release.Namespace }}
   labels:
     app: mlflow
 spec:

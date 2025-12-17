@@ -43,13 +43,13 @@ Real-time ML platform with incremental learning, featuring:
 ### Phase 4: Storage & Persistence (Priority: HIGH)
 **Goal:** Proper artifact storage with MinIO
 
-- [ ] Add MinIO Helm dependency (Bitnami chart)
+- [x] Add MinIO Helm dependency (Bitnami chart)
 - [ ] Configure MinIO buckets:
   - `mlflow-artifacts` - MLflow models and artifacts
   - `delta-lake` - Delta Lake tables (future)
   - `raw-data` - Raw Kafka data snapshots
-- [ ] Update MLflow to use MinIO as artifact store
-- [ ] Configure MLflow environment variables:
+- [x] Update MLflow to use MinIO as artifact store
+- [x] Configure MLflow environment variables:
   ```
   MLFLOW_S3_ENDPOINT_URL=http://minio:9000
   AWS_ACCESS_KEY_ID=<minio-access-key>
@@ -57,7 +57,7 @@ Real-time ML platform with incremental learning, featuring:
   ```
 - [ ] **Transfer existing saved models and encoders to MLflow/MinIO**
 - [ ] Test model logging and retrieval from MinIO
-- [ ] Add MinIO to Services dropdown in navbar
+- [x] Add MinIO to Services dropdown in navbar
 
 ### Phase 5: MLflow Model Integration (Priority: HIGH)
 **Goal:** Connect Reflex pages to latest models registered on MLflow instead of loading in-memory models
@@ -193,6 +193,12 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 - [ ] Optimize Kafka consumer batch sizes
 - [ ] Add caching for expensive computations
 - [ ] Consider Redis for Reflex state (already configured)
+
+### Infrastructure
+- [ ] Update MinIO volume mount to use dynamic project path instead of hardcoded `/data/minio`
+  - Current: `host_path = "/data/minio"` in `k3d/terraform/variables.tf`
+  - Goal: Use Terraform `path.module` to dynamically resolve project root (e.g., `${abspath("${path.module}/../..")}/data/minio`)
+  - Benefit: Any user cloning the project will have MinIO data persist in their local project folder
 
 ---
 

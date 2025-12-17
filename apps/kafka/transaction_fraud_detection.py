@@ -31,20 +31,31 @@ DEVICE_OS = ['iOS', 'Android', 'Windows', 'macOS', 'Linux', 'Other']
 BROWSERS = ['Chrome', 'Safari', 'Firefox', 'Edge', 'Opera', 'Other']
 
 def create_producer():
-    # Retry connection logic
-    while True:
+    # Retry connection logic with metadata readiness check
+    max_retries = 30
+    retry_count = 0
+    while retry_count < max_retries:
         try:
             producer = KafkaProducer(
                 bootstrap_servers = KAFKA_BROKERS,
                 value_serializer = lambda v: json.dumps(v).encode('utf-8'),
-                client_id = f"{KAFKA_TOPIC}_client"
+                client_id = f"{KAFKA_TOPIC}_client",
+                request_timeout_ms = 30000,
+                metadata_max_age_ms = 10000,
+                reconnect_backoff_ms = 1000,
+                reconnect_backoff_max_ms = 10000
             )
-            print("Kafka Producer connected!")
+            # Wait for metadata to ensure Kafka is fully ready
+            print("Checking Kafka metadata availability...")
+            producer.partitions_for(KAFKA_TOPIC)  # This will block until metadata is available or timeout
+            print("Kafka Producer connected and ready!")
             return producer
         except Exception as e:
-            print(f"Error connecting to Kafka: {e}")
-            print("Retrying in 5 seconds...")
-            time.sleep(5)
+            retry_count += 1
+            print(f"Error connecting to Kafka (attempt {retry_count}/{max_retries}): {e}")
+            print("Retrying in 10 seconds...")
+            time.sleep(10)
+    raise Exception(f"Failed to connect to Kafka after {max_retries} attempts")
 
 
 def generate_transaction(

@@ -58,19 +58,31 @@ def get_seasonal_multiplier(current_time, profile_name):
         return random.uniform(0.95, 1.05)
 
 def create_producer():
-    while True:
+    """Creates the Kafka producer with retry logic and metadata readiness check."""
+    max_retries = 30
+    retry_count = 0
+    while retry_count < max_retries:
         try:
             producer = KafkaProducer(
                 bootstrap_servers=KAFKA_BROKERS,
                 value_serializer=lambda v: json.dumps(v).encode('utf-8'),
-                client_id=f"{KAFKA_TOPIC}_client"
+                client_id=f"{KAFKA_TOPIC}_client",
+                request_timeout_ms=30000,
+                metadata_max_age_ms=10000,
+                reconnect_backoff_ms=1000,
+                reconnect_backoff_max_ms=10000
             )
-            print(f"Kafka Producer for {KAFKA_TOPIC} connected!")
+            # Wait for metadata to ensure Kafka is fully ready
+            print(f"Checking Kafka metadata availability for {KAFKA_TOPIC}...")
+            producer.partitions_for(KAFKA_TOPIC)
+            print(f"Kafka Producer for {KAFKA_TOPIC} connected and ready!")
             return producer
         except Exception as e:
-            print(f"Error connecting to Kafka for {KAFKA_TOPIC}: {e}")
-            print("Retrying in 5 seconds...")
-            time.sleep(5)
+            retry_count += 1
+            print(f"Error connecting to Kafka for {KAFKA_TOPIC} (attempt {retry_count}/{max_retries}): {e}")
+            print("Retrying in 10 seconds...")
+            time.sleep(10)
+    raise Exception(f"Failed to connect to Kafka after {max_retries} attempts")
 
 def generate_sales_event(current_sim_time, days_elapsed, concept_drift_stage):
     """

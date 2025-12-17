@@ -135,18 +135,30 @@ streamlit:
       periodSeconds: 10
       failureThreshold: 3
 
-# MLflow subchart configuration
+
+# MLflow subchart configuration (community-charts/mlflow)
+# Connects to MinIO for artifacts, SQLite for metadata
 mlflow:
+  # Service configuration
   service:
     type: ClusterIP
     port: 5000
     containerPort: 5000
+  # Gunicorn: single worker to avoid SQLite lock contention (recommended for dev)
+  extraArgs:
+    workers: "1"
+  # Backend store using SQLite (persisted via hostPath PVC)
   backendStore:
-    # Use persistent SQLite instead of in-memory
+    databaseMigration: true
     defaultSqlitePath: "/mlflow-data/mlflow.db"
+  # Artifact store pointing to MinIO S3-compatible storage
   artifactRoot:
-    defaultArtifactRoot: "/mlflow-data/mlruns"
-    defaultArtifactsDestination: "/mlflow-data/mlartifacts"
+    s3:
+      enabled: true
+      bucket: "mlflow-artifacts"
+      awsAccessKeyId: "minioadmin"
+      awsSecretAccessKey: "minioadmin123"
+  # Resource limits
   resources:
     requests:
       memory: "512Mi"
@@ -154,15 +166,19 @@ mlflow:
     limits:
       memory: "1Gi"
       cpu: "500m"
-  # Disable DNS rebinding protection for development environment
-  # Use "*" to allow all hosts, or specific hosts like "mlflow.company.com,192.168.*"
+  # Environment variables for MinIO/S3 connection
   extraEnvVars:
+    # Allow external connections (required for Python MLflow client)
     MLFLOW_SERVER_ALLOWED_HOSTS: "*"
-  # Add persistent storage for SQLite database and artifacts
+    # MinIO S3 endpoint (internal cluster service)
+    MLFLOW_S3_ENDPOINT_URL: "http://coelho-realtime-minio:9000"
+    MLFLOW_S3_IGNORE_TLS: "true"
+    AWS_DEFAULT_REGION: "us-east-1"
+  # Persistent storage for SQLite metadata database
   extraVolumes:
     - name: mlflow-data
       persistentVolumeClaim:
-        claimName: mlflow-data-pvc
+        claimName: coelho-realtime-mlflow-pvc
   extraVolumeMounts:
     - name: mlflow-data
       mountPath: /mlflow-data
@@ -235,3 +251,57 @@ redis:
     # Set max memory and eviction policy
     maxmemory 256mb
     maxmemory-policy allkeys-lru
+
+
+# MinIO Object Storage (S3-compatible) - Official MinIO Chart (https://helm.min.io/)
+# Used for storing parquet files and MLflow artifacts
+# Data persists in /data/minio on host via K3d volume mount
+minio:
+  enabled: true
+  # Deployment mode
+  mode: standalone
+  # Root credentials
+  rootUser: "minioadmin"
+  rootPassword: "minioadmin123"
+  # MinIO API Service (S3 endpoint)
+  service:
+    type: NodePort
+    port: "9000"
+    nodePort: 30900
+  # MinIO Console Service (Web UI)
+  consoleService:
+    type: NodePort
+    port: "9001"
+    nodePort: 30901
+  # Persistence using pre-created PVC with hostPath (survives skaffold dev Ctrl+C)
+  persistence:
+    enabled: true
+    existingClaim: "minio-hostpath-pvc"
+  # Security context - run as root to avoid permission issues with hostPath
+  securityContext:
+    enabled: false
+  containerSecurityContext:
+    enabled: false
+  # Resource limits
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+  # Replicas (standalone mode = 1)
+  replicas: 1
+  # Default buckets to create on startup
+  buckets:
+    - name: mlflow-artifacts
+      policy: none
+      purge: false
+  # Service account
+  serviceAccount:
+    create: true
+    name: "minio-sa"
+  # Disable ingress for local development
+  ingress:
+    enabled: false
+  consoleIngress:
+    enabled: false

@@ -3,7 +3,7 @@ apiVersion: v1
 data:
   # Kafka-specific configuration (Single-node KRaft mode)
   ALLOW_PLAINTEXT_LISTENER: "yes"
-  KAFKA_CFG_ADVERTISED_LISTENERS: "CLIENT_INTERNAL://coelho-realtime-kafka-service:29092,CLIENT_EXTERNAL://coelho-realtime-kafka-service:9092"
+  KAFKA_CFG_ADVERTISED_LISTENERS: "CLIENT_INTERNAL://coelho-realtime-kafka:29092,CLIENT_EXTERNAL://coelho-realtime-kafka:9092"
   KAFKA_CFG_NODE_ID: "1"
   KAFKA_CFG_PROCESS_ROLES: "controller,broker"
   KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "1@localhost:9093"

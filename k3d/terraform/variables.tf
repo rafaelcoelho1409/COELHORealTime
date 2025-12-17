@@ -68,3 +68,20 @@ variable "rancher_bootstrap_password" {
   default     = "admin"
   sensitive   = true
 }
+
+# Storage Configuration
+variable "volume_mounts" {
+  description = "Host volumes to mount into the cluster for persistent storage"
+  type = list(object({
+    host_path      = string
+    container_path = string
+    node_filters   = list(string)
+  }))
+  default = [
+    {
+      host_path      = "/data/minio"
+      container_path = "/data/minio"
+      node_filters   = ["server:*", "agent:*"]
+    }
+  ]
+}

@@ -83,32 +83,50 @@ deploy:
   helm: {}
 
 portForward:
+  # FastAPI
   - resourceType: service
-    resourceName: coelho-realtime-fastapi-service
+    resourceName: coelho-realtime-fastapi
     namespace: coelho-realtime
     port: 8001
     localPort: 8001
     address: 0.0.0.0
+  # MLFlow
   - resourceType: service
     resourceName: coelho-realtime-mlflow
     namespace: coelho-realtime
     port: 5000
     localPort: 5001
     address: 0.0.0.0
+  # Reflex (frontend)
   - resourceType: service
-    resourceName: coelho-realtime-reflex-service
+    resourceName: coelho-realtime-reflex
     namespace: coelho-realtime
     port: 3000
     localPort: 3000
     address: 0.0.0.0
+  # Reflex (backend)
   - resourceType: service
-    resourceName: coelho-realtime-reflex-service
+    resourceName: coelho-realtime-reflex
     namespace: coelho-realtime
     port: 8000
     localPort: 8000
     address: 0.0.0.0
+  # MinIO S3 API
+  - resourceType: service
+    resourceName: coelho-realtime-minio
+    namespace: coelho-realtime
+    port: 9000
+    localPort: 9000
+    address: 0.0.0.0
+  # MinIO Console (Web UI)
+  - resourceType: service
+    resourceName: coelho-realtime-minio-console
+    namespace: coelho-realtime
+    port: 9001
+    localPort: 9001
+    address: 0.0.0.0
   #- resourceType: service
-  #  resourceName: coelho-realtime-streamlit-service
+  #  resourceName: coelho-realtime-streamlit
   #  namespace: coelho-realtime
   #  port: 8501
   #  localPort: 8501

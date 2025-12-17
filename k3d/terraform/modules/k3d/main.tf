@@ -46,6 +46,16 @@ resource "k3d_cluster" "coelho-realtime" {
     }
   }
 
+  # Volume mounts for persistent data (survives cluster restarts)
+  dynamic "volume" {
+    for_each = var.volume_mounts
+    content {
+      source       = volume.value.host_path
+      destination  = volume.value.container_path
+      node_filters = volume.value.node_filters
+    }
+  }
+
   # K3D options
   k3d {
     disable_load_balancer = false

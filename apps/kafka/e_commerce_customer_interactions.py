@@ -60,20 +60,31 @@ MAX_ACTIVE_SESSIONS = 500 # Limit memory usage
 SESSION_TIMEOUT_SECONDS = 15 * 60 # 15 minutes
 
 def create_producer():
-    """Creates the Kafka producer with retry logic."""
-    while True:
+    """Creates the Kafka producer with retry logic and metadata readiness check."""
+    max_retries = 30
+    retry_count = 0
+    while retry_count < max_retries:
         try:
             producer = KafkaProducer(
                 bootstrap_servers = KAFKA_BROKERS,
                 value_serializer = lambda v: json.dumps(v).encode('utf-8'),
-                client_id = f"{KAFKA_TOPIC}_client"
+                client_id = f"{KAFKA_TOPIC}_client",
+                request_timeout_ms = 30000,
+                metadata_max_age_ms = 10000,
+                reconnect_backoff_ms = 1000,
+                reconnect_backoff_max_ms = 10000
             )
-            print("Kafka Producer connected!")
+            # Wait for metadata to ensure Kafka is fully ready
+            print("Checking Kafka metadata availability...")
+            producer.partitions_for(KAFKA_TOPIC)
+            print("Kafka Producer connected and ready!")
             return producer
         except Exception as e:
-            print(f"Error connecting to Kafka: {e}")
-            print("Retrying in 5 seconds...")
-            time.sleep(5)
+            retry_count += 1
+            print(f"Error connecting to Kafka (attempt {retry_count}/{max_retries}): {e}")
+            print("Retrying in 10 seconds...")
+            time.sleep(10)
+    raise Exception(f"Failed to connect to Kafka after {max_retries} attempts")
 
 def generate_customer_event(event_rate_per_minute):
     """
