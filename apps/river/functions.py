@@ -563,12 +563,16 @@ def load_or_create_data(consumer, project_name):
     # Fall back to Kafka consumer if available
     if consumer is not None:
         try:
+            transaction = None  # Initialize to prevent unbound variable error
             for message in consumer:
                 transaction = message.value
                 break
-            data_df = pd.DataFrame([transaction])
-            print(f"Creating data from Kafka: {project_name}", file=sys.stderr)
-            return data_df
+            if transaction is not None:
+                data_df = pd.DataFrame([transaction])
+                print(f"Creating data from Kafka: {project_name}", file=sys.stderr)
+                return data_df
+            else:
+                print(f"No messages received from Kafka for {project_name}")
         except Exception as e:
             print(f"Error loading data from Kafka: {e}")
 

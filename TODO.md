@@ -208,12 +208,12 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
   - Implemented in `k3d/terraform/main.tf` using `locals.project_root = abspath("${path.module}/../..")`
   - Data directory: `data/minio/` in project root
   - Added `.gitkeep` file and `.gitignore` rules to track directory but ignore data
-- [ ] Add PostgreSQL for MLflow metadata persistence (instead of SQLite)
+- [x] Add PostgreSQL for MLflow metadata persistence (instead of SQLite)
   - PostgreSQL is production-ready and supports concurrency
   - Required for Airflow in future projects (SQLite is dev-only for Airflow)
   - One PostgreSQL instance can serve multiple services (MLflow, Airflow, Superset, etc.)
-  - Use Bitnami PostgreSQL Helm chart with hostPath persistence
-  - Configure MLflow to use `postgresql://` backend store
+  - Bitnami PostgreSQL Helm chart with hostPath persistence at `/data/postgresql`
+  - MLflow configured to use `postgresql://mlflow:mlflow123@coelho-realtime-postgresql:5432/mlflow`
 
 ---
 
@@ -235,16 +235,16 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 │       │    └────┬─────┘                                              │
 │       │         │                                                    │
 │       │         ▼                                                    │
-│       │    ┌──────────┐    ┌──────────┐                             │
-│       │    │  MLflow  │◄──►│  MinIO   │                             │
-│       │    │          │    │ (S3)     │                             │
-│       │    └──────────┘    └────┬─────┘                             │
-│       │                         │                                    │
-│       │                         ▼                                    │
-│       │                    ┌──────────┐                             │
-│       │                    │  Delta   │ (future)                    │
-│       │                    │  Lake    │                             │
-│       │                    └──────────┘                             │
+│       │    ┌──────────┐    ┌──────────┐    ┌──────────┐             │
+│       │    │  MLflow  │◄──►│PostgreSQL│    │  MinIO   │             │
+│       │    │          │    │(metadata)│    │(artifacts)│             │
+│       │    └──────────┘    └──────────┘    └────┬─────┘             │
+│       │                                         │                    │
+│       │                                         ▼                    │
+│       │                                    ┌──────────┐             │
+│       │                                    │  Delta   │ (future)    │
+│       │                                    │  Lake    │             │
+│       │                                    └──────────┘             │
 │       │                                                              │
 │       ▼                                                              │
 │  ┌──────────┐    ┌──────────┐                                       │
@@ -289,4 +289,4 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 
 ---
 
-*Last updated: 2025-12-17*
+*Last updated: 2025-12-18*

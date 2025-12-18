@@ -18,6 +18,11 @@ locals {
       host_path      = "${local.project_root}/data/minio"
       container_path = "/data/minio"
       node_filters   = ["server:*", "agent:*"]
+    },
+    {
+      host_path      = "${local.project_root}/data/postgresql"
+      container_path = "/data/postgresql"
+      node_filters   = ["server:*", "agent:*"]
     }
   ]
 
@@ -64,7 +69,7 @@ module "k3d_cluster" {
     ]
   )
 
-  # Volume mounts for persistent storage (MinIO data)
+  # Volume mounts for persistent storage (MinIO and PostgreSQL data)
   # Uses project-relative paths computed in locals block
   volume_mounts = local.volume_mounts
 }

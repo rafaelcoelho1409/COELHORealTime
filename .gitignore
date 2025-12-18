@@ -98,7 +98,9 @@ ordinal_encoders/
 **/helm/charts/
 Chart.lock
 
-# Persistent data directories (MinIO)
+# Persistent data directories (MinIO, PostgreSQL)
 # Keep .gitkeep files but ignore actual data
 data/minio/*
 !data/minio/.gitkeep
+data/postgresql/*
+!data/postgresql/.gitkeep

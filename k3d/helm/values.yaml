@@ -137,20 +137,28 @@ streamlit:
 
 
 # MLflow subchart configuration (community-charts/mlflow)
-# Connects to MinIO for artifacts, SQLite for metadata
+# Connects to MinIO for artifacts, PostgreSQL for metadata
 mlflow:
   # Service configuration
   service:
     type: ClusterIP
     port: 5000
     containerPort: 5000
-  # Gunicorn: single worker to avoid SQLite lock contention (recommended for dev)
+  # Gunicorn: multiple workers supported with PostgreSQL (no lock contention)
   extraArgs:
-    workers: "1"
-  # Backend store using SQLite (persisted via hostPath PVC)
+    workers: "2"
+    gunicornOpts: "--log-level=info --timeout=120"
+  # Backend store using PostgreSQL (persisted via hostPath)
   backendStore:
     databaseMigration: true
-    defaultSqlitePath: "/mlflow-data/mlflow.db"
+    databaseConnectionCheck: true
+    postgres:
+      enabled: true
+      host: "coelho-realtime-postgresql"
+      port: 5432
+      database: "mlflow"
+      user: "mlflow"
+      password: "mlflow123"
   # Artifact store pointing to MinIO S3-compatible storage
   artifactRoot:
     s3:
@@ -174,14 +182,6 @@ mlflow:
     MLFLOW_S3_ENDPOINT_URL: "http://coelho-realtime-minio:9000"
     MLFLOW_S3_IGNORE_TLS: "true"
     AWS_DEFAULT_REGION: "us-east-1"
-  # Persistent storage for SQLite metadata database
-  extraVolumes:
-    - name: mlflow-data
-      persistentVolumeClaim:
-        claimName: coelho-realtime-mlflow-pvc
-  extraVolumeMounts:
-    - name: mlflow-data
-      mountPath: /mlflow-data
 
 
 reflex:
@@ -345,3 +345,34 @@ minio:
     enabled: false
   consoleIngress:
     enabled: false
+
+
+# PostgreSQL Database (Bitnami PostgreSQL chart)
+# Used by MLflow for metadata storage (experiments, runs, metrics, parameters)
+# Data persists in /data/postgresql on host via K3d volume mount
+postgresql:
+  enabled: true
+  # Authentication
+  auth:
+    postgresPassword: "postgres123"
+    username: "mlflow"
+    password: "mlflow123"
+    database: "mlflow"
+  # Use pre-created PVC with hostPath (survives skaffold dev Ctrl+C)
+  primary:
+    persistence:
+      enabled: true
+      existingClaim: "postgresql-hostpath-pvc"
+    # Resource limits
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  # Enable volumePermissions init container to fix hostPath ownership
+  volumePermissions:
+    enabled: true
+  # Disable replication for local development
+  architecture: standalone
