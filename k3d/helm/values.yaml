@@ -349,10 +349,11 @@ minio:
 
 # PostgreSQL Database (Bitnami PostgreSQL chart)
 # Used by MLflow for metadata storage (experiments, runs, metrics, parameters)
+# Also used by Grafana for dashboard/user storage (created via Grafana init container)
 # Data persists in /data/postgresql on host via K3d volume mount
 postgresql:
   enabled: true
-  # Authentication
+  # Authentication - primary user for MLflow
   auth:
     postgresPassword: "postgres123"
     username: "mlflow"
@@ -376,3 +377,253 @@ postgresql:
     enabled: true
   # Disable replication for local development
   architecture: standalone
+
+
+# kube-prometheus-stack configuration (Prometheus + Grafana + Alertmanager)
+# Provides comprehensive monitoring and observability for the cluster
+# Port mappings changed to avoid conflicts:
+#   - Grafana: 3000 → 3001 (Reflex uses 3000)
+#   - Alertmanager: 9093 → 9094 (Kafka controller uses 9093)
+# Integrations:
+#   - Grafana → PostgreSQL (shared with MLflow)
+kube-prometheus-stack:
+  enabled: true
+
+  # Prometheus Operator configuration
+  prometheusOperator:
+    enabled: true
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+  # Prometheus Server configuration
+  prometheus:
+    enabled: true
+    prometheusSpec:
+      # Scrape interval and evaluation
+      scrapeInterval: 30s
+      evaluationInterval: 30s
+      # Retention period (7 days for local dev)
+      retention: 7d
+      retentionSize: "5GB"
+      # Resource limits for local k3d
+      resources:
+        requests:
+          cpu: 200m
+          memory: 512Mi
+        limits:
+          cpu: 1000m
+          memory: 2Gi
+      # Storage for metrics
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            storageClassName: local-path
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 10Gi
+      # Enable service discovery for all namespaces
+      serviceMonitorSelectorNilUsesHelmValues: false
+      podMonitorSelectorNilUsesHelmValues: false
+      ruleSelectorNilUsesHelmValues: false
+    # Prometheus service configuration
+    service:
+      type: NodePort
+      port: 9090
+      targetPort: 9090
+      nodePort: 30090
+
+  # Grafana configuration
+  grafana:
+    enabled: true
+    # Admin credentials
+    adminUser: admin
+    adminPassword: admin123
+    # Service configuration - Port 3001 to avoid conflict with Reflex (3000)
+    service:
+      type: NodePort
+      port: 3001
+      targetPort: 3000  # Grafana internal port stays 3000
+      nodePort: 30031
+    # Resource limits
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    # Use PostgreSQL as database backend (shared with MLflow)
+    persistence:
+      enabled: false  # Disabled since we use PostgreSQL
+    # Init container to create grafana database in PostgreSQL before Grafana starts
+    extraInitContainers:
+      - name: init-postgres-grafana-db
+        image: bitnami/postgresql:latest
+        command:
+          - /bin/bash
+          - -c
+          - |
+            echo "Waiting for PostgreSQL to be ready..."
+            until PGPASSWORD=$POSTGRES_PASSWORD psql -h $PG_HOST -U postgres -c '\q' 2>/dev/null; do
+              echo "PostgreSQL is unavailable - sleeping"
+              sleep 2
+            done
+            echo "PostgreSQL is ready!"
+
+            echo "Creating grafana user and database if not exists..."
+            PGPASSWORD=$POSTGRES_PASSWORD psql -h $PG_HOST -U postgres <<-EOSQL
+              DO \$\$
+              BEGIN
+                IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'grafana') THEN
+                  CREATE USER grafana WITH PASSWORD 'grafana123';
+                END IF;
+              END
+              \$\$;
+
+              SELECT 'CREATE DATABASE grafana OWNER grafana'
+              WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'grafana')\gexec
+
+              GRANT ALL PRIVILEGES ON DATABASE grafana TO grafana;
+            EOSQL
+            echo "Grafana database setup complete!"
+        env:
+          - name: PG_HOST
+            value: "coelho-realtime-postgresql"
+          - name: POSTGRES_PASSWORD
+            value: "postgres123"
+    # PostgreSQL database configuration for Grafana
+    env:
+      GF_DATABASE_TYPE: postgres
+      GF_DATABASE_HOST: coelho-realtime-postgresql:5432
+      GF_DATABASE_NAME: grafana
+      GF_DATABASE_USER: grafana
+      GF_DATABASE_PASSWORD: grafana123
+      GF_DATABASE_SSL_MODE: disable
+    # Default dashboards
+    defaultDashboardsEnabled: true
+    defaultDashboardsTimezone: browser
+    # Sidecar for dashboard/datasource discovery
+    sidecar:
+      dashboards:
+        enabled: true
+        label: grafana_dashboard
+        labelValue: "1"
+        searchNamespace: ALL
+      datasources:
+        enabled: true
+        defaultDatasourceEnabled: true
+    # Additional data sources
+    additionalDataSources: []
+    # Grafana.ini configuration
+    grafana.ini:
+      server:
+        root_url: "%(protocol)s://%(domain)s:%(http_port)s/"
+        serve_from_sub_path: false
+      auth.anonymous:
+        enabled: true
+        org_role: Viewer
+
+  # Alertmanager configuration
+  alertmanager:
+    enabled: true
+    alertmanagerSpec:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 100m
+          memory: 128Mi
+      storage:
+        volumeClaimTemplate:
+          spec:
+            storageClassName: local-path
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 1Gi
+    # Service configuration - Port 9094 to avoid conflict with Kafka controller (9093)
+    service:
+      type: NodePort
+      port: 9094
+      targetPort: 9093  # Alertmanager internal port stays 9093
+      nodePort: 30094
+
+  # Node Exporter for node-level metrics
+  nodeExporter:
+    enabled: true
+    resources:
+      requests:
+        cpu: 50m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
+
+  # kube-state-metrics for Kubernetes object metrics
+  kubeStateMetrics:
+    enabled: true
+
+  # Disable components not needed for local k3d development
+  kubeApiServer:
+    enabled: true
+  kubeControllerManager:
+    enabled: false  # Not accessible in k3d
+  kubeScheduler:
+    enabled: false  # Not accessible in k3d
+  kubeProxy:
+    enabled: false  # k3d uses different networking
+  kubeEtcd:
+    enabled: false  # Not accessible in k3d
+
+  # CoreDNS monitoring
+  coreDns:
+    enabled: true
+
+  # Kubelet monitoring
+  kubelet:
+    enabled: true
+
+  # Default rules for alerting
+  defaultRules:
+    create: true
+    rules:
+      alertmanager: true
+      etcd: false  # Not accessible in k3d
+      configReloaders: true
+      general: true
+      k8sContainerCpuUsageSecondsTotal: true
+      k8sContainerMemoryCache: true
+      k8sContainerMemoryRss: true
+      k8sContainerMemorySwap: true
+      k8sContainerResource: true
+      k8sPodOwner: true
+      kubeApiserverAvailability: true
+      kubeApiserverBurnrate: true
+      kubeApiserverHistogram: true
+      kubeApiserverSlos: true
+      kubeControllerManager: false  # Not accessible in k3d
+      kubelet: true
+      kubeProxy: false  # k3d uses different networking
+      kubePrometheusGeneral: true
+      kubePrometheusNodeRecording: true
+      kubernetesApps: true
+      kubernetesResources: true
+      kubernetesStorage: true
+      kubernetesSystem: true
+      kubeSchedulerAlerting: false  # Not accessible in k3d
+      kubeSchedulerRecording: false  # Not accessible in k3d
+      kubeStateMetrics: true
+      network: true
+      node: true
+      nodeExporterAlerting: true
+      nodeExporterRecording: true
+      prometheus: true
+      prometheusOperator: true
+      windows: false

@@ -144,6 +144,27 @@ portForward:
     port: 8002
     localPort: 8002
     address: 0.0.0.0
+  # Prometheus (service name truncated by Helm)
+  - resourceType: service
+    resourceName: coelho-realtime-kube-prome-prometheus
+    namespace: coelho-realtime
+    port: 9090
+    localPort: 9090
+    address: 0.0.0.0
+  # Grafana (port 3001 to avoid conflict with Reflex)
+  - resourceType: service
+    resourceName: coelho-realtime-grafana
+    namespace: coelho-realtime
+    port: 3001
+    localPort: 3001
+    address: 0.0.0.0
+  # Alertmanager (port 9094 to avoid conflict with Kafka controller, name truncated)
+  - resourceType: service
+    resourceName: coelho-realtime-kube-prome-alertmanager
+    namespace: coelho-realtime
+    port: 9094
+    localPort: 9094
+    address: 0.0.0.0
   #- resourceType: service
   #  resourceName: coelho-realtime-streamlit
   #  namespace: coelho-realtime
