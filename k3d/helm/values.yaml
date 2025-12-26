@@ -415,6 +415,8 @@ minio:
   metrics:
     serviceMonitor:
       enabled: true
+      public: true
+      includeNode: true
       namespace: coelho-realtime
 
 

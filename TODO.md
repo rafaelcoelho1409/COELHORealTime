@@ -107,14 +107,17 @@ Kafka → River ML Training Scripts → MLflow
 - [ ] Update Reflex to call Scikit-Learn service for batch predictions
 - [ ] Enable Scikit-Learn option in navbar (remove "Soon" badge)
 
-### Phase 7: Observability Stack (COMPLETED)
+### Phase 7: Observability Stack (PARTIALLY COMPLETED)
 **Goal:** Production-grade monitoring with Prometheus & Grafana
 
 - [x] Add kube-prometheus-stack Helm dependency (v80.6.0)
 - [x] Configure ServiceMonitors for:
   - [x] FastAPI metrics (prometheus-fastapi-instrumentator)
   - [x] River ML Training Service metrics (prometheus-fastapi-instrumentator)
-  - [ ] Kafka metrics (disabled - pending Bitnami migration, see Infrastructure)
+  - [x] PostgreSQL metrics (Bitnami exporter)
+  - [x] Redis metrics (Bitnami exporter)
+  - [x] MinIO metrics (ServiceMonitor with cluster/node metrics)
+  - [ ] Kafka metrics (disabled - JMX exporter incompatible with Kafka 4.0)
   - [ ] MLflow metrics (disabled - no /metrics endpoint, needs exporter)
   - [ ] Reflex backend metrics (disabled - no /metrics endpoint, needs instrumentation)
 - [x] Create custom Grafana dashboards:
@@ -128,7 +131,35 @@ Kafka → River ML Training Scripts → MLflow
 - [x] Grafana connected to PostgreSQL for persistence
 - [x] Fix Grafana datasource provisioning (timing issue with sidecar)
 - [x] Port forwarding configured: Prometheus (9090), Grafana (3001), Alertmanager (9094)
-- **Note:** 19 Prometheus targets UP, 0 DOWN. Kafka/MLflow/Reflex ServiceMonitors disabled until metrics endpoints available.
+- **Note:** Kafka JMX exporter disabled due to incompatibility with Kafka 4.0. Wait for Bitnami update.
+
+#### Pending Observability Enhancements
+
+- [ ] **Set up Alertmanager notifications** (Priority: HIGH)
+  - Currently alerts fire but notifications go nowhere
+  - Configure receivers in `kube-prometheus-stack.alertmanager.config`:
+    - [ ] Slack webhook integration
+    - [ ] Email (SMTP) notifications
+    - [ ] PagerDuty integration (optional)
+  - Set up routing rules for different severity levels:
+    - `critical` → immediate notification
+    - `warning` → batched notifications
+  - Test alert delivery with `amtool` or firing a test alert
+
+- [ ] **Create custom application dashboards** (Priority: MEDIUM)
+  - [ ] FastAPI Analytics Dashboard - request latency histograms, error rates by endpoint, throughput
+  - [ ] River ML Training Dashboard - samples processed, prediction latency, model accuracy metrics
+  - [ ] Reflex Frontend Dashboard - WebSocket connections, page load times, backend API calls
+  - [ ] Kafka Producers Dashboard - messages produced per topic, producer lag, batch sizes
+  - Consider using Grafana dashboard provisioning via ConfigMaps
+
+- [ ] **Add centralized logging stack** (Priority: MEDIUM)
+  - [ ] Deploy Grafana Loki for log aggregation
+  - [ ] Deploy Promtail as DaemonSet for log collection
+  - [ ] Configure Loki datasource in Grafana
+  - [ ] Create log exploration dashboards
+  - [ ] Set up log-based alerting for error patterns
+  - Benefits: Correlate logs with metrics, search across all services, debug issues faster
 
 ### Phase 8: Model A/B Testing (Priority: MEDIUM)
 **Goal:** Allow users to compare different MLflow models in production
@@ -220,34 +251,21 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
   - One PostgreSQL instance can serve multiple services (MLflow, Airflow, Superset, etc.)
   - Bitnami PostgreSQL Helm chart with hostPath persistence at `/data/postgresql`
   - MLflow configured to use `postgresql://mlflow:mlflow123@coelho-realtime-postgresql:5432/mlflow`
-- [ ] **Migrate Kafka to Bitnami Helm Chart** (Priority: MEDIUM)
-  - Current setup uses custom Docker build (`bitnamilegacy/kafka:3.5.1`) with bundled Python producers
-  - Benefits of migration:
-    - Up-to-date Kafka version (3.9.x vs 3.5.1)
-    - Built-in JMX/Prometheus metrics exporter
-    - No maintenance burden for security updates
-    - Proper separation of concerns (broker vs producers)
-    - Consistent with other Bitnami dependencies (PostgreSQL, Redis, MinIO)
-  - **Monitoring benefit**: Bitnami Kafka has built-in metrics - just enable in values.yaml:
-    ```yaml
-    kafka:
-      metrics:
-        jmx:
-          enabled: true
-        serviceMonitor:
-          enabled: true
-    ```
-    Current custom Kafka has no metrics endpoint, so Kafka dashboard shows "No data".
-    ServiceMonitor is disabled in `helm/templates/kafka/servicemonitor.yaml` until migration.
-  - Migration steps:
-    - [ ] Add Bitnami Kafka Helm dependency to Chart.yaml
-    - [ ] Move Python data generators to separate deployment (`apps/kafka-producers/`)
-    - [ ] Update values.yaml with Bitnami Kafka configuration (KRaft mode)
-    - [ ] Enable metrics and ServiceMonitor in values.yaml
-    - [ ] Remove custom Kafka Docker build and templates
-    - [ ] Test Kafka connectivity with existing services
-    - [ ] Verify Kafka dashboard shows metrics
-  - Note: Official Apache Kafka Helm Chart (KIP-1149) expected mid-2025, but Bitnami is mature now
+- [x] **Migrate Kafka to Bitnami Helm Chart** (COMPLETED)
+  - Migrated from custom Docker build to Bitnami Kafka Helm chart v32.4.3
+  - Kafka 4.0.0 with KRaft mode (no Zookeeper required)
+  - Python data generators moved to separate deployment (`apps/kafka-producers/`)
+  - **Known Issue:** JMX exporter disabled - incompatible with Kafka 4.0
+    - Error: "The Prometheus metrics HTTPServer caught an Exception"
+    - Waiting for Bitnami to update JMX exporter for Kafka 4.0 compatibility
+    - Kafka dashboard will show limited data until JMX is re-enabled
+  - Migration completed:
+    - [x] Add Bitnami Kafka Helm dependency to Chart.yaml
+    - [x] Move Python data generators to separate deployment (`apps/kafka-producers/`)
+    - [x] Update values.yaml with Bitnami Kafka configuration (KRaft mode)
+    - [x] Remove custom Kafka Docker build and templates
+    - [x] Test Kafka connectivity with existing services
+    - [ ] Enable JMX metrics (pending Bitnami update for Kafka 4.0)
 
 ---
 
@@ -298,23 +316,29 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 | 4. MinIO | ~~HIGH~~ DONE | Medium | High | None |
 | 5. MLflow Model Integration | HIGH | Medium | Very High | MinIO |
 | 6. Scikit-Learn Service | LOW | Medium | Medium | Phase 10 |
-| 7. Prometheus/Grafana | ~~HIGH~~ DONE | Medium | High | None |
+| 7. Prometheus/Grafana | ~~HIGH~~ 90% DONE | Medium | High | None |
+| 7a. Alertmanager Notifications | HIGH | Low | High | Phase 7 |
+| 7b. Custom App Dashboards | MEDIUM | Medium | Medium | Phase 7 |
+| 7c. Logging Stack (Loki) | MEDIUM | Medium | High | Phase 7 |
 | 8. A/B Testing | MEDIUM | Medium | High | MLflow, MinIO |
 | 9. Delta Lake | MEDIUM | High | Medium | MinIO |
 | 10. Batch ML | LOW | Medium | Low | Delta Lake |
-| Kafka Migration | MEDIUM | Medium | High | None |
+| Kafka Migration | ~~MEDIUM~~ DONE | Medium | High | None |
 
 ---
 
 ## Notes
 
 - **ML Training Service (DONE):** River service now handles real-time ML training separately from FastAPI
-- **Observability Stack (DONE):** kube-prometheus-stack v80.6.0 with 6 custom dashboards, 30+ alerting rules
+- **Kafka Migration (DONE):** Bitnami Kafka 4.0.0 with KRaft mode, JMX disabled due to compatibility
+- **Observability Stack (90% DONE):** kube-prometheus-stack v80.6.0 with dashboards and alerting rules
+  - PostgreSQL, Redis, MinIO metrics exporters enabled and working
+  - Pending: Alertmanager notifications, custom app dashboards, logging stack
 - **MLflow Integration:** Phase 5 enables production-ready model serving from MLflow registry
-- **Next Quick Wins:** Kafka Migration (enables dashboard metrics) or Phase 5 (MLflow model serving)
+- **Next Quick Wins:** Alertmanager notifications (low effort, high value) or Phase 5 (MLflow model serving)
 - **Dependencies:** Delta Lake and A/B Testing require MinIO to be set up first
 - **Scikit-Learn Service:** Create when Batch ML studies (Phase 10) are ready
-- **Pending Metrics:** Kafka (after Bitnami migration), MLflow (needs exporter), Reflex (needs instrumentation)
+- **Pending Metrics:** Kafka JMX (waiting for Bitnami update), MLflow (needs exporter), Reflex (needs instrumentation)
 
 ---
 
@@ -326,4 +350,4 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 
 ---
 
-*Last updated: 2025-12-26*
+*Last updated: 2025-12-26 (Observability enhancements added)*
