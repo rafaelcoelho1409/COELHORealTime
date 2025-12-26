@@ -2,6 +2,7 @@
 # HTTP API
 fastapi
 uvicorn
+prometheus-fastapi-instrumentator
 
 # ML Training
 pandas

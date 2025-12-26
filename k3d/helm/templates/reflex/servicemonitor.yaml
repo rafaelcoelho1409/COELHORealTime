@@ -1,0 +1,22 @@
+{{- if index .Values "kube-prometheus-stack" "enabled" }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}-reflex
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: coelho-realtime-reflex
+    release: {{ .Release.Name }}
+spec:
+  selector:
+    matchLabels:
+      app: coelho-realtime-reflex
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: backend
+      interval: 30s
+      path: /metrics
+      scheme: http
+{{- end }}

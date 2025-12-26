@@ -1,0 +1,14 @@
+{{- if index .Values "kube-prometheus-stack" "enabled" }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Release.Name }}-application-rules
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: prometheus
+    release: {{ .Release.Name }}
+    # This label is required for kube-prometheus-stack to pick up the rules
+    prometheus: {{ .Release.Name }}-kube-prome-prometheus
+spec:
+{{ .Files.Get "files/prometheus/rules/application-rules.yaml" | indent 2 }}
+{{- end }}

@@ -107,22 +107,26 @@ Kafka → River ML Training Scripts → MLflow
 - [ ] Update Reflex to call Scikit-Learn service for batch predictions
 - [ ] Enable Scikit-Learn option in navbar (remove "Soon" badge)
 
-### Phase 7: Observability Stack (Priority: HIGH)
+### Phase 7: Observability Stack (COMPLETED)
 **Goal:** Production-grade monitoring with Prometheus & Grafana
 
-- [ ] Add kube-prometheus-stack Helm dependency
-- [ ] Configure ServiceMonitors for:
-  - [ ] FastAPI metrics (add prometheus-fastapi-instrumentator)
-  - [ ] Kafka metrics (JMX exporter or Kafka exporter)
-  - [ ] ML Training Service metrics
-  - [ ] Reflex backend metrics
-- [ ] Create custom Grafana dashboards:
-  - [ ] Kubernetes Resources Dashboard (CPU, Memory, Network)
-  - [ ] Kafka Dashboard (consumer lag, throughput, partitions)
-  - [ ] FastAPI Dashboard (request latency, error rates, predictions/sec)
-  - [ ] ML Metrics Dashboard (model performance, training samples/sec)
-- [ ] Configure alerting rules (optional)
-- [ ] Update navbar Services dropdown (enable Prometheus & Grafana links)
+- [x] Add kube-prometheus-stack Helm dependency (v80.6.0)
+- [x] Configure ServiceMonitors for:
+  - [x] FastAPI metrics (prometheus-fastapi-instrumentator)
+  - [x] River ML Training Service metrics
+  - [x] Kafka metrics
+  - [x] MLflow metrics
+  - [x] Reflex backend metrics
+- [x] Create custom Grafana dashboards:
+  - [x] COELHORealTime Overview (service health, CPU, memory, network)
+  - [x] ML Pipeline Dashboard (FastAPI/River metrics, training, predictions)
+  - [x] Kafka Dashboard (consumer lag, throughput, partitions, pipeline topics)
+  - [x] PostgreSQL Dashboard (connections, queries, replication)
+  - [x] Redis Dashboard (memory, connections, ops/sec)
+  - [x] MinIO Dashboard (S3 operations, storage, buckets)
+- [x] Configure alerting rules (30+ rules in PrometheusRule CRD)
+- [x] Grafana connected to PostgreSQL for persistence
+- [x] Port forwarding configured: Prometheus (9090), Grafana (3001), Alertmanager (9094)
 
 ### Phase 8: Model A/B Testing (Priority: MEDIUM)
 **Goal:** Allow users to compare different MLflow models in production
@@ -214,6 +218,34 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
   - One PostgreSQL instance can serve multiple services (MLflow, Airflow, Superset, etc.)
   - Bitnami PostgreSQL Helm chart with hostPath persistence at `/data/postgresql`
   - MLflow configured to use `postgresql://mlflow:mlflow123@coelho-realtime-postgresql:5432/mlflow`
+- [ ] **Migrate Kafka to Bitnami Helm Chart** (Priority: MEDIUM)
+  - Current setup uses custom Docker build (`bitnamilegacy/kafka:3.5.1`) with bundled Python producers
+  - Benefits of migration:
+    - Up-to-date Kafka version (3.9.x vs 3.5.1)
+    - Built-in JMX/Prometheus metrics exporter
+    - No maintenance burden for security updates
+    - Proper separation of concerns (broker vs producers)
+    - Consistent with other Bitnami dependencies (PostgreSQL, Redis, MinIO)
+  - **Monitoring benefit**: Bitnami Kafka has built-in metrics - just enable in values.yaml:
+    ```yaml
+    kafka:
+      metrics:
+        jmx:
+          enabled: true
+        serviceMonitor:
+          enabled: true
+    ```
+    Current custom Kafka has no metrics endpoint, so Kafka dashboard shows "No data".
+    ServiceMonitor is disabled in `helm/templates/kafka/servicemonitor.yaml` until migration.
+  - Migration steps:
+    - [ ] Add Bitnami Kafka Helm dependency to Chart.yaml
+    - [ ] Move Python data generators to separate deployment (`apps/kafka-producers/`)
+    - [ ] Update values.yaml with Bitnami Kafka configuration (KRaft mode)
+    - [ ] Enable metrics and ServiceMonitor in values.yaml
+    - [ ] Remove custom Kafka Docker build and templates
+    - [ ] Test Kafka connectivity with existing services
+    - [ ] Verify Kafka dashboard shows metrics
+  - Note: Official Apache Kafka Helm Chart (KIP-1149) expected mid-2025, but Bitnami is mature now
 
 ---
 
@@ -247,10 +279,10 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 │       │                                    └──────────┘             │
 │       │                                                              │
 │       ▼                                                              │
-│  ┌──────────┐    ┌──────────┐                                       │
-│  │Prometheus│◄──►│ Grafana  │ (future)                              │
-│  │          │    │          │                                       │
-│  └──────────┘    └──────────┘                                       │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐                       │
+│  │Prometheus│◄──►│ Grafana  │◄──►│Alertmgr  │                       │
+│  │  :9090   │    │  :3001   │    │  :9094   │                       │
+│  └──────────┘    └──────────┘    └──────────┘                       │
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -261,13 +293,14 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 
 | Phase | Priority | Effort | Value | Dependencies |
 |-------|----------|--------|-------|--------------|
-| 4. MinIO | HIGH | Medium | High | None |
+| 4. MinIO | ~~HIGH~~ DONE | Medium | High | None |
 | 5. MLflow Model Integration | HIGH | Medium | Very High | MinIO |
 | 6. Scikit-Learn Service | LOW | Medium | Medium | Phase 10 |
-| 7. Prometheus/Grafana | HIGH | Medium | High | None |
+| 7. Prometheus/Grafana | ~~HIGH~~ DONE | Medium | High | None |
 | 8. A/B Testing | MEDIUM | Medium | High | MLflow, MinIO |
 | 9. Delta Lake | MEDIUM | High | Medium | MinIO |
 | 10. Batch ML | LOW | Medium | Low | Delta Lake |
+| Kafka Migration | MEDIUM | Medium | High | None |
 
 ---
 
@@ -289,4 +322,4 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 
 ---
 
-*Last updated: 2025-12-18*
+*Last updated: 2025-12-26*

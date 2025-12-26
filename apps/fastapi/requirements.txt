@@ -1,6 +1,7 @@
 fastapi
 uvicorn
 pydantic
+prometheus-fastapi-instrumentator
 ipykernel
 pandas
 mlflow

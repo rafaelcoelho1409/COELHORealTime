@@ -1,0 +1,89 @@
+{{- if index .Values "kube-prometheus-stack" "enabled" }}
+{{- if index .Values "kube-prometheus-stack" "grafana" "enabled" }}
+---
+# ConfigMap for COELHORealTime Overview Dashboard
+# Grafana sidecar auto-discovers ConfigMaps with label: grafana_dashboard: "1"
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-grafana-dashboard-overview
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: grafana
+    release: {{ .Release.Name }}
+    grafana_dashboard: "1"
+data:
+  coelho-realtime-overview.json: |
+{{ .Files.Get "files/grafana/dashboards/coelho-realtime-overview.json" | indent 4 }}
+---
+# ConfigMap for ML Pipeline Dashboard
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-grafana-dashboard-ml-pipeline
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: grafana
+    release: {{ .Release.Name }}
+    grafana_dashboard: "1"
+data:
+  ml-pipeline.json: |
+{{ .Files.Get "files/grafana/dashboards/ml-pipeline.json" | indent 4 }}
+---
+# ConfigMap for PostgreSQL Dashboard
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-grafana-dashboard-postgresql
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: grafana
+    release: {{ .Release.Name }}
+    grafana_dashboard: "1"
+data:
+  postgresql.json: |
+{{ .Files.Get "files/grafana/dashboards/postgresql.json" | indent 4 }}
+---
+# ConfigMap for Redis Dashboard
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-grafana-dashboard-redis
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: grafana
+    release: {{ .Release.Name }}
+    grafana_dashboard: "1"
+data:
+  redis.json: |
+{{ .Files.Get "files/grafana/dashboards/redis.json" | indent 4 }}
+---
+# ConfigMap for MinIO Dashboard
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-grafana-dashboard-minio
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: grafana
+    release: {{ .Release.Name }}
+    grafana_dashboard: "1"
+data:
+  minio.json: |
+{{ .Files.Get "files/grafana/dashboards/minio.json" | indent 4 }}
+---
+# ConfigMap for Kafka Dashboard
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-grafana-dashboard-kafka
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: grafana
+    release: {{ .Release.Name }}
+    grafana_dashboard: "1"
+data:
+  kafka.json: |
+{{ .Files.Get "files/grafana/dashboards/kafka.json" | indent 4 }}
+{{- end }}
+{{- end }}

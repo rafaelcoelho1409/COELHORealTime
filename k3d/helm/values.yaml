@@ -518,6 +518,28 @@ kube-prometheus-stack:
       datasources:
         enabled: true
         defaultDatasourceEnabled: true
+    # Datasources provisioned directly (not via sidecar) to avoid timing issues
+    datasources:
+      datasources.yaml:
+        apiVersion: 1
+        datasources:
+          - name: Prometheus
+            type: prometheus
+            uid: prometheus
+            url: http://coelho-realtime-kube-prome-prometheus.coelho-realtime:9090/
+            access: proxy
+            isDefault: true
+            jsonData:
+              httpMethod: POST
+              timeInterval: 30s
+          - name: Alertmanager
+            type: alertmanager
+            uid: alertmanager
+            url: http://coelho-realtime-kube-prome-alertmanager.coelho-realtime:9094/
+            access: proxy
+            jsonData:
+              handleGrafanaManagedAlerts: false
+              implementation: prometheus
     # Additional data sources
     additionalDataSources: []
     # Grafana.ini configuration

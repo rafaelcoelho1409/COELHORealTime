@@ -8,6 +8,7 @@ Also handles predictions using trained River models.
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_fastapi_instrumentator import Instrumentator
 import subprocess
 import os
 import sys
@@ -101,6 +102,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add Prometheus metrics instrumentation
+# Exposes /metrics endpoint for Prometheus scraping
+Instrumentator().instrument(app).expose(app)
 
 
 @app.get("/health")
