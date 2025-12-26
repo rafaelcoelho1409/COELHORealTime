@@ -291,25 +291,21 @@ def coelho_realtime_navbar() -> rx.Component:
                                     is_external = True
                                 )
                             ),
-                            rx.menu.separator(),
                             rx.menu.item(
                                 rx.link(
                                     rx.hstack(
                                         rx.image(
                                             src = "https://cdn.jsdelivr.net/gh/devicons/devicon/icons/prometheus/prometheus-original.svg",
                                             width = "16px",
-                                            height = "16px",
-                                            opacity = "0.5"
+                                            height = "16px"
                                         ),
-                                        rx.text("Prometheus", size = "3", weight = "medium", color = "gray"),
-                                        rx.badge("Soon", color_scheme = "gray", size = "1"),
+                                        rx.text("Prometheus", size = "3", weight = "medium"),
                                         spacing = "2",
                                         align_items = "center"
                                     ),
-                                    href = "#",
+                                    href = "http://localhost:9090",
                                     is_external = True
-                                ),
-                                disabled = True
+                                )
                             ),
                             rx.menu.item(
                                 rx.link(
@@ -317,18 +313,15 @@ def coelho_realtime_navbar() -> rx.Component:
                                         rx.image(
                                             src = "https://cdn.jsdelivr.net/gh/devicons/devicon/icons/grafana/grafana-original.svg",
                                             width = "16px",
-                                            height = "16px",
-                                            opacity = "0.5"
+                                            height = "16px"
                                         ),
-                                        rx.text("Grafana", size = "3", weight = "medium", color = "gray"),
-                                        rx.badge("Soon", color_scheme = "gray", size = "1"),
+                                        rx.text("Grafana", size = "3", weight = "medium"),
                                         spacing = "2",
                                         align_items = "center"
                                     ),
-                                    href = "#",
+                                    href = "http://localhost:3001",
                                     is_external = True
-                                ),
-                                disabled = True
+                                )
                             ),
                             size = "2"
                         )

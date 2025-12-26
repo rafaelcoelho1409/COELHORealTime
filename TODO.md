@@ -113,10 +113,10 @@ Kafka → River ML Training Scripts → MLflow
 - [x] Add kube-prometheus-stack Helm dependency (v80.6.0)
 - [x] Configure ServiceMonitors for:
   - [x] FastAPI metrics (prometheus-fastapi-instrumentator)
-  - [x] River ML Training Service metrics
-  - [x] Kafka metrics
-  - [x] MLflow metrics
-  - [x] Reflex backend metrics
+  - [x] River ML Training Service metrics (prometheus-fastapi-instrumentator)
+  - [ ] Kafka metrics (disabled - pending Bitnami migration, see Infrastructure)
+  - [ ] MLflow metrics (disabled - no /metrics endpoint, needs exporter)
+  - [ ] Reflex backend metrics (disabled - no /metrics endpoint, needs instrumentation)
 - [x] Create custom Grafana dashboards:
   - [x] COELHORealTime Overview (service health, CPU, memory, network)
   - [x] ML Pipeline Dashboard (FastAPI/River metrics, training, predictions)
@@ -126,7 +126,9 @@ Kafka → River ML Training Scripts → MLflow
   - [x] MinIO Dashboard (S3 operations, storage, buckets)
 - [x] Configure alerting rules (30+ rules in PrometheusRule CRD)
 - [x] Grafana connected to PostgreSQL for persistence
+- [x] Fix Grafana datasource provisioning (timing issue with sidecar)
 - [x] Port forwarding configured: Prometheus (9090), Grafana (3001), Alertmanager (9094)
+- **Note:** 19 Prometheus targets UP, 0 DOWN. Kafka/MLflow/Reflex ServiceMonitors disabled until metrics endpoints available.
 
 ### Phase 8: Model A/B Testing (Priority: MEDIUM)
 **Goal:** Allow users to compare different MLflow models in production
@@ -307,18 +309,20 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 ## Notes
 
 - **ML Training Service (DONE):** River service now handles real-time ML training separately from FastAPI
+- **Observability Stack (DONE):** kube-prometheus-stack v80.6.0 with 6 custom dashboards, 30+ alerting rules
 - **MLflow Integration:** Phase 5 enables production-ready model serving from MLflow registry
-- **Quick Wins:** MinIO (Phase 4) and Prometheus (Phase 7) can be added in parallel
+- **Next Quick Wins:** Kafka Migration (enables dashboard metrics) or Phase 5 (MLflow model serving)
 - **Dependencies:** Delta Lake and A/B Testing require MinIO to be set up first
 - **Scikit-Learn Service:** Create when Batch ML studies (Phase 10) are ready
+- **Pending Metrics:** Kafka (after Bitnami migration), MLflow (needs exporter), Reflex (needs instrumentation)
 
 ---
 
 ## Original Todo Items (from /todo file)
-- [x] ~~Transfer saved models and encoders to MLflow or to MinIO~~ → Phase 4
-- [x] ~~Configure MLflow to use MinIO as backend~~ → Phase 4
-- [x] ~~Create a separated service to process ML training in real-time~~ → Phase 6
-- [x] ~~Give users options to choose different MLflow models (A/B test)~~ → Phase 8
+- [ ] Transfer saved models and encoders to MLflow or to MinIO → Phase 4 (pending)
+- [x] ~~Configure MLflow to use MinIO as backend~~ → Phase 4 (done)
+- [x] ~~Create a separated service to process ML training in real-time~~ → Phase 6 (done)
+- [ ] Give users options to choose different MLflow models (A/B test) → Phase 8 (pending)
 
 ---
 
