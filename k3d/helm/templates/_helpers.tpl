@@ -26,6 +26,7 @@ MLFLOW_HOST: "coelho-realtime-mlflow"
 STREAMLIT_HOST: "coelho-realtime-streamlit"
 REFLEX_HOST: "coelho-realtime-reflex"
 RIVER_HOST: "coelho-realtime-river"
+SKLEARN_HOST: "coelho-realtime-sklearn"
 REDIS_HOST: "redis://coelho-realtime-redis-master:6379"
 {{- end -}}
 

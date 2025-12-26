@@ -8,8 +8,7 @@ source .venv/bin/activate
 # Install dependencies
 uv pip install -r requirements.txt
 
-# Start FastAPI data service
-# NOTE: ML training moved to River app
-uvicorn app:app --host 0.0.0.0 --port 8001 --reload &
+# Start Sklearn Batch ML service
+uvicorn app:app --host 0.0.0.0 --port 8003 --reload &
 
 wait

@@ -182,7 +182,8 @@ def main():
             with open(ENCODERS_PATH, 'wb') as f:
                 pickle.dump(encoders, f)
             data_df.to_parquet(DATA_PATH)
-            consumer.close()
+            if consumer is not None:
+                consumer.close()
             mlflow.end_run()
             print("Consumer closed.")
 

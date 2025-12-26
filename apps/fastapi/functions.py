@@ -46,7 +46,7 @@ KAFKA_HOST = os.environ["KAFKA_HOST"]
 
 
 # Configuration
-KAFKA_BROKERS = f'{KAFKA_HOST}:29092'  # Adjust as needed
+KAFKA_BROKERS = f'{KAFKA_HOST}:9092'
 
 ###---Functions----####
 #Data processing functions
@@ -585,7 +585,13 @@ def load_or_create_model(project_name, model_name, folder_path = None):
 
 
 def create_consumer(project_name, max_retries: int = 5, retry_delay: float = 5.0):
-    """Create and return Kafka consumer with retry logic."""
+    """Create Kafka consumer with manual partition assignment.
+
+    Note: Uses manual partition assignment instead of group-based subscription
+    due to Kafka 4.0 compatibility issues with kafka-python's consumer group protocol.
+    """
+    from kafka import TopicPartition
+
     consumer_name_dict = {
         "Transaction Fraud Detection": "transaction_fraud_detection",
         "Estimated Time of Arrival": "estimated_time_of_arrival",
@@ -596,15 +602,22 @@ def create_consumer(project_name, max_retries: int = 5, retry_delay: float = 5.0
 
     for attempt in range(max_retries):
         try:
+            # Create consumer without topic subscription (manual assignment)
             consumer = KafkaConsumer(
-                KAFKA_TOPIC,
                 bootstrap_servers=KAFKA_BROKERS,
-                auto_offset_reset='earliest',
                 value_deserializer=lambda v: json.loads(v.decode('utf-8')),
-                group_id=f'{KAFKA_TOPIC}_group',
-                consumer_timeout_ms=1000  # 1 second timeout for graceful shutdown checks
+                consumer_timeout_ms=1000,  # 1 second timeout for graceful shutdown checks
+                api_version=(3, 7),  # Force API version for Kafka 4.0 compatibility
             )
-            print(f"Kafka consumer created for {project_name}")
+
+            # Manually assign partition 0 of the topic
+            tp = TopicPartition(KAFKA_TOPIC, 0)
+            consumer.assign([tp])
+
+            # Seek to beginning to read all messages
+            consumer.seek_to_beginning(tp)
+
+            print(f"Kafka consumer created for {project_name} (manual assignment)")
             return consumer
         except NoBrokersAvailable as e:
             if attempt < max_retries - 1:

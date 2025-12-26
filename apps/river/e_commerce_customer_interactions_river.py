@@ -242,7 +242,8 @@ def main():
             with open(CLUSTER_FEATURE_COUNTS_PATH, 'w') as f:
                 json.dump(plain_dict_feature_counts, f, indent = 4)
             data_df.to_parquet(DATA_PATH)
-            consumer.close()
+            if consumer is not None:
+                consumer.close()
             mlflow.end_run()
             print("Consumer closed.")
 

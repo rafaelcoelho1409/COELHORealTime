@@ -77,7 +77,7 @@ class MLflowMetricsCache:
         self._cache.clear()
 
 
-mlflow_cache = MLflowMetricsCache(ttl_seconds = 30)  # Reduced from 300 to 30 seconds
+mlflow_cache = MLflowMetricsCache(ttl_seconds = 30)
 
 
 def _sync_get_mlflow_metrics(project_name: str, model_name: str) -> dict:
@@ -190,13 +190,13 @@ class DeviceInfo(BaseModel):
     browser: Optional[str] = None
     os: Optional[str] = None 
 
+
 class Location(BaseModel):
     """Pydantic model for location."""
     lat: Optional[float] = None
     lon: Optional[float] = None
-
     # Add validators within the nested model for its float fields
-    @field_validator('lat', 'lon', mode='before')
+    @field_validator('lat', 'lon', mode = 'before')
     @classmethod
     def check_location_coords_finite(cls, v: Any) -> Optional[float]:
         """
@@ -210,7 +210,6 @@ class Location(BaseModel):
         # Pydantic's standard validation will still run afterwards.
         return v
 
-# --- Main Model with Fixes ---
 
 class ECommerceCustomerInteractions(BaseModel):
     """Pydantic model for validating e-commerce customer interaction events."""
@@ -234,7 +233,6 @@ class ECommerceCustomerInteractions(BaseModel):
     time_on_page_seconds: Optional[int] = None
     # Consider using datetime type if you process timestamps
     timestamp: Optional[str] = None
-
     # Pydantic v2 validator syntax using @field_validator
     # Validator for quantity (handle potential float NaN input before int validation)
     @field_validator('quantity', mode = 'before')
@@ -258,7 +256,7 @@ class ECommerceCustomerInteractions(BaseModel):
             return None
         return v # Return original value for standard Pydantic float validation
     # Validator to ensure nested fields are dicts or None before processing
-    @field_validator('device_info', 'location', mode='before')
+    @field_validator('device_info', 'location', mode = 'before')
     @classmethod
     def ensure_dict_or_none(cls, v: Any) -> Optional[Dict]:
         """Ensure input is a dictionary or None before nested model validation."""
@@ -437,6 +435,7 @@ async def get_healthcheck():
             status_code = 503,
             detail = "Service Unavailable: Core components failed to load.")
     return healthcheck
+
 
 @app.put("/healthcheck", response_model = Healthcheck)
 async def update_healthcheck(update_data: Healthcheck):

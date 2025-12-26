@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+pydantic
+prometheus-fastapi-instrumentator
+pandas
+pyarrow
+mlflow
+kafka-python
+starlette
+scikit-learn
+xgboost-cpu
+setuptools
+yellowbrick
+matplotlib
+boto3
+imbalanced-learn

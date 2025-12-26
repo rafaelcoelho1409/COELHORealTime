@@ -95,17 +95,79 @@ Kafka → River ML Training Scripts → MLflow
   - [ ] Display current model version on each page
   - [ ] Show last model update timestamp
 
-### Phase 6: Scikit-Learn Service (Priority: LOW)
+### Phase 6: Scikit-Learn Service (COMPLETED)
 **Goal:** Create dedicated Scikit-Learn FastAPI service for batch ML
 
-- [ ] Create Scikit-Learn FastAPI service with endpoints:
-  - [ ] `/train` - Trigger batch model training
-  - [ ] `/predict` - Batch ML predictions
-  - [ ] `/status`, `/health` - Service monitoring
-- [ ] Add Helm templates for Scikit-Learn service (deployment, service, configmap)
-- [ ] Migrate Batch ML Streamlit pages to Reflex
-- [ ] Update Reflex to call Scikit-Learn service for batch predictions
-- [ ] Enable Scikit-Learn option in navbar (remove "Soon" badge)
+- [x] Create Scikit-Learn FastAPI service with endpoints:
+  - [x] `/predict` - Batch ML predictions (XGBClassifier via MLflow)
+  - [x] `/mlflow_metrics` - Get MLflow metrics for batch models
+  - [x] `/yellowbrick_metric` - Generate YellowBrick visualizations
+  - [x] `/sample`, `/health` - Service monitoring
+- [x] Add Helm templates for Scikit-Learn service (deployment, service, configmap)
+- [x] Add Batch ML tab to Reflex TFD page
+- [x] Update Reflex state with batch ML handlers (predictions, YellowBrick)
+- [x] Enable Scikit-Learn option in navbar (removed "Soon" badge)
+- [x] Clean up sklearn service (removed River code from copied FastAPI)
+
+**Sklearn Service Architecture:**
+```
+apps/sklearn/
+├── app.py              # FastAPI (port 8003)
+├── functions.py        # Sklearn/YellowBrick helpers
+├── Dockerfile.sklearn  # Docker image with UV
+└── entrypoint.sh       # Startup script
+```
+
+### Phase 6b: Consolidate FastAPI Services (Priority: MEDIUM)
+**Goal:** Deprecate FastAPI Analytics and distribute its endpoints to River and Sklearn
+
+**Current State (3 services):**
+- FastAPI Analytics (8001) - Mixed data queries + ML helpers
+- River (8002) - Incremental ML training + predictions
+- Sklearn (8003) - Batch ML predictions + YellowBrick
+
+**Target State (2 services):**
+- River (8002) - Incremental ML + data sampling + form helpers
+- Sklearn (8003) - Batch ML + YellowBrick + batch metrics
+
+**Migration Plan:**
+
+| Endpoint | From | To | Notes |
+|----------|------|-----|-------|
+| `/sample` | FastAPI | River | Data sampling for forms |
+| `/unique_values` | FastAPI | River | Form dropdown options |
+| `/initial_sample` | FastAPI | River | Initial form data |
+| `/get_ordinal_encoder` | FastAPI | River | River-specific encoders |
+| `/cluster_counts` | FastAPI | River | ECCI clustering (DBSTREAM) |
+| `/cluster_feature_counts` | FastAPI | River | ECCI clustering |
+| `/mlflow_metrics` | FastAPI | River | Add for incremental model metrics |
+| `/yellowbrick_metric` | FastAPI | (delete) | Already in Sklearn |
+| `/healthcheck` | FastAPI | (delete) | Use `/health` per service |
+
+**Tasks:**
+- [ ] Move data endpoints to River service:
+  - [ ] `/sample` - Random sample from dataset
+  - [ ] `/unique_values` - Unique values for dropdowns
+  - [ ] `/initial_sample` - Initial form data
+- [ ] Move River-specific endpoints to River service:
+  - [ ] `/get_ordinal_encoder` - River encoder mappings
+  - [ ] `/cluster_counts` - ECCI cluster counts
+  - [ ] `/cluster_feature_counts` - ECCI cluster feature counts
+- [ ] Add `/mlflow_metrics` to River service (for incremental models)
+- [ ] Update Reflex state.py to use River endpoints instead of FastAPI
+- [ ] Update Reflex resources.py FASTAPI_BASE_URL references
+- [ ] Remove FastAPI Analytics service:
+  - [ ] Delete `apps/fastapi/` directory
+  - [ ] Remove Helm templates (`k3d/helm/templates/fastapi/`)
+  - [ ] Remove `fastapi` section from `values.yaml`
+- [ ] Update navbar Services dropdown (remove FastAPI Analytics submenu)
+- [ ] Update architecture diagram in TODO.md
+
+**Benefits:**
+- 2 services instead of 3 (simpler architecture)
+- Clear separation: Incremental ML (River) vs Batch ML (Sklearn)
+- No code duplication
+- Easier maintenance and deployment
 
 ### Phase 7: Observability Stack (PARTIALLY COMPLETED)
 **Goal:** Production-grade monitoring with Prometheus & Grafana
@@ -315,7 +377,8 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 |-------|----------|--------|-------|--------------|
 | 4. MinIO | ~~HIGH~~ DONE | Medium | High | None |
 | 5. MLflow Model Integration | HIGH | Medium | Very High | MinIO |
-| 6. Scikit-Learn Service | LOW | Medium | Medium | Phase 10 |
+| 6. Scikit-Learn Service | ~~LOW~~ DONE | Medium | Medium | None |
+| 6b. Consolidate FastAPI Services | MEDIUM | Medium | High | Phase 6 |
 | 7. Prometheus/Grafana | ~~HIGH~~ 90% DONE | Medium | High | None |
 | 7a. Alertmanager Notifications | HIGH | Low | High | Phase 7 |
 | 7b. Custom App Dashboards | MEDIUM | Medium | Medium | Phase 7 |
@@ -334,10 +397,17 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 - **Observability Stack (90% DONE):** kube-prometheus-stack v80.6.0 with dashboards and alerting rules
   - PostgreSQL, Redis, MinIO metrics exporters enabled and working
   - Pending: Alertmanager notifications, custom app dashboards, logging stack
+- **Scikit-Learn Service (DONE):** Batch ML service with YellowBrick visualizations
+  - Reflex TFD page now has Batch ML tab with XGBClassifier predictions
+  - YellowBrick visualizations available (Classification, Target, Model Selection)
+  - Sklearn option enabled in navbar Services dropdown
+- **Service Consolidation (PLANNED):** Phase 6b will deprecate FastAPI Analytics
+  - Move data endpoints (`/sample`, `/unique_values`) to River
+  - Keep YellowBrick and batch ML in Sklearn
+  - Result: 2 services (River + Sklearn) instead of 3
 - **MLflow Integration:** Phase 5 enables production-ready model serving from MLflow registry
 - **Next Quick Wins:** Alertmanager notifications (low effort, high value) or Phase 5 (MLflow model serving)
 - **Dependencies:** Delta Lake and A/B Testing require MinIO to be set up first
-- **Scikit-Learn Service:** Create when Batch ML studies (Phase 10) are ready
 - **Pending Metrics:** Kafka JMX (waiting for Bitnami update), MLflow (needs exporter), Reflex (needs instrumentation)
 
 ---
@@ -350,4 +420,4 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 
 ---
 
-*Last updated: 2025-12-26 (Observability enhancements added)*
+*Last updated: 2025-12-26 (Phase 6 Scikit-Learn Service completed, Phase 6b Service Consolidation planned)*

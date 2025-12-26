@@ -12,6 +12,9 @@ FASTAPI_BASE_URL = f"http://{FASTAPI_HOST}:8001"
 RIVER_HOST = os.getenv("RIVER_HOST", "localhost")
 RIVER_BASE_URL = f"http://{RIVER_HOST}:8002"
 
+SKLEARN_HOST = os.getenv("SKLEARN_HOST", "localhost")
+SKLEARN_BASE_URL = f"http://{SKLEARN_HOST}:8003"
+
 
 # =============================================================================
 # Form Value Helpers
@@ -47,12 +50,79 @@ def get_nested_str(data: dict, key1: str, key2: str, default: str = "") -> str:
 
 
 class State(rx.State):
-    tab_name: str = "Incremental ML"
+    tab_name: str = "incremental_ml"
     page_name_mapping: dict = {
         "/": "Home",
         "/transaction-fraud-detection": "Transaction Fraud Detection",
         "/estimated-time-of-arrival": "Estimated Time of Arrival",
         "/e-commerce-customer-interactions": "E-Commerce Customer Interactions"
+    }
+
+    # ==========================================================================
+    # BATCH ML STATE
+    # ==========================================================================
+    batch_ml_model_name: dict = {
+        "Transaction Fraud Detection": "XGBoost Classifier (Scikit-Learn)",
+    }
+    # YellowBrick visualization state
+    yellowbrick_metric_type: str = "Classification"
+    yellowbrick_metric_name: str = ""
+    yellowbrick_image_base64: str = ""
+    yellowbrick_loading: bool = False
+    yellowbrick_error: str = ""
+    # Detailed metrics options for YellowBrick
+    yellowbrick_metrics_options: dict = {
+        "Classification": [
+            "",
+            "ClassificationReport",
+            "ConfusionMatrix",
+            "ROCAUC",
+            "PrecisionRecallCurve",
+            "ClassPredictionError"
+        ],
+        "Feature Analysis": [
+            "",
+        ],
+        "Target": [
+            "",
+            "BalancedBinningReference",
+            "ClassBalance"
+        ],
+        "Model Selection": [
+            "",
+            "ValidationCurve",
+            "LearningCurve",
+            "CVScores",
+            "FeatureImportances",
+            "DroppingCurve"
+        ]
+    }
+    # Batch ML prediction results (separate from incremental ML)
+    batch_prediction_results: dict = {
+        "Transaction Fraud Detection": {},
+    }
+    # Batch ML MLflow metrics (separate from incremental ML)
+    batch_mlflow_metrics: dict = {
+        "Transaction Fraud Detection": {},
+    }
+    # Batch ML training state
+    batch_training_loading: bool = False
+    batch_model_available: dict = {
+        "Transaction Fraud Detection": False,
+    }
+    batch_training_error: str = ""
+    batch_last_trained: dict = {
+        "Transaction Fraud Detection": "",
+    }
+    batch_training_metrics: dict = {
+        "Transaction Fraud Detection": {},
+    }
+    # Batch ML toggle state (like incremental ML)
+    batch_ml_state: dict = {
+        "Transaction Fraud Detection": False,
+    }
+    batch_ml_model_key: dict = {
+        "Transaction Fraud Detection": "transaction_fraud_detection_sklearn.py",
     }
     project_name: str = "Home"
     # Track the currently active Kafka producer/model
@@ -225,18 +295,183 @@ class State(rx.State):
                 "precision": "0.00%", "rocauc": "0.00%", "geometric_mean": "0.00%"
             }
         return {
-            "f1": f"{metrics.get('metrics.F1', 0) * 100:.2f}%",
-            "accuracy": f"{metrics.get('metrics.Accuracy', 0) * 100:.2f}%",
-            "recall": f"{metrics.get('metrics.Recall', 0) * 100:.2f}%",
-            "precision": f"{metrics.get('metrics.Precision', 0) * 100:.2f}%",
-            "rocauc": f"{metrics.get('metrics.ROCAUC', 0) * 100:.2f}%",
-            "geometric_mean": f"{metrics.get('metrics.GeometricMean', 0) * 100:.2f}%",
+            "f1": f"{(metrics.get('metrics.F1') or 0) * 100:.2f}%",
+            "accuracy": f"{(metrics.get('metrics.Accuracy') or 0) * 100:.2f}%",
+            "recall": f"{(metrics.get('metrics.Recall') or 0) * 100:.2f}%",
+            "precision": f"{(metrics.get('metrics.Precision') or 0) * 100:.2f}%",
+            "rocauc": f"{(metrics.get('metrics.ROCAUC') or 0) * 100:.2f}%",
+            "geometric_mean": f"{(metrics.get('metrics.GeometricMean') or 0) * 100:.2f}%",
         }
 
     @rx.var
     def ml_training_switch_checked(self) -> bool:
         """Check if ML training is enabled for the current page's model."""
         return self.ml_training_enabled and self.activated_model == self._current_page_model_key
+
+    # =========================================================================
+    # Batch ML (Scikit-Learn) computed vars
+    # =========================================================================
+    @rx.var
+    def is_batch_ml_tab(self) -> bool:
+        """Check if Batch ML tab is active."""
+        return self.tab_name == "batch_ml"
+
+    @rx.var
+    def tfd_batch_ml_enabled(self) -> bool:
+        """Check if TFD batch ML training toggle is enabled."""
+        return self.batch_ml_state.get("Transaction Fraud Detection", False)
+
+    @rx.var
+    def tfd_batch_model_available(self) -> bool:
+        """Check if TFD batch model is available for prediction."""
+        return self.batch_model_available.get("Transaction Fraud Detection", False)
+
+    @rx.var
+    def tfd_batch_last_trained(self) -> str:
+        """Get the last trained timestamp for TFD batch model."""
+        return self.batch_last_trained.get("Transaction Fraud Detection", "")
+
+    @rx.var
+    def tfd_batch_training_metrics_display(self) -> dict[str, str]:
+        """Get TFD batch training metrics for display."""
+        metrics = self.batch_training_metrics.get("Transaction Fraud Detection", {})
+        if not isinstance(metrics, dict) or not metrics:
+            return {}
+        return {
+            "f1": f"{(metrics.get('F1') or 0) * 100:.2f}%",
+            "accuracy": f"{(metrics.get('Accuracy') or 0) * 100:.2f}%",
+            "recall": f"{(metrics.get('Recall') or 0) * 100:.2f}%",
+            "precision": f"{(metrics.get('Precision') or 0) * 100:.2f}%",
+            "rocauc": f"{(metrics.get('ROCAUC') or 0) * 100:.2f}%",
+            "geometric_mean": f"{(metrics.get('GeometricMean') or 0) * 100:.2f}%",
+        }
+
+    @rx.var
+    def yellowbrick_metric_options(self) -> list[str]:
+        """Get available YellowBrick metric names for current metric type."""
+        return self.yellowbrick_metrics_options.get(self.yellowbrick_metric_type, [""])
+
+    @rx.var
+    def yellowbrick_metric_types(self) -> list[str]:
+        """Get available YellowBrick metric types."""
+        return list(self.yellowbrick_metrics_options.keys())
+
+    @rx.var
+    def tfd_batch_prediction_show(self) -> bool:
+        """Check if batch prediction results should be shown for TFD."""
+        results = self.batch_prediction_results.get("Transaction Fraud Detection", {})
+        if isinstance(results, dict):
+            return results.get("show", False)
+        return False
+
+    @rx.var
+    def tfd_batch_fraud_probability(self) -> float:
+        """Get batch fraud probability for TFD."""
+        results = self.batch_prediction_results.get("Transaction Fraud Detection", {})
+        if isinstance(results, dict):
+            return results.get("fraud_probability", 0.0)
+        return 0.0
+
+    @rx.var
+    def tfd_batch_prediction_text(self) -> str:
+        """Get batch prediction result text for TFD."""
+        results = self.batch_prediction_results.get("Transaction Fraud Detection", {})
+        if isinstance(results, dict):
+            return "Fraud" if results.get("prediction", 0) == 1 else "Not Fraud"
+        return ""
+
+    @rx.var
+    def tfd_batch_prediction_color(self) -> str:
+        """Get batch prediction result color for TFD."""
+        results = self.batch_prediction_results.get("Transaction Fraud Detection", {})
+        if isinstance(results, dict):
+            return "red" if results.get("prediction", 0) == 1 else "green"
+        return "gray"
+
+    @rx.var
+    def tfd_batch_fraud_gauge(self) -> go.Figure:
+        """Generate Plotly gauge chart for batch fraud probability."""
+        prob = self.tfd_batch_fraud_probability * 100
+
+        # Determine risk level and colors
+        if prob < 30:
+            risk_text = "LOW RISK"
+            bar_color = "#22c55e"  # green
+        elif prob < 70:
+            risk_text = "MEDIUM RISK"
+            bar_color = "#eab308"  # yellow
+        else:
+            risk_text = "HIGH RISK"
+            bar_color = "#ef4444"  # red
+
+        fig = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=prob,
+            number={
+                'suffix': "%",
+                'font': {'size': 40, 'color': bar_color}
+            },
+            title={
+                'text': f"<b>{risk_text}</b><br><span style='font-size:14px;color:gray'>Fraud Probability</span>",
+                'font': {'size': 18}
+            },
+            gauge={
+                'axis': {
+                    'range': [0, 100],
+                    'tickwidth': 1,
+                    'tickcolor': "#666",
+                    'tickvals': [0, 25, 50, 75, 100],
+                    'ticktext': ['0%', '25%', '50%', '75%', '100%']
+                },
+                'bar': {'color': bar_color, 'thickness': 0.75},
+                'bgcolor': "rgba(0,0,0,0)",
+                'borderwidth': 2,
+                'bordercolor': "#333",
+                'steps': [
+                    {'range': [0, 30], 'color': 'rgba(34, 197, 94, 0.3)'},
+                    {'range': [30, 70], 'color': 'rgba(234, 179, 8, 0.3)'},
+                    {'range': [70, 100], 'color': 'rgba(239, 68, 68, 0.3)'}
+                ],
+                'threshold': {
+                    'line': {'color': "#333", 'width': 4},
+                    'thickness': 0.8,
+                    'value': prob
+                }
+            }
+        ))
+
+        fig.update_layout(
+            height=280,
+            margin=dict(l=30, r=30, t=80, b=30),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            font={'color': '#888'}
+        )
+
+        return fig
+
+    @rx.var
+    def tfd_batch_metrics(self) -> dict[str, str]:
+        """Get all TFD batch ML metrics as formatted percentage strings."""
+        metrics = self.batch_mlflow_metrics.get("Transaction Fraud Detection", {})
+        if not isinstance(metrics, dict):
+            return {}
+        # Return all metrics dynamically
+        result = {}
+        for key, value in metrics.items():
+            if key.startswith("metrics."):
+                metric_name = key.replace("metrics.", "")
+                # Format as percentage for classification metrics
+                if isinstance(value, (int, float)):
+                    result[metric_name] = f"{value * 100:.2f}%"
+                else:
+                    result[metric_name] = str(value)
+        return result
+
+    @rx.var
+    def tfd_batch_metric_names(self) -> list[str]:
+        """Get list of batch ML metric names for TFD."""
+        return list(self.tfd_batch_metrics.keys())
 
     # =========================================================================
     # Estimated Time of Arrival (ETA) computed vars
@@ -1735,3 +1970,406 @@ class State(rx.State):
                 }
         except Exception as e:
             print(f"Error randomizing ECCI form: {e}")
+
+    # =========================================================================
+    # Batch ML (Scikit-Learn) Event Handlers
+    # =========================================================================
+    @rx.event
+    def set_tab(self, tab_value: str):
+        """Set the active tab (incremental_ml or batch_ml)."""
+        self.tab_name = tab_value
+        # Reset YellowBrick state when switching tabs
+        if tab_value == "batch_ml":
+            self.yellowbrick_metric_name = ""
+            self.yellowbrick_image_base64 = ""
+            self.yellowbrick_error = ""
+
+    @rx.event
+    def set_yellowbrick_metric_type(self, metric_type: str):
+        """Set YellowBrick metric type and reset metric name."""
+        self.yellowbrick_metric_type = metric_type
+        self.yellowbrick_metric_name = ""
+        self.yellowbrick_image_base64 = ""
+        self.yellowbrick_error = ""
+
+    @rx.event
+    def set_yellowbrick_metric_name(self, metric_name: str):
+        """Set YellowBrick metric name."""
+        self.yellowbrick_metric_name = metric_name
+        if metric_name:
+            return State.fetch_yellowbrick_metric("Transaction Fraud Detection")
+
+    @rx.event(background=True)
+    async def fetch_yellowbrick_metric(self, project_name: str):
+        """Fetch YellowBrick visualization from FastAPI."""
+        metric_type = self.yellowbrick_metric_type
+        metric_name = self.yellowbrick_metric_name
+
+        if not metric_name:
+            async with self:
+                self.yellowbrick_image_base64 = ""
+                self.yellowbrick_error = ""
+            return
+
+        async with self:
+            self.yellowbrick_loading = True
+            self.yellowbrick_error = ""
+
+        try:
+            response = await httpx_client_post(
+                url=f"{SKLEARN_BASE_URL}/yellowbrick_metric",
+                json={
+                    "project_name": project_name,
+                    "metric_type": metric_type,
+                    "metric_name": metric_name
+                },
+                timeout=120.0  # YellowBrick can take time to generate
+            )
+            result = response.json()
+
+            if "error" in result:
+                async with self:
+                    self.yellowbrick_image_base64 = ""
+                    self.yellowbrick_error = result.get("error", "Unknown error")
+                    self.yellowbrick_loading = False
+            else:
+                async with self:
+                    self.yellowbrick_image_base64 = result.get("image_base64", "")
+                    self.yellowbrick_error = ""
+                    self.yellowbrick_loading = False
+        except Exception as e:
+            print(f"Error fetching YellowBrick metric: {e}")
+            async with self:
+                self.yellowbrick_image_base64 = ""
+                self.yellowbrick_error = str(e)
+                self.yellowbrick_loading = False
+
+    @rx.event(background=True)
+    async def toggle_batch_ml_training(self, project_name: str):
+        """Toggle batch ML training on/off using subprocess (like incremental ML)."""
+        import asyncio
+
+        async with self:
+            current_state = self.batch_ml_state.get(project_name, False)
+            model_key = self.batch_ml_model_key.get(project_name, "")
+
+        if current_state:
+            # Turn OFF - stop training
+            try:
+                response = await httpx_client_post(
+                    url=f"{SKLEARN_BASE_URL}/switch_model",
+                    json={"model_key": "none"},
+                    timeout=30.0
+                )
+                result = response.json()
+                print(f"Batch training stopped: {result}")
+
+                async with self:
+                    self.batch_ml_state = {
+                        **self.batch_ml_state,
+                        project_name: False
+                    }
+                    self.batch_training_loading = False
+
+                yield rx.toast.info(
+                    "Training Stopped",
+                    description=f"Batch training for {project_name} has been stopped",
+                    duration=3000
+                )
+            except Exception as e:
+                print(f"Error stopping batch training: {e}")
+                yield rx.toast.error("Failed to stop training", description=str(e)[:100])
+        else:
+            # Turn ON - start training and poll for completion
+            try:
+                response = await httpx_client_post(
+                    url=f"{SKLEARN_BASE_URL}/switch_model",
+                    json={"model_key": model_key},
+                    timeout=30.0
+                )
+                result = response.json()
+                print(f"Batch training started: {result}")
+
+                async with self:
+                    self.batch_ml_state = {
+                        **self.batch_ml_state,
+                        project_name: True
+                    }
+                    self.batch_training_loading = True
+                    self.batch_training_error = ""
+
+                yield rx.toast.info(
+                    "Training Started",
+                    description=f"Batch training for {project_name} has started",
+                    duration=3000
+                )
+
+                # Poll for completion
+                max_polls = 300  # 10 minutes max (2s interval)
+                for _ in range(max_polls):
+                    await asyncio.sleep(2)
+
+                    try:
+                        status_response = await httpx_client_get(
+                            url=f"{SKLEARN_BASE_URL}/batch_status",
+                            timeout=10.0
+                        )
+                        status_result = status_response.json()
+                        status = status_result.get("status", "")
+
+                        if status == "completed":
+                            # Training finished successfully
+                            async with self:
+                                self.batch_ml_state = {
+                                    **self.batch_ml_state,
+                                    project_name: False
+                                }
+                                self.batch_training_loading = False
+                                self.batch_model_available = {
+                                    **self.batch_model_available,
+                                    project_name: True
+                                }
+                                self.batch_last_trained = {
+                                    **self.batch_last_trained,
+                                    project_name: status_result.get("completed_at", "")
+                                }
+
+                            # Fetch metrics from MLflow
+                            await self.check_batch_model_available(project_name)
+
+                            yield rx.toast.success(
+                                "Training Complete",
+                                description=f"Model for {project_name} trained successfully",
+                                duration=5000
+                            )
+                            return
+
+                        elif status == "failed":
+                            # Training failed
+                            exit_code = status_result.get("exit_code", -1)
+                            async with self:
+                                self.batch_ml_state = {
+                                    **self.batch_ml_state,
+                                    project_name: False
+                                }
+                                self.batch_training_loading = False
+                                self.batch_training_error = f"Training failed (exit code: {exit_code})"
+
+                            yield rx.toast.error(
+                                "Training Failed",
+                                description=f"Exit code: {exit_code}",
+                                duration=5000
+                            )
+                            return
+
+                        elif status != "running":
+                            # Unknown status or idle - stop polling
+                            async with self:
+                                self.batch_ml_state = {
+                                    **self.batch_ml_state,
+                                    project_name: False
+                                }
+                                self.batch_training_loading = False
+                            return
+
+                    except Exception as poll_error:
+                        print(f"Error polling batch status: {poll_error}")
+                        # Continue polling on transient errors
+
+                # Timeout - training took too long
+                async with self:
+                    self.batch_ml_state = {
+                        **self.batch_ml_state,
+                        project_name: False
+                    }
+                    self.batch_training_loading = False
+                    self.batch_training_error = "Training timeout"
+
+                yield rx.toast.error(
+                    "Training Timeout",
+                    description="Training took too long",
+                    duration=5000
+                )
+
+            except Exception as e:
+                print(f"Error starting batch training: {e}")
+                async with self:
+                    self.batch_ml_state = {
+                        **self.batch_ml_state,
+                        project_name: False
+                    }
+                    self.batch_training_loading = False
+                    self.batch_training_error = str(e)
+                yield rx.toast.error(
+                    "Failed to Start Training",
+                    description=str(e)[:100],
+                    duration=5000
+                )
+
+    @rx.event(background=True)
+    async def check_batch_model_available(self, project_name: str):
+        """Check if a trained batch model is available in MLflow."""
+        try:
+            response = await httpx_client_post(
+                url=f"{SKLEARN_BASE_URL}/model_available",
+                json={
+                    "project_name": project_name,
+                    "model_name": "XGBClassifier"
+                },
+                timeout=30.0
+            )
+            result = response.json()
+
+            async with self:
+                self.batch_model_available = {
+                    **self.batch_model_available,
+                    project_name: result.get("available", False)
+                }
+                if result.get("available"):
+                    self.batch_last_trained = {
+                        **self.batch_last_trained,
+                        project_name: result.get("trained_at", "")
+                    }
+                    # Store metrics from model_available response
+                    metrics = result.get("metrics", {})
+                    if metrics:
+                        self.batch_training_metrics = {
+                            **self.batch_training_metrics,
+                            project_name: metrics
+                        }
+        except Exception as e:
+            print(f"Error checking batch model availability: {e}")
+            async with self:
+                self.batch_model_available = {
+                    **self.batch_model_available,
+                    project_name: False
+                }
+
+    @rx.event(background=True)
+    async def predict_batch_tfd(self):
+        """Make batch ML prediction for Transaction Fraud Detection using XGBClassifier."""
+        project_name = "Transaction Fraud Detection"
+        current_form = self.form_data.get(project_name, {})
+
+        # Combine date and time
+        timestamp = f"{current_form.get('timestamp_date', '')}T{current_form.get('timestamp_time', '')}:00.000000+00:00"
+
+        # Prepare request payload
+        payload = {
+            "project_name": project_name,
+            "model_name": "XGBClassifier",
+            "transaction_id": current_form.get("transaction_id", ""),
+            "user_id": current_form.get("user_id", ""),
+            "timestamp": timestamp,
+            "amount": float(current_form.get("amount", 0)),
+            "currency": current_form.get("currency", ""),
+            "merchant_id": current_form.get("merchant_id", ""),
+            "product_category": current_form.get("product_category", ""),
+            "transaction_type": current_form.get("transaction_type", ""),
+            "payment_method": current_form.get("payment_method", ""),
+            "location": {
+                "lat": float(current_form.get("lat", 0)),
+                "lon": float(current_form.get("lon", 0))
+            },
+            "ip_address": current_form.get("ip_address", ""),
+            "device_info": {
+                "os": current_form.get("os", ""),
+                "browser": current_form.get("browser", "")
+            },
+            "user_agent": current_form.get("user_agent", ""),
+            "account_age_days": int(current_form.get("account_age_days", 0)),
+            "cvv_provided": bool(current_form.get("cvv_provided", False)),
+            "billing_address_match": bool(current_form.get("billing_address_match", False))
+        }
+
+        try:
+            print(f"Making batch prediction with payload: {payload}")
+            response = await httpx_client_post(
+                url=f"{SKLEARN_BASE_URL}/predict",
+                json=payload,
+                timeout=30.0
+            )
+            result = response.json()
+            print(f"Batch prediction result: {result}")
+
+            async with self:
+                self.batch_prediction_results = {
+                    **self.batch_prediction_results,
+                    project_name: {
+                        "prediction": result.get("prediction"),
+                        "fraud_probability": result.get("fraud_probability"),
+                        "show": True
+                    }
+                }
+        except Exception as e:
+            print(f"Error making batch prediction: {e}")
+            async with self:
+                self.batch_prediction_results = {
+                    **self.batch_prediction_results,
+                    project_name: {
+                        "prediction": None,
+                        "fraud_probability": 0.0,
+                        "show": False
+                    }
+                }
+            yield rx.toast.error(
+                "Prediction failed",
+                description=str(e),
+                duration=5000
+            )
+
+    @rx.event(background=True)
+    async def get_batch_mlflow_metrics(self, project_name: str):
+        """Fetch batch ML MLflow metrics for a project."""
+        try:
+            response = await httpx_client_post(
+                url=f"{SKLEARN_BASE_URL}/mlflow_metrics",
+                json={
+                    "project_name": project_name,
+                    "model_name": "XGBClassifier"
+                },
+                timeout=60.0
+            )
+            async with self:
+                self.batch_mlflow_metrics = {
+                    **self.batch_mlflow_metrics,
+                    project_name: response.json()
+                }
+        except Exception as e:
+            print(f"Error fetching batch MLflow metrics: {e}")
+            async with self:
+                self.batch_mlflow_metrics = {
+                    **self.batch_mlflow_metrics,
+                    project_name: {}
+                }
+
+    @rx.event(background=True)
+    async def refresh_batch_mlflow_metrics(self, project_name: str):
+        """Force refresh batch ML MLflow metrics bypassing cache."""
+        try:
+            response = await httpx_client_post(
+                url=f"{SKLEARN_BASE_URL}/mlflow_metrics",
+                json={
+                    "project_name": project_name,
+                    "model_name": "XGBClassifier",
+                    "force_refresh": True
+                },
+                timeout=60.0
+            )
+            async with self:
+                self.batch_mlflow_metrics = {
+                    **self.batch_mlflow_metrics,
+                    project_name: response.json()
+                }
+            yield rx.toast.success(
+                "Metrics refreshed",
+                description=f"Latest batch ML metrics loaded for {project_name}",
+                duration=2000
+            )
+        except Exception as e:
+            print(f"Error refreshing batch MLflow metrics: {e}")
+            yield rx.toast.error(
+                "Refresh failed",
+                description=str(e),
+                duration=3000
+            )

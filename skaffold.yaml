@@ -57,6 +57,17 @@ build:
             dest: /app
           - src: "requirements.txt"
             dest: /app
+    # Sklearn Batch ML service
+    - image: coelho-realtime-sklearn
+      context: ./apps/sklearn
+      docker:
+        dockerfile: Dockerfile.sklearn
+      sync:
+        manual:
+          - src: "**/*.py"
+            dest: /app
+          - src: "requirements.txt"
+            dest: /app
     # Streamlit service (DEPRECATED)
     #- image: coelho-realtime-streamlit
     #  context: ./apps/streamlit
@@ -90,6 +101,7 @@ manifests:
           #streamlit.image: "{{.IMAGE_NAME_coelho_realtime_streamlit}}:{{.IMAGE_TAG_coelho_realtime_streamlit}}"
           reflex.image: "{{.IMAGE_NAME_coelho_realtime_reflex}}:{{.IMAGE_TAG_coelho_realtime_reflex}}"
           river.image: "{{.IMAGE_NAME_coelho_realtime_river}}:{{.IMAGE_TAG_coelho_realtime_river}}"
+          sklearn.image: "{{.IMAGE_NAME_coelho_realtime_sklearn}}:{{.IMAGE_TAG_coelho_realtime_sklearn}}"
 
 deploy:
   helm: {}
@@ -143,6 +155,13 @@ portForward:
     namespace: coelho-realtime
     port: 8002
     localPort: 8002
+    address: 0.0.0.0
+  # Sklearn Batch ML
+  - resourceType: service
+    resourceName: coelho-realtime-sklearn
+    namespace: coelho-realtime
+    port: 8003
+    localPort: 8003
     address: 0.0.0.0
   # Prometheus (service name truncated by Helm)
   - resourceType: service
@@ -234,6 +253,15 @@ profiles:
             infer:
               - "**/*.py"
               - "requirements.txt"
+        # Sklearn Batch ML - Use infer for automatic detection
+        - image: coelho-realtime-sklearn
+          context: ./apps/sklearn
+          docker:
+            dockerfile: Dockerfile.sklearn
+          sync:
+            infer:
+              - "**/*.py"
+              - "requirements.txt"
         ## Streamlit - Use infer for automatic detection  (DEPRECATED)
         #- image: coelho-realtime-streamlit
         #  context: ./apps/streamlit
@@ -258,5 +286,6 @@ profiles:
               #streamlit.image: "{{.IMAGE_NAME_coelho_realtime_streamlit}}:{{.IMAGE_TAG_coelho_realtime_streamlit}}"
               reflex.image: "{{.IMAGE_NAME_coelho_realtime_reflex}}:{{.IMAGE_TAG_coelho_realtime_reflex}}"
               river.image: "{{.IMAGE_NAME_coelho_realtime_river}}:{{.IMAGE_TAG_coelho_realtime_river}}"
+              sklearn.image: "{{.IMAGE_NAME_coelho_realtime_sklearn}}:{{.IMAGE_TAG_coelho_realtime_sklearn}}"
     deploy:
       helm: {}

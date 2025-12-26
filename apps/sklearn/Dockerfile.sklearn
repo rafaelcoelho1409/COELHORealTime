@@ -1,0 +1,14 @@
+FROM python:3.13-slim
+
+COPY . /app
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y procps && \
+    pip install uv --no-cache-dir && \
+    rm -rf /var/lib/apt/lists/*
+
+# Expose port for Sklearn Batch ML API
+EXPOSE 8003
+
+ENTRYPOINT ["/bin/bash", "/app/entrypoint.sh"]

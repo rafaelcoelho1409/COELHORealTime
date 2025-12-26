@@ -277,31 +277,12 @@ async def predict(payload: dict):
             raise HTTPException(
                 status_code = 500,
                 detail = f"Prediction failed: {e}")
+    # XGBClassifier (Batch ML) is now handled by the sklearn service (port 8003)
     elif model_name in ["XGBClassifier"]:
-        try:
-            # Use pre-loaded encoders
-            encoders = encoders_dict[project_name].get("sklearn", {})
-            if project_name == "Transaction Fraud Detection":
-                processed_x = process_sample(x, ..., project_name, library="sklearn")
-                preprocessor = encoders.get("preprocessor")
-                if preprocessor is None:
-                    raise HTTPException(
-                        status_code = 503,
-                        detail = "Preprocessor not loaded")
-                processed_x = pd.DataFrame({k: [v] for k, v in processed_x.items()})
-                processed_x = preprocessor.transform(processed_x)
-                y_pred_proba = model.predict_proba(processed_x).tolist()[0]
-                fraud_probability = y_pred_proba[1]
-                binary_prediction = 1 if fraud_probability >= 0.5 else 0
-                return {
-                    "fraud_probability": fraud_probability,
-                    "prediction": binary_prediction,
-                }
-        except Exception as e:
-            print(f"Error during prediction: {e}", file=sys.stderr)
-            raise HTTPException(
-                status_code = 500,
-                detail = f"Prediction failed: {e}")
+        raise HTTPException(
+            status_code = 400,
+            detail = "XGBClassifier (Batch ML) is handled by the sklearn service at port 8003"
+        )
     raise HTTPException(
         status_code = 400,
         detail = f"Unknown model: {model_name}")

@@ -314,6 +314,43 @@ river:
       failureThreshold: 3
 
 
+sklearn:
+  image: coelho-realtime-sklearn:latest
+  imagePullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "4Gi"
+      cpu: "2000m"
+  portsSettings:
+    ports:
+      - name: http
+        port: 8003
+        targetPort: 8003
+        nodePort: 30007
+        protocol: TCP
+    type: LoadBalancer
+  livenessProbeSettings:
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: 8003
+      initialDelaySeconds: 120
+      periodSeconds: 30
+      failureThreshold: 5
+  readinessProbeSettings:
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: 8003
+      initialDelaySeconds: 60
+      periodSeconds: 10
+      failureThreshold: 3
+
+
 # Redis configuration (Bitnami Redis chart)
 # Used by Reflex for state management in production
 redis:
