@@ -4,6 +4,35 @@
 
 This document provides a comprehensive analysis of the three Kafka producers in this project for open-source quality assessment.
 
+## Architecture
+
+The producers run as a separate Kubernetes deployment, connecting to the Kafka broker as clients:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Bitnami Kafka Helm Chart (coelho-realtime-kafka)              │
+│  ├── KRaft mode (no Zookeeper)                                 │
+│  ├── Port 9092 (client listener) ◄── Producers connect here   │
+│  ├── Port 5555 (JMX metrics for Prometheus)                    │
+│  └── Persistent storage (2Gi)                                  │
+└─────────────────────────────────────────────────────────────────┘
+                              ▲
+                              │ KAFKA_HOST:9092
+                              │
+┌─────────────────────────────────────────────────────────────────┐
+│  kafka-producers (python:3.13-slim)                            │
+│  ├── transaction_fraud_detection.py                            │
+│  ├── estimated_time_of_arrival.py                              │
+│  └── e_commerce_customer_interactions.py                       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Key benefits of this separation:**
+- Kafka broker managed by Bitnami (security updates, proper metrics)
+- Smaller producer image (~150MB vs ~800MB+)
+- Independent scaling of producers and broker
+- JMX metrics available for Prometheus/Grafana monitoring
+
 ---
 
 ## 1. Transaction Fraud Detection (`transaction_fraud_detection.py`)
@@ -106,7 +135,7 @@ This document provides a comprehensive analysis of the three Kafka producers in 
 
 5. **Add configurable schemas** - Allow users to select which fields to include/exclude for their use cases.
 
-6. **Add metrics endpoint** - Expose Prometheus metrics (messages/sec, errors) for monitoring in production demos.
+6. ~~**Add metrics endpoint**~~ ✅ **DONE** - Kafka broker now exposes JMX metrics via Bitnami Helm chart (port 5555), with ServiceMonitor for Prometheus autodiscovery.
 
 ---
 

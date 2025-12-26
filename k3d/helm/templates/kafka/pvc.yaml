@@ -1,4 +1,0 @@
-{{- $appName := "kafka" -}}
-
-apiVersion: v1
-{{- include "coelho-realtime.PVCSettings" (dict "appName" $appName "root" .) | nindent 0 }}

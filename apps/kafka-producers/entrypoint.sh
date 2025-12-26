@@ -1,17 +1,28 @@
 #!/bin/bash
 
-# Start Kafka in background using original entrypoint
-/opt/bitnami/scripts/kafka/entrypoint.sh /opt/bitnami/scripts/kafka/run.sh &
+# Kafka Producers Entrypoint
+# Connects to Kafka broker (Bitnami Helm chart) running in the cluster
 
-# Wait for Kafka to be ready
-echo "Waiting for Kafka to start..."
-while ! nc -z localhost 9092; do
-  sleep 0.1
+# Create and activate virtual environment
+rm -rf .venv
+uv venv --python 3.13
+source .venv/bin/activate
+
+# Install dependencies
+uv pip install -r requirements.txt
+
+# Get Kafka host from environment variable (set by Helm ConfigMap)
+KAFKA_BOOTSTRAP="${KAFKA_HOST:-coelho-realtime-kafka}:9092"
+
+echo "Waiting for Kafka broker at ${KAFKA_BOOTSTRAP}..."
+while ! nc -z ${KAFKA_HOST:-coelho-realtime-kafka} 9092; do
+  echo "Kafka not ready, retrying in 5 seconds..."
+  sleep 5
 done
 
 echo "Kafka is ready. Starting Python producers..."
 
-# Start Python producers with unbuffered output redirected to main stdout
+# Start Python producers with unbuffered output
 # Using PYTHONUNBUFFERED=1 ensures print statements appear immediately
 PYTHONUNBUFFERED=1 python3 transaction_fraud_detection.py \
   --fraud-probability 0.01 \

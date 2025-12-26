@@ -51,49 +51,100 @@ fastapi:
       failureThreshold: 3
 
 
+# Bitnami Kafka chart configuration (https://github.com/bitnami/charts/tree/main/bitnami/kafka)
+# KRaft mode enabled by default (no Zookeeper required)
+# NOTE: Using bitnamilegacy registry since mainline bitnami images were restructured in Aug 2025
+# See: https://github.com/bitnami/charts/issues/35164
 kafka:
-  image: coelho-realtime-kafka:latest
+  enabled: true
+  # Use legacy registry (mainline bitnami no longer has these images after Aug 2025)
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/kafka
+    tag: "4.0.0-debian-12-r10"
+  # Allow legacy images (required for bitnamilegacy registry)
+  global:
+    security:
+      allowInsecureImages: true
+  # Volume permissions init container (uses os-shell)
+  defaultInitContainers:
+    volumePermissions:
+      image:
+        registry: docker.io
+        repository: bitnamilegacy/os-shell
+        tag: "12-debian-12-r51"
+  # Single-node KRaft mode for local development
+  # Controller nodes act as both controller and broker
+  controller:
+    replicaCount: 1
+    persistence:
+      enabled: true
+      size: 2Gi
+      storageClass: local-path
+    resources:
+      requests:
+        memory: "1Gi"
+        cpu: "500m"
+      limits:
+        memory: "2Gi"
+        cpu: "1000m"
+  # No separate broker nodes - controller handles everything
+  broker:
+    replicaCount: 0
+  # Listener configuration - PLAINTEXT for local development (no auth)
+  listeners:
+    client:
+      protocol: PLAINTEXT
+    controller:
+      protocol: PLAINTEXT
+    interbroker:
+      protocol: PLAINTEXT
+  # Disable SASL authentication for local development
+  sasl:
+    client:
+      users: []
+      passwords: ""
+  # Kafka metrics configuration
+  # JMX exporter disabled due to compatibility issues with Kafka 4.0
+  # TODO: Re-enable when JMX exporter supports Kafka 4.0 or use alternative metrics
+  metrics:
+    jmx:
+      enabled: false
+  # Kafka service configuration
+  service:
+    type: ClusterIP
+    ports:
+      client: 9092
+      controller: 9093
+      interbroker: 9094
+  # Extra environment variables
+  extraEnvVars:
+    - name: KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE
+      value: "true"
+    - name: KAFKA_CFG_NUM_PARTITIONS
+      value: "3"
+    - name: KAFKA_CFG_DEFAULT_REPLICATION_FACTOR
+      value: "1"
+  # Log configuration
+  log:
+    dirs: /bitnami/kafka/data
+    retentionHours: 168
+    retentionBytes: "1073741824"
+
+
+# Kafka Producers - Python data generators (separate from Kafka broker)
+kafka-producers:
+  enabled: true
+  image: coelho-realtime-kafka-producers:latest
   imagePullPolicy: IfNotPresent
   replicas: 1
   resources:
     requests:
-      memory: "1Gi"
-      cpu: "500m"
+      memory: "256Mi"
+      cpu: "100m"
     limits:
-      memory: "2Gi"
-      cpu: "1000m"
-  portsSettings:
-    ports:
-      - name: external
-        port: 9092
-        targetPort: 9092
-        nodePort: 30001
-        protocol: TCP
-      - name: internal
-        port: 29092
-        targetPort: 29092
-        protocol: TCP
-      - name: controller
-        port: 9093
-        targetPort: 9093
-        protocol: TCP
-    type: LoadBalancer #ClusterIP
-  storageSize: 2Gi
-  storageClassName: local-path
-  livenessProbeSettings:
-    livenessProbe:
-      tcpSocket:
-        port: 29092
-      initialDelaySeconds: 90
-      periodSeconds: 30
-      failureThreshold: 5
-  readinessProbeSettings:
-    readinessProbe:
-      tcpSocket:
-        port: 29092
-      initialDelaySeconds: 60
-      periodSeconds: 10
-      failureThreshold: 6
+      memory: "512Mi"
+      cpu: "250m"
 
 
 # DEPRECATED: Streamlit has been replaced by Reflex
@@ -291,6 +342,19 @@ redis:
     # Set max memory and eviction policy
     maxmemory 256mb
     maxmemory-policy allkeys-lru
+  # Prometheus metrics exporter
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      namespace: coelho-realtime
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
 
 
 # MinIO Object Storage (S3-compatible) - Official MinIO Chart (https://helm.min.io/)
@@ -331,11 +395,13 @@ minio:
       memory: 512Mi
   # Replicas (standalone mode = 1)
   replicas: 1
-  # Default buckets to create on startup
-  buckets:
-    - name: mlflow-artifacts
-      policy: none
-      purge: false
+  # Disable ALL post-install job triggers (causes timing issues with ConfigMap)
+  # Bucket will be created by our custom bucket-job.yaml instead
+  buckets: []
+  users: []
+  policies: []
+  customCommands: []
+  svcaccts: []
   # Service account
   serviceAccount:
     create: true
@@ -345,6 +411,11 @@ minio:
     enabled: false
   consoleIngress:
     enabled: false
+  # Prometheus metrics
+  metrics:
+    serviceMonitor:
+      enabled: true
+      namespace: coelho-realtime
 
 
 # PostgreSQL Database (Bitnami PostgreSQL chart)
@@ -377,6 +448,19 @@ postgresql:
     enabled: true
   # Disable replication for local development
   architecture: standalone
+  # Prometheus metrics exporter
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      namespace: coelho-realtime
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
 
 
 # kube-prometheus-stack configuration (Prometheus + Grafana + Alertmanager)
@@ -404,6 +488,9 @@ kube-prometheus-stack:
   prometheus:
     enabled: true
     prometheusSpec:
+      # Add cluster label to all metrics (required for kube-prometheus-stack dashboards)
+      externalLabels:
+        cluster: coelho-realtime
       # Scrape interval and evaluation
       scrapeInterval: 30s
       evaluationInterval: 30s
@@ -517,7 +604,8 @@ kube-prometheus-stack:
         searchNamespace: ALL
       datasources:
         enabled: true
-        defaultDatasourceEnabled: true
+        # Disable default datasource - we provision our own below
+        defaultDatasourceEnabled: false
     # Datasources provisioned directly (not via sidecar) to avoid timing issues
     datasources:
       datasources.yaml:

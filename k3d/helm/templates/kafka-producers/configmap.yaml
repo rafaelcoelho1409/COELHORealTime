@@ -1,0 +1,8 @@
+{{- $appName := "kafka-producers" -}}
+{{- $appConfig := index $.Values $appName }}
+{{- if $appConfig.enabled }}
+apiVersion: v1
+{{- include "coelho-realtime.ConfigMapSettings" (dict "appName" $appName "root" .) | nindent 0 }}
+data:
+  {{- include "coelho-realtime.commonEnvVars" . | nindent 2 }}
+{{- end }}

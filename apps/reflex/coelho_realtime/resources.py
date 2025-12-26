@@ -323,6 +323,22 @@ def coelho_realtime_navbar() -> rx.Component:
                                     is_external = True
                                 )
                             ),
+                            rx.menu.item(
+                                rx.link(
+                                    rx.hstack(
+                                        rx.image(
+                                            src = "https://cdn.jsdelivr.net/gh/devicons/devicon/icons/prometheus/prometheus-original.svg",
+                                            width = "16px",
+                                            height = "16px"
+                                        ),
+                                        rx.text("Alertmanager", size = "3", weight = "medium"),
+                                        spacing = "2",
+                                        align_items = "center"
+                                    ),
+                                    href = "http://localhost:9094",
+                                    is_external = True
+                                )
+                            ),
                             size = "2"
                         )
                     ),

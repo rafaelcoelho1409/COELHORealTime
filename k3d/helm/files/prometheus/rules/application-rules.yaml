@@ -63,12 +63,12 @@ groups:
           summary: "River predictions are slow"
           description: "River p99 prediction latency is {{ $value }}s (threshold: 0.5s)."
 
-  # Kafka Data Pipeline Alerts
+  # Kafka Data Pipeline Alerts (JMX Exporter metrics)
   - name: kafka.rules
     interval: 30s
     rules:
       - alert: KafkaDown
-        expr: up{job="kafka"} == 0
+        expr: up{job=~".*kafka.*"} == 0
         for: 1m
         labels:
           severity: critical
@@ -76,23 +76,59 @@ groups:
           summary: "Kafka broker is down"
           description: "Kafka instance {{ $labels.instance }} has been down for more than 1 minute."
 
-      - alert: KafkaConsumerLag
-        expr: kafka_consumer_group_lag > 1000
+      - alert: KafkaJvmMemoryHigh
+        expr: (jvm_memory_bytes_used{area="heap",job=~".*kafka.*"} / jvm_memory_bytes_max{area="heap",job=~".*kafka.*"}) * 100 > 80
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "Kafka consumer lag is high"
-          description: "Consumer group {{ $labels.group }} has lag of {{ $value }} messages."
+          summary: "Kafka JVM heap memory usage is high"
+          description: "Kafka broker {{ $labels.instance }} heap usage is {{ $value | printf \"%.1f\" }}%."
+
+      - alert: KafkaNoActiveController
+        expr: kafka_controller_kafkacontroller_activecontrollercount{job=~".*kafka.*"} != 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kafka has no active controller"
+          description: "Kafka cluster has {{ $value }} active controllers (expected: 1)."
 
       - alert: KafkaUnderReplicatedPartitions
-        expr: kafka_topic_partition_under_replicated_partition > 0
+        expr: kafka_server_replicamanager_underreplicatedpartitions{job=~".*kafka.*"} > 0
         for: 5m
         labels:
           severity: critical
         annotations:
           summary: "Kafka has under-replicated partitions"
-          description: "Topic {{ $labels.topic }} has {{ $value }} under-replicated partitions."
+          description: "Kafka broker {{ $labels.instance }} has {{ $value }} under-replicated partitions."
+
+      - alert: KafkaOfflinePartitions
+        expr: kafka_controller_kafkacontroller_offlinepartitionscount{job=~".*kafka.*"} > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kafka has offline partitions"
+          description: "Kafka cluster has {{ $value }} offline partitions."
+
+      - alert: KafkaNetworkProcessorIdleHigh
+        expr: kafka_network_socketserver_networkprocessoravgidlepercent{job=~".*kafka.*"} < 0.3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka network processors are busy"
+          description: "Kafka network processor idle is {{ $value | printf \"%.1f\" }}% (threshold: 30%)."
+
+      - alert: KafkaRequestHandlerIdleLow
+        expr: kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent_total{job=~".*kafka.*"} < 0.3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka request handlers are busy"
+          description: "Kafka request handler idle is {{ $value | printf \"%.1f\" }}% (threshold: 30%)."
 
   # MLflow Tracking Server Alerts
   - name: mlflow.rules

@@ -22,17 +22,17 @@ build:
             dest: /app
           - src: "**/*.yml"
             dest: /app
-    # Kafka service
-    - image: coelho-realtime-kafka
-      context: ./apps/kafka
+    # Kafka Producers (Python data generators)
+    - image: coelho-realtime-kafka-producers
+      context: ./apps/kafka-producers
       docker:
-        dockerfile: Dockerfile.kafka
+        dockerfile: Dockerfile.kafka-producers
       sync:
         manual:
           - src: "**/*.py"
-            dest: /producer
+            dest: /app
           - src: "requirements.txt"
-            dest: /producer
+            dest: /app
     # Reflex service
     - image: coelho-realtime-reflex
       context: ./apps/reflex
@@ -86,7 +86,7 @@ manifests:
         setValueTemplates:
           # Skaffold will automatically replace these with built image tags
           fastapi.image: "{{.IMAGE_NAME_coelho_realtime_fastapi}}:{{.IMAGE_TAG_coelho_realtime_fastapi}}"
-          kafka.image: "{{.IMAGE_NAME_coelho_realtime_kafka}}:{{.IMAGE_TAG_coelho_realtime_kafka}}"
+          kafka-producers.image: "{{.IMAGE_NAME_coelho_realtime_kafka_producers}}:{{.IMAGE_TAG_coelho_realtime_kafka_producers}}"
           #streamlit.image: "{{.IMAGE_NAME_coelho_realtime_streamlit}}:{{.IMAGE_TAG_coelho_realtime_streamlit}}"
           reflex.image: "{{.IMAGE_NAME_coelho_realtime_reflex}}:{{.IMAGE_TAG_coelho_realtime_reflex}}"
           river.image: "{{.IMAGE_NAME_coelho_realtime_river}}:{{.IMAGE_TAG_coelho_realtime_river}}"
@@ -165,6 +165,20 @@ portForward:
     port: 9094
     localPort: 9094
     address: 0.0.0.0
+  # Kafka client (for external access/testing)
+  - resourceType: service
+    resourceName: coelho-realtime-kafka
+    namespace: coelho-realtime
+    port: 9092
+    localPort: 9092
+    address: 0.0.0.0
+  # Kafka JMX metrics disabled (JMX exporter incompatible with Kafka 4.0)
+  # - resourceType: service
+  #   resourceName: coelho-realtime-kafka-jmx-metrics
+  #   namespace: coelho-realtime
+  #   port: 5556
+  #   localPort: 5556
+  #   address: 0.0.0.0
   #- resourceType: service
   #  resourceName: coelho-realtime-streamlit
   #  namespace: coelho-realtime
@@ -190,17 +204,17 @@ profiles:
               - "**/*.py"
               - "requirements.txt"
               - "**/*.json"
-        # Kafka - Use manual sync to /producer directory
-        - image: coelho-realtime-kafka
-          context: ./apps/kafka
+        # Kafka Producers - Use manual sync to /app directory
+        - image: coelho-realtime-kafka-producers
+          context: ./apps/kafka-producers
           docker:
-            dockerfile: Dockerfile.kafka
+            dockerfile: Dockerfile.kafka-producers
           sync:
             manual:
               - src: "**/*.py"
-                dest: /producer
+                dest: /app
               - src: "requirements.txt"
-                dest: /producer
+                dest: /app
         # Reflex - Use infer for automatic detection
         - image: coelho-realtime-reflex
           context: ./apps/reflex
@@ -240,7 +254,7 @@ profiles:
             createNamespace: true
             setValueTemplates:
               fastapi.image: "{{.IMAGE_NAME_coelho_realtime_fastapi}}:{{.IMAGE_TAG_coelho_realtime_fastapi}}"
-              kafka.image: "{{.IMAGE_NAME_coelho_realtime_kafka}}:{{.IMAGE_TAG_coelho_realtime_kafka}}"
+              kafka-producers.image: "{{.IMAGE_NAME_coelho_realtime_kafka_producers}}:{{.IMAGE_TAG_coelho_realtime_kafka_producers}}"
               #streamlit.image: "{{.IMAGE_NAME_coelho_realtime_streamlit}}:{{.IMAGE_TAG_coelho_realtime_streamlit}}"
               reflex.image: "{{.IMAGE_NAME_coelho_realtime_reflex}}:{{.IMAGE_TAG_coelho_realtime_reflex}}"
               river.image: "{{.IMAGE_NAME_coelho_realtime_river}}:{{.IMAGE_TAG_coelho_realtime_river}}"

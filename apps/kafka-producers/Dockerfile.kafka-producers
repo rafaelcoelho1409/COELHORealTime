@@ -1,0 +1,14 @@
+# Kafka Producers - Python data generators
+# Connects to Kafka broker (Bitnami Helm chart) as a client
+FROM python:3.13-slim
+
+COPY . /app
+
+WORKDIR /app
+
+# Install netcat for Kafka readiness check and UV for package management
+RUN apt-get update && apt-get install -y --no-install-recommends netcat-openbsd && \
+    rm -rf /var/lib/apt/lists/* && \
+    pip install uv --no-cache-dir
+
+ENTRYPOINT ["/bin/bash", "/app/entrypoint.sh"]

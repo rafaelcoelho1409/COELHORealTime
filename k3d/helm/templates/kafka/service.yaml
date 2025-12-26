@@ -1,5 +1,0 @@
-{{- $appName := "kafka" -}}
-
-apiVersion: v1
-{{- include "coelho-realtime.ServiceSettings" (dict "appName" $appName "root" .) | nindent 0 }}
-{{- toYaml (index .Values $appName "portsSettings") | nindent 2}}

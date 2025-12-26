@@ -1,23 +1,9 @@
-{{/*
-Kafka ServiceMonitor - DISABLED
-
-The current custom Kafka Docker image (bitnamilegacy/kafka:3.5.1) does not expose
-a /metrics HTTP endpoint. Prometheus tries to scrape port 9092 which speaks
-Kafka binary protocol, not HTTP, causing "Invalid receive" errors.
-
-To enable Kafka metrics, either:
-1. Migrate to Bitnami Kafka Helm chart (has built-in JMX exporter) - see TODO.md
-2. Add a JMX exporter sidecar to the current deployment
-3. Deploy kafka-exporter as a separate service
-
-Uncomment below when Kafka has proper metrics endpoint exposed.
-*/}}
-{{- if false }}
-{{- if index .Values "kube-prometheus-stack" "enabled" }}
+{{- if and (index .Values "kafka" "enabled") (index .Values "kube-prometheus-stack" "enabled") (index .Values "kafka" "metrics" "jmx" "enabled") }}
+# Kafka JMX ServiceMonitor - only created when JMX exporter is enabled
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: {{ .Release.Name }}-kafka
+  name: {{ .Release.Name }}-kafka-jmx
   namespace: {{ .Release.Namespace }}
   labels:
     app: coelho-realtime-kafka
@@ -25,15 +11,15 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app: coelho-realtime-kafka
+      app.kubernetes.io/name: kafka
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: metrics
   namespaceSelector:
     matchNames:
       - {{ .Release.Namespace }}
   endpoints:
-    # Kafka JMX metrics (requires JMX exporter sidecar)
-    - port: metrics
+    - port: http-metrics
       interval: 30s
       path: /metrics
       scheme: http
-{{- end }}
 {{- end }}
