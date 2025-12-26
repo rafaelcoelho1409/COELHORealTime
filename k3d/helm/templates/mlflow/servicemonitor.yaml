@@ -1,3 +1,17 @@
+{{/*
+MLflow ServiceMonitor - DISABLED
+
+MLflow does not expose a /metrics endpoint by default.
+Prometheus scraping returns 404 NOT FOUND.
+
+To enable MLflow metrics, options:
+1. Use mlflow-prometheus-exporter (https://github.com/azaurus1/mlflow-prometheus-exporter)
+2. Add custom metrics endpoint to MLflow server
+3. Use Gunicorn with prometheus-flask-exporter
+
+Uncomment below when MLflow has metrics endpoint.
+*/}}
+{{- if false }}
 {{- if index .Values "kube-prometheus-stack" "enabled" }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
@@ -19,4 +33,5 @@ spec:
       interval: 30s
       path: /metrics
       scheme: http
+{{- end }}
 {{- end }}

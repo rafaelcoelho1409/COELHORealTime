@@ -1,3 +1,17 @@
+{{/*
+Reflex ServiceMonitor - DISABLED
+
+Reflex does not expose a /metrics endpoint by default.
+Prometheus scraping returns 404 Not Found.
+
+To enable Reflex metrics, add prometheus instrumentation:
+1. Add prometheus-fastapi-instrumentator to Reflex backend
+2. Or use starlette-prometheus middleware
+3. Expose /metrics endpoint in the Reflex app
+
+Uncomment below when Reflex has metrics endpoint.
+*/}}
+{{- if false }}
 {{- if index .Values "kube-prometheus-stack" "enabled" }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
@@ -19,4 +33,5 @@ spec:
       interval: 30s
       path: /metrics
       scheme: http
+{{- end }}
 {{- end }}
