@@ -184,6 +184,23 @@ class State(rx.State):
         "Estimated Time of Arrival": {},
         "E-Commerce Customer Interactions": {}
     }
+    # Incremental ML model availability (checked from MLflow)
+    incremental_model_available: dict = {
+        "Transaction Fraud Detection": False,
+        "Estimated Time of Arrival": False,
+        "E-Commerce Customer Interactions": False
+    }
+    incremental_model_last_trained: dict = {
+        "Transaction Fraud Detection": "",
+        "Estimated Time of Arrival": "",
+        "E-Commerce Customer Interactions": ""
+    }
+    # MLflow experiment URLs for each project
+    mlflow_experiment_url: dict = {
+        "Transaction Fraud Detection": "",
+        "Estimated Time of Arrival": "",
+        "E-Commerce Customer Interactions": ""
+    }
 
     ##==========================================================================
     ## VARS
@@ -1046,6 +1063,9 @@ class State(rx.State):
                     self.activated_model = ""
                     self.model_switch_message = "Model stopped"
                     self.ml_training_enabled = False
+                # Re-check model availability after training stopped (model may have been saved)
+                yield State.check_incremental_model_available(project_name)
+                yield State.get_mlflow_metrics(project_name)
                 yield rx.toast.info(
                     "Real-time ML training stopped",
                     description = f"Stopped processing for {project_name}",
@@ -2271,6 +2291,53 @@ class State(rx.State):
             async with self:
                 self.batch_model_available = {
                     **self.batch_model_available,
+                    project_name: False
+                }
+
+    # Incremental model name mapping for MLflow
+    _incremental_model_names: dict = {
+        "Transaction Fraud Detection": "ARFClassifier",
+        "Estimated Time of Arrival": "ARFRegressor",
+        "E-Commerce Customer Interactions": "DBSTREAM",
+    }
+
+    @rx.event(background=True)
+    async def check_incremental_model_available(self, project_name: str):
+        """Check if a trained incremental (River) model is available in MLflow."""
+        model_name = self._incremental_model_names.get(project_name, "ARFClassifier")
+        try:
+            response = await httpx_client_post(
+                url=f"{RIVER_BASE_URL}/model_available",
+                json={
+                    "project_name": project_name,
+                    "model_name": model_name
+                },
+                timeout=30.0
+            )
+            result = response.json()
+
+            async with self:
+                self.incremental_model_available = {
+                    **self.incremental_model_available,
+                    project_name: result.get("available", False)
+                }
+                if result.get("available"):
+                    self.incremental_model_last_trained = {
+                        **self.incremental_model_last_trained,
+                        project_name: result.get("trained_at", "")
+                    }
+                # Store experiment URL (available even if no model trained yet)
+                experiment_url = result.get("experiment_url", "")
+                if experiment_url:
+                    self.mlflow_experiment_url = {
+                        **self.mlflow_experiment_url,
+                        project_name: experiment_url
+                    }
+        except Exception as e:
+            print(f"Error checking incremental model availability: {e}")
+            async with self:
+                self.incremental_model_available = {
+                    **self.incremental_model_available,
                     project_name: False
                 }
 

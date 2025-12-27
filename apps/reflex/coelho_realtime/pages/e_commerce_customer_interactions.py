@@ -26,10 +26,11 @@ def index() -> rx.Component:
             padding = "2em",
             width = "100%"
         ),
-        # On mount: set page context, load sample data, and fetch cluster analytics
+        # On mount: set page context, load sample data, check model availability, and fetch cluster analytics
         on_mount = [
             State.set_current_page_model(MODEL_KEY),
             State.update_sample(PROJECT_NAME),
+            State.check_incremental_model_available(PROJECT_NAME),
             State.fetch_ecci_cluster_counts,
             State.fetch_ecci_cluster_feature_counts,
         ],

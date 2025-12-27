@@ -280,6 +280,11 @@ class MLflowMetricsRequest(BaseModel):
     force_refresh: bool = False
 
 
+class ModelAvailabilityRequest(BaseModel):
+    project_name: str
+    model_name: str
+
+
 # =============================================================================
 # MLflow Metrics Cache
 # =============================================================================
@@ -893,3 +898,64 @@ async def get_mlflow_metrics(request: MLflowMetricsRequest):
             status_code=500,
             detail=f"Failed to fetch MLflow metrics: {str(e)}"
         )
+
+
+@app.post("/model_available")
+async def check_model_available(request: ModelAvailabilityRequest):
+    """Check if a trained River model is available in MLflow."""
+    project_name = request.project_name
+    model_name = request.model_name
+
+    try:
+        experiment = mlflow.get_experiment_by_name(project_name)
+        if experiment is None:
+            return {
+                "available": False,
+                "message": f"No experiment found for {project_name}",
+                "experiment_url": None
+            }
+
+        experiment_url = f"http://localhost:5001/#/experiments/{experiment.experiment_id}"
+
+        # Fetch runs and filter in Python (same approach as _sync_get_mlflow_metrics)
+        runs_df = mlflow.search_runs(
+            experiment_ids=[experiment.experiment_id],
+            max_results=100,
+            order_by=["start_time DESC"]
+        )
+
+        if runs_df.empty:
+            return {
+                "available": False,
+                "message": f"No runs found in experiment {project_name}",
+                "experiment_id": experiment.experiment_id,
+                "experiment_url": experiment_url
+            }
+
+        # Filter by model name tag
+        filtered_runs = runs_df[runs_df["tags.mlflow.runName"] == model_name]
+
+        if filtered_runs.empty:
+            return {
+                "available": False,
+                "message": f"No trained model found for {model_name}",
+                "experiment_id": experiment.experiment_id,
+                "experiment_url": experiment_url
+            }
+
+        run = filtered_runs.iloc[0]
+        return {
+            "available": True,
+            "run_id": run["run_id"],
+            "trained_at": run["start_time"].isoformat() if pd.notna(run["start_time"]) else None,
+            "experiment_id": experiment.experiment_id,
+            "experiment_url": experiment_url,
+            "metrics": {k.replace("metrics.", ""): v for k, v in run.items() if k.startswith("metrics.")}
+        }
+    except Exception as e:
+        print(f"Error checking model availability: {e}", file=sys.stderr)
+        return {
+            "available": False,
+            "message": f"Error checking model: {str(e)}",
+            "experiment_url": None
+        }

@@ -39,51 +39,111 @@ def ml_training_switch(model_key: str, project_name: str) -> rx.Component:
     When disabled or on page leave, stops the consumer.
     """
     return rx.card(
-        rx.hstack(
-            rx.vstack(
-                rx.hstack(
-                    rx.icon("activity", size = 18, color = rx.cond(
-                        State.ml_training_enabled,
-                        rx.color("green", 9),
-                        rx.color("gray", 9)
-                    )),
+        rx.vstack(
+            rx.hstack(
+                rx.vstack(
+                    rx.hstack(
+                        rx.icon("activity", size = 18, color = rx.cond(
+                            State.ml_training_enabled,
+                            rx.color("green", 9),
+                            rx.color("gray", 9)
+                        )),
+                        rx.text(
+                            "Real-time ML Training",
+                            size = "3",
+                            weight = "medium"
+                        ),
+                        spacing = "2",
+                        align_items = "center"
+                    ),
                     rx.text(
-                        "Real-time ML Training",
-                        size = "3",
-                        weight = "medium"
+                        rx.cond(
+                            State.ml_training_enabled,
+                            "Processing live Kafka stream data",
+                            "Toggle to start processing live data"
+                        ),
+                        size = "1",
+                        color = "gray"
                     ),
-                    spacing = "2",
-                    align_items = "center"
+                    spacing = "1",
+                    align_items = "start"
                 ),
-                rx.text(
-                    rx.cond(
-                        State.ml_training_enabled,
-                        "Processing live Kafka stream data",
-                        "Toggle to start processing live data"
+                rx.switch(
+                    checked = State.ml_training_enabled,
+                    on_change = lambda checked: State.toggle_ml_training(
+                        checked,
+                        model_key,
+                        project_name
                     ),
-                    size = "1",
-                    color = "gray"
+                    size = "3"
                 ),
-                rx.text(
-                    f"Incremental ML model: {State.incremental_ml_model_name[project_name]}",
-                    size = "1",
-                    color = "gray",
-                    weight = "medium"
-                ),
-                spacing = "1",
-                align_items = "start"
+                justify = "between",
+                align_items = "center",
+                width = "100%"
             ),
-            rx.switch(
-                checked = State.ml_training_enabled,
-                on_change = lambda checked: State.toggle_ml_training(
-                    checked,
-                    model_key,
-                    project_name
+            rx.divider(size = "4", width = "100%"),
+            # Model name badge and MLflow button
+            rx.hstack(
+                rx.badge(
+                    rx.hstack(
+                        rx.icon("brain", size = 12),
+                        rx.text(State.incremental_ml_model_name[project_name], size = "1"),
+                        spacing = "1",
+                        align_items = "center"
+                    ),
+                    color_scheme = "blue",
+                    variant = "soft",
+                    size = "1"
                 ),
-                size = "3"
+                # MLflow button - links to experiment (fills remaining space)
+                rx.cond(
+                    State.mlflow_experiment_url[project_name] != "",
+                    rx.link(
+                        rx.button(
+                            rx.hstack(
+                                rx.image(
+                                    src = "https://cdn.simpleicons.org/mlflow/0194E2",
+                                    width = "14px",
+                                    height = "14px"
+                                ),
+                                rx.text("MLflow", size = "1"),
+                                spacing = "1",
+                                align_items = "center"
+                            ),
+                            size = "1",
+                            variant = "soft",
+                            color_scheme = "cyan",
+                            width = "100%"
+                        ),
+                        href = State.mlflow_experiment_url[project_name],
+                        is_external = True,
+                        flex = "1"
+                    ),
+                    rx.button(
+                        rx.hstack(
+                            rx.image(
+                                src = "https://cdn.simpleicons.org/mlflow/0194E2",
+                                width = "14px",
+                                height = "14px",
+                                opacity = "0.5"
+                            ),
+                            rx.text("MLflow", size = "1"),
+                            spacing = "1",
+                            align_items = "center"
+                        ),
+                        size = "1",
+                        variant = "soft",
+                        color_scheme = "gray",
+                        disabled = True,
+                        flex = "1"
+                    )
+                ),
+                spacing = "2",
+                align_items = "center",
+                width = "100%"
             ),
-            justify = "between",
-            align_items = "center",
+            spacing = "2",
+            align_items = "start",
             width = "100%"
         ),
         variant = "surface",
@@ -661,12 +721,13 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                 align_items = "start",
                 width = "100%"
             ),
-            # Predict button (regular button with on_click)
+            # Predict button (disabled when no model available)
             rx.button(
                 "Predict",
                 on_click = State.predict_transaction_fraud_detection,
                 size = "3",
-                width = "100%"
+                width = "100%",
+                disabled = ~State.incremental_model_available["Transaction Fraud Detection"]
             ),
             spacing = "3",
             align_items = "start",
@@ -802,12 +863,21 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                 variant = "classic",
                 width = "100%"
             ),
-            # Show info message when no prediction yet
-            rx.callout(
-                rx.text("Fill in the transaction details and click the ", rx.text("Predict", weight = "bold"), " button to get the fraud probability."),
-                icon = "info",
-                color = "blue",
-                width = "100%"
+            # Show info or warning message when no prediction yet
+            rx.cond(
+                State.incremental_model_available["Transaction Fraud Detection"],
+                rx.callout(
+                    "Fill in the transaction details and click **Predict** to get the fraud probability.",
+                    icon = "info",
+                    color = "blue",
+                    width = "100%"
+                ),
+                rx.callout(
+                    "No trained model available. Toggle **Real-time ML Training** to train first.",
+                    icon = "alert-triangle",
+                    color = "orange",
+                    width = "100%"
+                )
             )
         ),
         on_mount = State.get_mlflow_metrics("Transaction Fraud Detection"),
@@ -1394,7 +1464,7 @@ def transaction_fraud_detection_batch_form() -> rx.Component:
                             ),
                             # Show info message when no prediction yet
                             rx.callout(
-                                rx.text("Fill in the transaction details and click the ", rx.text("Predict", weight = "bold"), " button to get the fraud probability."),
+                                "Fill in the transaction details and click **Predict** to get the fraud probability.",
                                 icon = "info",
                                 color = "blue",
                                 width = "100%"
@@ -1881,12 +1951,13 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
                 align_items = "start",
                 width = "100%"
             ),
-            # Predict button
+            # Predict button (disabled when no model available)
             rx.button(
                 "Predict",
                 on_click = State.predict_eta,
                 size = "3",
-                width = "100%"
+                width = "100%",
+                disabled = ~State.incremental_model_available["Estimated Time of Arrival"]
             ),
             spacing = "3",
             align_items = "start",
@@ -1972,13 +2043,22 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
                         align_items = "center",
                         justify_content = "center"
                     ),
-                    # Show info message when no prediction yet
+                    # Show info or warning message when no prediction yet
                     rx.box(
-                        rx.callout(
-                            rx.text("Click the ", rx.text("Predict", weight = "bold"), " button to get the estimated time of arrival."),
-                            icon = "info",
-                            color = "blue",
-                            width = "100%"
+                        rx.cond(
+                            State.incremental_model_available["Estimated Time of Arrival"],
+                            rx.callout(
+                                "Click **Predict** to get the estimated time of arrival.",
+                                icon = "info",
+                                color = "blue",
+                                width = "100%"
+                            ),
+                            rx.callout(
+                                "No trained model available. Toggle **Real-time ML Training** to train first.",
+                                icon = "alert-triangle",
+                                color = "orange",
+                                width = "100%"
+                            )
                         ),
                         width = "100%",
                         flex = "1",
@@ -2335,12 +2415,13 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
                 align_items = "start",
                 width = "100%"
             ),
-            # Predict button
+            # Predict button (disabled when no model available)
             rx.button(
-                "Predict Cluster",
+                "Predict",
                 on_click = State.predict_ecci,
                 size = "3",
-                width = "100%"
+                width = "100%",
+                disabled = ~State.incremental_model_available["E-Commerce Customer Interactions"]
             ),
             spacing = "3",
             align_items = "start",
@@ -2431,11 +2512,20 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
                                     justify_content = "center"
                                 ),
                                 rx.box(
-                                    rx.callout(
-                                        rx.text("Click ", rx.text("Predict Cluster", weight = "bold"), " to identify the segment."),
-                                        icon = "info",
-                                        color = "blue",
-                                        width = "100%"
+                                    rx.cond(
+                                        State.incremental_model_available["E-Commerce Customer Interactions"],
+                                        rx.callout(
+                                            "Click **Predict** to identify the customer segment.",
+                                            icon = "info",
+                                            color = "blue",
+                                            width = "100%"
+                                        ),
+                                        rx.callout(
+                                            "No trained model available. Toggle **Real-time ML Training** to train first.",
+                                            icon = "alert-triangle",
+                                            color = "orange",
+                                            width = "100%"
+                                        )
                                     ),
                                     width = "100%",
                                     flex = "1",
