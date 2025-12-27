@@ -37,24 +37,24 @@ signal.signal(signal.SIGTERM, signal_handler)
 signal.signal(signal.SIGINT, signal_handler)
 
 # Define schema for Transaction Fraud Detection events
+# Matches exactly what Kafka producer sends
 tfd_schema = StructType([
     StructField("transaction_id", StringType(), True),
-    StructField("customer_id", StringType(), True),
-    StructField("merchant_id", StringType(), True),
+    StructField("user_id", StringType(), True),
     StructField("timestamp", StringType(), True),
     StructField("amount", DoubleType(), True),
     StructField("currency", StringType(), True),
+    StructField("merchant_id", StringType(), True),
+    StructField("product_category", StringType(), True),
     StructField("transaction_type", StringType(), True),
-    StructField("card_type", StringType(), True),
-    StructField("card_last_four", StringType(), True),
-    StructField("merchant_category", StringType(), True),
-    StructField("merchant_country", StringType(), True),
-    StructField("customer_country", StringType(), True),
-    StructField("is_online", BooleanType(), True),
-    StructField("device_type", StringType(), True),
-    StructField("ip_country", StringType(), True),
-    StructField("distance_from_home", DoubleType(), True),
-    StructField("time_since_last_transaction", DoubleType(), True),
+    StructField("payment_method", StringType(), True),
+    StructField("location", StringType(), True),  # JSON dict stored as string
+    StructField("ip_address", StringType(), True),
+    StructField("device_info", StringType(), True),  # JSON dict stored as string
+    StructField("user_agent", StringType(), True),
+    StructField("account_age_days", IntegerType(), True),
+    StructField("cvv_provided", BooleanType(), True),
+    StructField("billing_address_match", BooleanType(), True),
     StructField("is_fraud", IntegerType(), True),
 ])
 

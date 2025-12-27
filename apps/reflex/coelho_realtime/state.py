@@ -6,9 +6,6 @@ import plotly.graph_objects as go
 import folium
 from .utils import httpx_client_post, httpx_client_get
 
-FASTAPI_HOST = os.getenv("FASTAPI_HOST", "localhost")
-FASTAPI_BASE_URL = f"http://{FASTAPI_HOST}:8001"
-
 RIVER_HOST = os.getenv("RIVER_HOST", "localhost")
 RIVER_BASE_URL = f"http://{RIVER_HOST}:8002"
 
@@ -1082,7 +1079,7 @@ class State(rx.State):
             return
         try:
             sample = await httpx_client_post(
-                url = f"{FASTAPI_BASE_URL}/initial_sample",
+                url = f"{RIVER_BASE_URL}/initial_sample",
                 json = {"project_name": project_name},
                 timeout = 30.0
             )
@@ -1154,32 +1151,32 @@ class State(rx.State):
             # Fetch all unique values in parallel for better performance
             responses = await asyncio.gather(
                 httpx_client_post(
-                    url = f"{FASTAPI_BASE_URL}/unique_values",
+                    url = f"{RIVER_BASE_URL}/unique_values",
                     json = {"column_name": "currency", "project_name": project_name},
                     timeout = 30.0
                 ),
                 httpx_client_post(
-                    url = f"{FASTAPI_BASE_URL}/unique_values",
+                    url = f"{RIVER_BASE_URL}/unique_values",
                     json = {"column_name": "merchant_id", "project_name": project_name},
                     timeout = 30.0
                 ),
                 httpx_client_post(
-                    url = f"{FASTAPI_BASE_URL}/unique_values",
+                    url = f"{RIVER_BASE_URL}/unique_values",
                     json = {"column_name": "product_category", "project_name": project_name},
                     timeout = 30.0
                 ),
                 httpx_client_post(
-                    url = f"{FASTAPI_BASE_URL}/unique_values",
+                    url = f"{RIVER_BASE_URL}/unique_values",
                     json = {"column_name": "transaction_type", "project_name": project_name},
                     timeout = 30.0
                 ),
                 httpx_client_post(
-                    url = f"{FASTAPI_BASE_URL}/unique_values",
+                    url = f"{RIVER_BASE_URL}/unique_values",
                     json = {"column_name": "payment_method", "project_name": project_name},
                     timeout = 30.0
                 ),
                 httpx_client_post(
-                    url = f"{FASTAPI_BASE_URL}/unique_values",
+                    url = f"{RIVER_BASE_URL}/unique_values",
                     json = {"column_name": "device_info", "project_name": project_name},
                     timeout = 30.0
                 ),
@@ -1317,7 +1314,7 @@ class State(rx.State):
         model_name = self._mlflow_model_names.get(project_name, "ARFClassifier")
         try:
             response = await httpx_client_post(
-                url = f"{FASTAPI_BASE_URL}/mlflow_metrics",
+                url = f"{RIVER_BASE_URL}/mlflow_metrics",
                 json = {
                     "project_name": project_name,
                     "model_name": model_name
@@ -1343,7 +1340,7 @@ class State(rx.State):
         model_name = self._mlflow_model_names.get(project_name, "ARFClassifier")
         try:
             response = await httpx_client_post(
-                url = f"{FASTAPI_BASE_URL}/mlflow_metrics",
+                url = f"{RIVER_BASE_URL}/mlflow_metrics",
                 json = {
                     "project_name": project_name,
                     "model_name": model_name,
@@ -1454,22 +1451,22 @@ class State(rx.State):
         try:
             responses = await asyncio.gather(
                 httpx_client_post(
-                    url = f"{FASTAPI_BASE_URL}/unique_values",
+                    url = f"{RIVER_BASE_URL}/unique_values",
                     json = {"column_name": "driver_id", "project_name": project_name},
                     timeout = 30.0
                 ),
                 httpx_client_post(
-                    url = f"{FASTAPI_BASE_URL}/unique_values",
+                    url = f"{RIVER_BASE_URL}/unique_values",
                     json = {"column_name": "vehicle_id", "project_name": project_name},
                     timeout = 30.0
                 ),
                 httpx_client_post(
-                    url = f"{FASTAPI_BASE_URL}/unique_values",
+                    url = f"{RIVER_BASE_URL}/unique_values",
                     json = {"column_name": "weather", "project_name": project_name},
                     timeout = 30.0
                 ),
                 httpx_client_post(
-                    url = f"{FASTAPI_BASE_URL}/unique_values",
+                    url = f"{RIVER_BASE_URL}/unique_values",
                     json = {"column_name": "vehicle_type", "project_name": project_name},
                     timeout = 30.0
                 ),
@@ -1694,17 +1691,17 @@ class State(rx.State):
             # Only fetch low-cardinality fields for dropdowns
             responses = await asyncio.gather(
                 httpx_client_post(
-                    url=f"{FASTAPI_BASE_URL}/unique_values",
+                    url=f"{RIVER_BASE_URL}/unique_values",
                     json={"column_name": "device_info", "project_name": project_name, "limit": 50},
                     timeout=30.0
                 ),
                 httpx_client_post(
-                    url=f"{FASTAPI_BASE_URL}/unique_values",
+                    url=f"{RIVER_BASE_URL}/unique_values",
                     json={"column_name": "event_type", "project_name": project_name, "limit": 20},
                     timeout=30.0
                 ),
                 httpx_client_post(
-                    url=f"{FASTAPI_BASE_URL}/unique_values",
+                    url=f"{RIVER_BASE_URL}/unique_values",
                     json={"column_name": "product_category", "project_name": project_name, "limit": 50},
                     timeout=30.0
                 ),
@@ -1847,7 +1844,7 @@ class State(rx.State):
         """Fetch cluster counts from FastAPI."""
         try:
             response = await httpx_client_get(
-                url=f"{FASTAPI_BASE_URL}/cluster_counts",
+                url=f"{RIVER_BASE_URL}/cluster_counts",
                 timeout=30.0
             )
             cluster_counts = response.json()
@@ -1868,7 +1865,7 @@ class State(rx.State):
         column_name = "device_info" if feature in device_info_features else feature
         try:
             response = await httpx_client_post(
-                url=f"{FASTAPI_BASE_URL}/cluster_feature_counts",
+                url=f"{RIVER_BASE_URL}/cluster_feature_counts",
                 json={"column_name": column_name},
                 timeout=30.0
             )
@@ -1914,7 +1911,7 @@ class State(rx.State):
         project_name = "Transaction Fraud Detection"
         try:
             response = await httpx_client_post(
-                url=f"{FASTAPI_BASE_URL}/sample",
+                url=f"{RIVER_BASE_URL}/sample",
                 json={"project_name": project_name},
                 timeout=30.0
             )
@@ -1935,7 +1932,7 @@ class State(rx.State):
         project_name = "Estimated Time of Arrival"
         try:
             response = await httpx_client_post(
-                url=f"{FASTAPI_BASE_URL}/sample",
+                url=f"{RIVER_BASE_URL}/sample",
                 json={"project_name": project_name},
                 timeout=30.0
             )
@@ -1956,7 +1953,7 @@ class State(rx.State):
         project_name = "E-Commerce Customer Interactions"
         try:
             response = await httpx_client_post(
-                url=f"{FASTAPI_BASE_URL}/sample",
+                url=f"{RIVER_BASE_URL}/sample",
                 json={"project_name": project_name},
                 timeout=30.0
             )

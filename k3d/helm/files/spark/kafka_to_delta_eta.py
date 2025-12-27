@@ -35,25 +35,26 @@ signal.signal(signal.SIGTERM, signal_handler)
 signal.signal(signal.SIGINT, signal_handler)
 
 # Define schema for ETA events
+# Matches exactly what Kafka producer sends
 eta_schema = StructType([
     StructField("trip_id", StringType(), True),
     StructField("driver_id", StringType(), True),
     StructField("vehicle_id", StringType(), True),
     StructField("timestamp", StringType(), True),
-    StructField("origin", StringType(), True),
-    StructField("destination", StringType(), True),
+    StructField("origin", StringType(), True),  # JSON dict stored as string
+    StructField("destination", StringType(), True),  # JSON dict stored as string
     StructField("estimated_distance_km", DoubleType(), True),
     StructField("weather", StringType(), True),
     StructField("temperature_celsius", DoubleType(), True),
-    StructField("day_of_week", StringType(), True),
+    StructField("day_of_week", IntegerType(), True),  # Kafka sends int (0-6)
     StructField("hour_of_day", IntegerType(), True),
     StructField("driver_rating", DoubleType(), True),
     StructField("vehicle_type", StringType(), True),
-    StructField("initial_estimated_travel_time_seconds", DoubleType(), True),
-    StructField("simulated_actual_travel_time_seconds", DoubleType(), True),
+    StructField("initial_estimated_travel_time_seconds", IntegerType(), True),
+    StructField("simulated_actual_travel_time_seconds", IntegerType(), True),
     StructField("debug_traffic_factor", DoubleType(), True),
     StructField("debug_weather_factor", DoubleType(), True),
-    StructField("debug_incident_delay_seconds", DoubleType(), True),
+    StructField("debug_incident_delay_seconds", IntegerType(), True),
     StructField("debug_driver_factor", DoubleType(), True),
 ])
 

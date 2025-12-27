@@ -35,6 +35,7 @@ signal.signal(signal.SIGTERM, signal_handler)
 signal.signal(signal.SIGINT, signal_handler)
 
 # Define schema for E-Commerce events
+# Matches exactly what Kafka producer sends
 ecommerce_schema = StructType([
     StructField("event_id", StringType(), True),
     StructField("customer_id", StringType(), True),
@@ -47,10 +48,10 @@ ecommerce_schema = StructType([
     StructField("quantity", IntegerType(), True),
     StructField("page_url", StringType(), True),
     StructField("referrer_url", StringType(), True),
-    StructField("device_info", StringType(), True),
-    StructField("location", StringType(), True),
+    StructField("device_info", StringType(), True),  # JSON dict stored as string
+    StructField("location", StringType(), True),  # JSON dict stored as string
     StructField("session_event_sequence", IntegerType(), True),
-    StructField("time_on_page_seconds", DoubleType(), True),
+    StructField("time_on_page_seconds", IntegerType(), True),  # Kafka sends int
     StructField("search_query", StringType(), True),
 ])
 
