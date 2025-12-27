@@ -236,6 +236,17 @@ class SampleRequest(BaseModel):
     project_name: str
 
 
+class SklearnHealthcheck(BaseModel):
+    """Healthcheck for sklearn batch ML service."""
+    model_available: dict[str, bool] = {}
+    data_load: dict[str, str] = {}
+    encoders_load: dict[str, str] = {}
+
+
+# Initialize sklearn healthcheck
+sklearn_healthcheck = SklearnHealthcheck()
+
+
 class TrainRequest(BaseModel):
     project_name: str
     model_name: str = "XGBClassifier"
@@ -340,7 +351,10 @@ def _sync_train_model(project_name: str, model_name: str) -> dict:
 # =============================================================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global data_dict, encoders_dict
+    global data_dict, encoders_dict, sklearn_healthcheck
+
+    data_load_status = {}
+    encoders_load_status = {}
 
     # Load data for batch ML projects
     print("Loading data for Batch ML projects...")
@@ -348,18 +362,26 @@ async def lifespan(app: FastAPI):
         try:
             consumer = create_consumer(project_name)
             data_dict[project_name] = load_or_create_data(consumer, project_name)
+            data_load_status[project_name] = "success"
             print(f"Data loaded for {project_name}")
         except Exception as e:
+            data_load_status[project_name] = f"failed: {e}"
             print(f"Error loading data for {project_name}: {e}", file=sys.stderr)
+
+    sklearn_healthcheck.data_load = data_load_status
 
     # Load sklearn encoders
     print("Loading sklearn encoders...")
     for project_name in PROJECT_NAMES:
         try:
             encoders_dict[project_name] = load_sklearn_encoders(project_name)
+            encoders_load_status[project_name] = "success"
             print(f"Encoders loaded for {project_name}")
         except Exception as e:
+            encoders_load_status[project_name] = f"failed: {e}"
             print(f"Error loading encoders for {project_name}: {e}", file=sys.stderr)
+
+    sklearn_healthcheck.encoders_load = encoders_load_status
 
     # Configure MLflow
     try:
@@ -406,6 +428,22 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
+
+
+@app.get("/healthcheck", response_model=SklearnHealthcheck)
+async def get_healthcheck():
+    """Get detailed healthcheck status for sklearn batch ML service."""
+    return sklearn_healthcheck
+
+
+@app.put("/healthcheck", response_model=SklearnHealthcheck)
+async def update_healthcheck(update_data: SklearnHealthcheck):
+    """Update healthcheck status."""
+    global sklearn_healthcheck
+    update_dict = update_data.model_dump(exclude_unset=True)
+    for field, value in update_dict.items():
+        setattr(sklearn_healthcheck, field, value)
+    return sklearn_healthcheck
 
 
 @app.post("/sample")

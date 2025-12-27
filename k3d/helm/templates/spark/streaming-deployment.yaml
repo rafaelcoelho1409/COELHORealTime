@@ -1,0 +1,218 @@
+{{- if .Values.spark.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "coelho-realtime.fullname" . }}-spark-streaming
+  labels:
+    {{- include "coelho-realtime.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spark-streaming
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "coelho-realtime.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: spark-streaming
+  template:
+    metadata:
+      labels:
+        {{- include "coelho-realtime.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: spark-streaming
+    spec:
+      # Init container to download Delta Lake JARs (same as master/worker)
+      initContainers:
+        - name: download-delta-jars
+          image: curlimages/curl:8.11.1
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "Downloading Delta Lake JARs for Spark 4.0..."
+              mkdir -p /jars
+
+              # Delta Lake 4.0.0 (for Spark 4.0)
+              curl -L -o /jars/delta-spark_2.13-4.0.0.jar \
+                https://repo1.maven.org/maven2/io/delta/delta-spark_2.13/4.0.0/delta-spark_2.13-4.0.0.jar
+              curl -L -o /jars/delta-storage-4.0.0.jar \
+                https://repo1.maven.org/maven2/io/delta/delta-storage/4.0.0/delta-storage-4.0.0.jar
+
+              # Kafka Structured Streaming (Spark 4.0)
+              curl -L -o /jars/spark-sql-kafka-0-10_2.13-4.0.0.jar \
+                https://repo1.maven.org/maven2/org/apache/spark/spark-sql-kafka-0-10_2.13/4.0.0/spark-sql-kafka-0-10_2.13-4.0.0.jar
+              curl -L -o /jars/spark-token-provider-kafka-0-10_2.13-4.0.0.jar \
+                https://repo1.maven.org/maven2/org/apache/spark/spark-token-provider-kafka-0-10_2.13/4.0.0/spark-token-provider-kafka-0-10_2.13-4.0.0.jar
+              curl -L -o /jars/kafka-clients-3.9.0.jar \
+                https://repo1.maven.org/maven2/org/apache/kafka/kafka-clients/3.9.0/kafka-clients-3.9.0.jar
+              curl -L -o /jars/commons-pool2-2.12.0.jar \
+                https://repo1.maven.org/maven2/org/apache/commons/commons-pool2/2.12.0/commons-pool2-2.12.0.jar
+
+              # Hadoop AWS (S3A) for MinIO connectivity
+              curl -L -o /jars/hadoop-aws-3.4.2.jar \
+                https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.4.2/hadoop-aws-3.4.2.jar
+              curl -L -o /jars/aws-java-sdk-bundle-1.12.790.jar \
+                https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.790/aws-java-sdk-bundle-1.12.790.jar
+
+              echo "All JARs downloaded successfully!"
+              ls -la /jars/
+          volumeMounts:
+            - name: spark-extra-jars
+              mountPath: /jars
+      # Run as root to fix Hadoop UnixLoginModule issue
+      # See: https://github.com/bitnami/containers/issues/52698
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        fsGroup: 0
+      containers:
+        - name: spark-streaming
+          image: {{ .Values.spark.image.registry }}/{{ .Values.spark.image.repository }}:{{ .Values.spark.image.tag }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              # Fix Spark 4.0 user/home issues
+              # See: https://github.com/bitnami/containers/issues/52698
+              export HOME=/tmp
+              export USER=spark
+              export HADOOP_USER_NAME=spark
+              mkdir -p /tmp/.ivy2
+
+              echo "Waiting for Spark master to be ready..."
+              sleep 30
+
+              # Build explicit JAR list (comma-separated, no glob)
+              EXTRA_JARS=$(find /opt/bitnami/spark/jars/extra -name "*.jar" -type f 2>/dev/null | sort | tr '\n' ',' | sed 's/,$//')
+              echo "Extra JARs: $EXTRA_JARS"
+
+              if [ -z "$EXTRA_JARS" ]; then
+                echo "ERROR: No JARs found in /opt/bitnami/spark/jars/extra"
+                exit 1
+              fi
+
+              echo "Starting all streaming jobs..."
+
+              # Common S3A configurations (fix NumberFormatException with "60s" timeout values)
+              # Also use SimpleAWSCredentialsProvider for compatibility with AWS SDK v1 bundle
+              S3A_CONF="--conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem \
+                --conf spark.hadoop.fs.s3a.aws.credentials.provider=org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider \
+                --conf spark.hadoop.fs.s3a.connection.timeout=60000 \
+                --conf spark.hadoop.fs.s3a.connection.establish.timeout=60000 \
+                --conf spark.hadoop.fs.s3a.connection.request.timeout=60000 \
+                --conf spark.hadoop.fs.s3a.connection.acquisition.timeout=60000 \
+                --conf spark.hadoop.fs.s3a.threads.keepalivetime=60 \
+                --conf spark.hadoop.fs.s3a.multipart.purge.age=86400"
+
+              # Common executor config: 1 executor with 2 cores per app (3 apps × 2 cores = 6 of 8 cores)
+              EXECUTOR_CONF="--conf spark.executor.cores=2 --conf spark.executor.memory=512m --conf spark.executor.instances=1 --conf spark.cores.max=2"
+
+              # Prometheus metrics configuration (Spark 3.0+ PrometheusServlet)
+              METRICS_CONF="--conf spark.ui.prometheus.enabled=true \
+                --conf spark.sql.streaming.metricsEnabled=true \
+                --conf spark.metrics.conf.*.sink.prometheusServlet.class=org.apache.spark.metrics.sink.PrometheusServlet \
+                --conf spark.metrics.conf.*.sink.prometheusServlet.path=/metrics/prometheus \
+                --conf spark.metrics.conf.master.sink.prometheusServlet.path=/metrics/master/prometheus \
+                --conf spark.metrics.conf.applications.sink.prometheusServlet.path=/metrics/applications/prometheus"
+
+              # Submit Transaction Fraud Detection streaming job (Spark UI on port 4040)
+              spark-submit \
+                --master spark://{{ include "coelho-realtime.fullname" . }}-spark-master-svc:7077 \
+                --deploy-mode client \
+                --jars "$EXTRA_JARS" \
+                --conf "spark.jars.ivy=/tmp/.ivy2" \
+                --conf "spark.driver.host=$POD_IP" \
+                --conf "spark.driver.bindAddress=0.0.0.0" \
+                --conf "spark.ui.port=4040" \
+                $S3A_CONF \
+                $EXECUTOR_CONF \
+                $METRICS_CONF \
+                --conf "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension" \
+                --conf "spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog" \
+                /opt/spark-jobs/kafka_to_delta_tfd.py &
+
+              # Submit ETA streaming job (Spark UI on port 4041)
+              spark-submit \
+                --master spark://{{ include "coelho-realtime.fullname" . }}-spark-master-svc:7077 \
+                --deploy-mode client \
+                --jars "$EXTRA_JARS" \
+                --conf "spark.jars.ivy=/tmp/.ivy2" \
+                --conf "spark.driver.host=$POD_IP" \
+                --conf "spark.driver.bindAddress=0.0.0.0" \
+                --conf "spark.ui.port=4041" \
+                $S3A_CONF \
+                $EXECUTOR_CONF \
+                $METRICS_CONF \
+                --conf "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension" \
+                --conf "spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog" \
+                /opt/spark-jobs/kafka_to_delta_eta.py &
+
+              # Submit E-Commerce streaming job (Spark UI on port 4042)
+              spark-submit \
+                --master spark://{{ include "coelho-realtime.fullname" . }}-spark-master-svc:7077 \
+                --deploy-mode client \
+                --jars "$EXTRA_JARS" \
+                --conf "spark.jars.ivy=/tmp/.ivy2" \
+                --conf "spark.driver.host=$POD_IP" \
+                --conf "spark.driver.bindAddress=0.0.0.0" \
+                --conf "spark.ui.port=4042" \
+                $S3A_CONF \
+                $EXECUTOR_CONF \
+                $METRICS_CONF \
+                --conf "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension" \
+                --conf "spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog" \
+                /opt/spark-jobs/kafka_to_delta_ecommerce.py &
+
+              # Wait for all background jobs
+              wait
+          ports:
+            # Spark UI ports for each streaming application
+            - name: spark-ui-tfd
+              containerPort: 4040
+              protocol: TCP
+            - name: spark-ui-eta
+              containerPort: 4041
+              protocol: TCP
+            - name: spark-ui-ecci
+              containerPort: 4042
+              protocol: TCP
+          env:
+            - name: KAFKA_BOOTSTRAP
+              value: "{{ include "coelho-realtime.fullname" . }}-kafka:9092"
+            - name: MINIO_ENDPOINT
+              value: "http://{{ include "coelho-realtime.fullname" . }}-minio:9000"
+            - name: MINIO_ACCESS_KEY
+              value: "{{ .Values.minio.rootUser }}"
+            - name: MINIO_SECRET_KEY
+              value: "{{ .Values.minio.rootPassword }}"
+            - name: SPARK_EXTRA_CLASSPATH
+              value: "/opt/bitnami/spark/jars/extra/*"
+            # Fix for Spark 4.0 Ivy home directory issue
+            - name: HOME
+              value: "/tmp"
+            # Fix for Hadoop user authentication
+            - name: HADOOP_USER_NAME
+              value: "spark"
+            - name: USER
+              value: "spark"
+            # Pod IP for Spark driver host resolution (fixes DNS issue)
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          resources:
+            # Increased for 3 concurrent Spark drivers (was OOMKilled with 2Gi)
+            requests:
+              memory: "2Gi"
+              cpu: "1000m"
+            limits:
+              memory: "4Gi"
+              cpu: "2000m"
+          volumeMounts:
+            - name: spark-jobs
+              mountPath: /opt/spark-jobs
+            - name: spark-extra-jars
+              mountPath: /opt/bitnami/spark/jars/extra
+      volumes:
+        - name: spark-jobs
+          configMap:
+            name: {{ include "coelho-realtime.fullname" . }}-spark-streaming-jobs
+        - name: spark-extra-jars
+          emptyDir: {}
+{{- end }}

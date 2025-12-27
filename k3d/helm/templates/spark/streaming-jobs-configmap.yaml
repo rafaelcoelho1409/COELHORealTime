@@ -1,0 +1,15 @@
+{{- if .Values.spark.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "coelho-realtime.fullname" . }}-spark-streaming-jobs
+  labels:
+    {{- include "coelho-realtime.labels" . | nindent 4 }}
+data:
+  kafka_to_delta_tfd.py: |
+{{ .Files.Get "files/spark/kafka_to_delta_tfd.py" | indent 4 }}
+  kafka_to_delta_eta.py: |
+{{ .Files.Get "files/spark/kafka_to_delta_eta.py" | indent 4 }}
+  kafka_to_delta_ecommerce.py: |
+{{ .Files.Get "files/spark/kafka_to_delta_ecommerce.py" | indent 4 }}
+{{- end }}

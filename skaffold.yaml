@@ -5,23 +5,7 @@ metadata:
 
 build:
   artifacts:
-    # FastAPI service
-    - image: coelho-realtime-fastapi
-      context: ./apps/fastapi
-      docker:
-        dockerfile: Dockerfile.fastapi
-      sync:
-        manual:
-          - src: "**/*.py"
-            dest: /app
-          - src: "requirements.txt"
-            dest: /app
-          - src: "**/*.json"
-            dest: /app
-          - src: "**/*.yaml"
-            dest: /app
-          - src: "**/*.yml"
-            dest: /app
+    # NOTE: FastAPI service (port 8001) has been terminated and merged into river/sklearn services
     # Kafka Producers (Python data generators)
     - image: coelho-realtime-kafka-producers
       context: ./apps/kafka-producers
@@ -68,19 +52,7 @@ build:
             dest: /app
           - src: "requirements.txt"
             dest: /app
-    # Streamlit service (DEPRECATED)
-    #- image: coelho-realtime-streamlit
-    #  context: ./apps/streamlit
-    #  docker:
-    #    dockerfile: Dockerfile.streamlit
-    #  sync:
-    #    manual:
-    #      - src: "**/*.py"
-    #        dest: /app
-    #      - src: "requirements.txt"
-    #        dest: /app
-    #      - src: "**/*.json"
-    #        dest: /app
+    # NOTE: Streamlit has been removed - fully replaced by Reflex
   local:
     push: true  # Push to localhost:5000, K3d registry mirrors handle the rest
     useBuildkit: false
@@ -96,9 +68,8 @@ manifests:
         createNamespace: true
         setValueTemplates:
           # Skaffold will automatically replace these with built image tags
-          fastapi.image: "{{.IMAGE_NAME_coelho_realtime_fastapi}}:{{.IMAGE_TAG_coelho_realtime_fastapi}}"
+          # NOTE: fastapi and streamlit services removed - replaced by river/sklearn/reflex
           kafka-producers.image: "{{.IMAGE_NAME_coelho_realtime_kafka_producers}}:{{.IMAGE_TAG_coelho_realtime_kafka_producers}}"
-          #streamlit.image: "{{.IMAGE_NAME_coelho_realtime_streamlit}}:{{.IMAGE_TAG_coelho_realtime_streamlit}}"
           reflex.image: "{{.IMAGE_NAME_coelho_realtime_reflex}}:{{.IMAGE_TAG_coelho_realtime_reflex}}"
           river.image: "{{.IMAGE_NAME_coelho_realtime_river}}:{{.IMAGE_TAG_coelho_realtime_river}}"
           sklearn.image: "{{.IMAGE_NAME_coelho_realtime_sklearn}}:{{.IMAGE_TAG_coelho_realtime_sklearn}}"
@@ -107,13 +78,7 @@ deploy:
   helm: {}
 
 portForward:
-  # FastAPI
-  - resourceType: service
-    resourceName: coelho-realtime-fastapi
-    namespace: coelho-realtime
-    port: 8001
-    localPort: 8001
-    address: 0.0.0.0
+  # NOTE: FastAPI service (port 8001) has been terminated and merged into river/sklearn services
   # MLFlow
   - resourceType: service
     resourceName: coelho-realtime-mlflow
@@ -191,6 +156,13 @@ portForward:
     port: 9092
     localPort: 9092
     address: 0.0.0.0
+  # Spark Master Web UI (shows running applications, workers, streaming jobs)
+  - resourceType: service
+    resourceName: coelho-realtime-spark-master-svc
+    namespace: coelho-realtime
+    port: 80
+    localPort: 4040
+    address: 0.0.0.0
   # Kafka JMX metrics disabled (JMX exporter incompatible with Kafka 4.0)
   # - resourceType: service
   #   resourceName: coelho-realtime-kafka-jmx-metrics
@@ -198,12 +170,7 @@ portForward:
   #   port: 5556
   #   localPort: 5556
   #   address: 0.0.0.0
-  #- resourceType: service
-  #  resourceName: coelho-realtime-streamlit
-  #  namespace: coelho-realtime
-  #  port: 8501
-  #  localPort: 8501
-  #  address: 0.0.0.0
+  # NOTE: Streamlit removed - fully replaced by Reflex
 
 
 profiles:
@@ -213,16 +180,7 @@ profiles:
       - command: dev
     build:
       artifacts:
-        # FastAPI - Use infer for automatic detection
-        - image: coelho-realtime-fastapi
-          context: ./apps/fastapi
-          docker:
-            dockerfile: Dockerfile.fastapi
-          sync:
-            infer:
-              - "**/*.py"
-              - "requirements.txt"
-              - "**/*.json"
+        # NOTE: FastAPI service has been terminated and merged into river/sklearn services
         # Kafka Producers - Use manual sync to /app directory
         - image: coelho-realtime-kafka-producers
           context: ./apps/kafka-producers
@@ -262,16 +220,7 @@ profiles:
             infer:
               - "**/*.py"
               - "requirements.txt"
-        ## Streamlit - Use infer for automatic detection  (DEPRECATED)
-        #- image: coelho-realtime-streamlit
-        #  context: ./apps/streamlit
-        #  docker:
-        #    dockerfile: Dockerfile.streamlit
-        #  sync:
-        #    infer:
-        #      - "**/*.py"
-        #      - "requirements.txt"
-        #      - "**/*.json"
+        # NOTE: Streamlit has been removed - fully replaced by Reflex
     # Profile-specific manifests override (if needed)
     manifests:
       helm:
@@ -281,9 +230,8 @@ profiles:
             namespace: coelho-realtime
             createNamespace: true
             setValueTemplates:
-              fastapi.image: "{{.IMAGE_NAME_coelho_realtime_fastapi}}:{{.IMAGE_TAG_coelho_realtime_fastapi}}"
+              # NOTE: fastapi and streamlit removed - replaced by river/sklearn/reflex
               kafka-producers.image: "{{.IMAGE_NAME_coelho_realtime_kafka_producers}}:{{.IMAGE_TAG_coelho_realtime_kafka_producers}}"
-              #streamlit.image: "{{.IMAGE_NAME_coelho_realtime_streamlit}}:{{.IMAGE_TAG_coelho_realtime_streamlit}}"
               reflex.image: "{{.IMAGE_NAME_coelho_realtime_reflex}}:{{.IMAGE_TAG_coelho_realtime_reflex}}"
               river.image: "{{.IMAGE_NAME_coelho_realtime_river}}:{{.IMAGE_TAG_coelho_realtime_river}}"
               sklearn.image: "{{.IMAGE_NAME_coelho_realtime_sklearn}}:{{.IMAGE_TAG_coelho_realtime_sklearn}}"

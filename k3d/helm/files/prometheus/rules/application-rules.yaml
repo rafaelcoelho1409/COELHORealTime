@@ -1,38 +1,8 @@
 # Application-Level Alerting Rules for COELHORealTime
 # These rules monitor the ML pipeline services
+# NOTE: FastAPI Analytics service has been terminated and merged into River/Sklearn services
 groups:
-  # FastAPI Analytics Service Alerts
-  - name: fastapi.rules
-    interval: 30s
-    rules:
-      - alert: FastAPIDown
-        expr: up{job="fastapi"} == 0
-        for: 1m
-        labels:
-          severity: critical
-        annotations:
-          summary: "FastAPI Analytics service is down"
-          description: "FastAPI instance {{ $labels.instance }} has been down for more than 1 minute."
-
-      - alert: FastAPIHighLatency
-        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job="fastapi"}[5m])) > 2
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "FastAPI has high latency"
-          description: "FastAPI p99 latency is {{ $value }}s (threshold: 2s)."
-
-      - alert: FastAPIHighErrorRate
-        expr: (rate(http_requests_total{job="fastapi",status=~"5.."}[5m]) / rate(http_requests_total{job="fastapi"}[5m])) * 100 > 5
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "FastAPI has high error rate"
-          description: "FastAPI error rate is {{ $value }}% (threshold: 5%)."
-
-  # River ML Training Service Alerts
+  # River ML Training Service Alerts (now also handles data endpoints)
   - name: river.rules
     interval: 30s
     rules:

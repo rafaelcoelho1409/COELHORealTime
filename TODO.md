@@ -6,7 +6,7 @@ Real-time ML platform with incremental learning, featuring:
 - Estimated Time of Arrival (River ML)
 - E-Commerce Customer Interactions (DBSTREAM Clustering)
 
-**Tech Stack:** Reflex, FastAPI, Kafka, MLflow, River ML, k3d/Kubernetes
+**Tech Stack:** Reflex, River ML, Sklearn, Kafka, MLflow, k3d/Kubernetes
 
 ---
 
@@ -19,12 +19,13 @@ Real-time ML platform with incremental learning, featuring:
 - [x] FastAPI backend with River ML models
 - [x] MLflow for experiment tracking
 
-### Phase 2: Streamlit MVP
-- [x] Transaction Fraud Detection page
-- [x] Estimated Time of Arrival page
-- [x] E-Commerce Customer Interactions page
-- [x] Real-time training toggle
-- [x] Prediction forms and visualizations
+### Phase 2: Streamlit MVP (DEPRECATED - Migrated to Reflex)
+- [x] Transaction Fraud Detection page → Migrated to Reflex
+- [x] Estimated Time of Arrival page → Migrated to Reflex
+- [x] E-Commerce Customer Interactions page → Migrated to Reflex
+- [x] Real-time training toggle → Migrated to Reflex
+- [x] Prediction forms and visualizations → Migrated to Reflex
+- [x] **Streamlit app deleted** - fully replaced by Reflex (Phase 3)
 
 ### Phase 3: Reflex Migration (COMPLETED)
 - [x] Migrate TFD page to Reflex
@@ -118,52 +119,40 @@ apps/sklearn/
 └── entrypoint.sh       # Startup script
 ```
 
-### Phase 6b: Consolidate FastAPI Services (Priority: MEDIUM)
+### Phase 6b: Consolidate FastAPI Services (COMPLETED)
 **Goal:** Deprecate FastAPI Analytics and distribute its endpoints to River and Sklearn
 
-**Current State (3 services):**
-- FastAPI Analytics (8001) - Mixed data queries + ML helpers
-- River (8002) - Incremental ML training + predictions
-- Sklearn (8003) - Batch ML predictions + YellowBrick
-
-**Target State (2 services):**
-- River (8002) - Incremental ML + data sampling + form helpers
+**Final State (2 services):**
+- River (8002) - Incremental ML + data sampling + form helpers + cluster analytics
 - Sklearn (8003) - Batch ML + YellowBrick + batch metrics
 
-**Migration Plan:**
+**Migration Completed:**
 
-| Endpoint | From | To | Notes |
-|----------|------|-----|-------|
-| `/sample` | FastAPI | River | Data sampling for forms |
-| `/unique_values` | FastAPI | River | Form dropdown options |
-| `/initial_sample` | FastAPI | River | Initial form data |
-| `/get_ordinal_encoder` | FastAPI | River | River-specific encoders |
-| `/cluster_counts` | FastAPI | River | ECCI clustering (DBSTREAM) |
-| `/cluster_feature_counts` | FastAPI | River | ECCI clustering |
-| `/mlflow_metrics` | FastAPI | River | Add for incremental model metrics |
-| `/yellowbrick_metric` | FastAPI | (delete) | Already in Sklearn |
-| `/healthcheck` | FastAPI | (delete) | Use `/health` per service |
+| Endpoint | From | To | Status |
+|----------|------|-----|--------|
+| `/sample` | FastAPI | River | ✓ Done |
+| `/unique_values` | FastAPI | River | ✓ Done |
+| `/initial_sample` | FastAPI | River | ✓ Done |
+| `/get_ordinal_encoder` | FastAPI | River | ✓ Done |
+| `/cluster_counts` | FastAPI | River | ✓ Done |
+| `/cluster_feature_counts` | FastAPI | River | ✓ Done |
+| `/mlflow_metrics` | FastAPI | River | ✓ Done |
+| `/healthcheck` | FastAPI | River + Sklearn | ✓ Done |
+| `/yellowbrick_metric` | FastAPI | Sklearn | ✓ Already there |
 
-**Tasks:**
-- [ ] Move data endpoints to River service:
-  - [ ] `/sample` - Random sample from dataset
-  - [ ] `/unique_values` - Unique values for dropdowns
-  - [ ] `/initial_sample` - Initial form data
-- [ ] Move River-specific endpoints to River service:
-  - [ ] `/get_ordinal_encoder` - River encoder mappings
-  - [ ] `/cluster_counts` - ECCI cluster counts
-  - [ ] `/cluster_feature_counts` - ECCI cluster feature counts
-- [ ] Add `/mlflow_metrics` to River service (for incremental models)
-- [ ] Update Reflex state.py to use River endpoints instead of FastAPI
-- [ ] Update Reflex resources.py FASTAPI_BASE_URL references
-- [ ] Remove FastAPI Analytics service:
-  - [ ] Delete `apps/fastapi/` directory
-  - [ ] Remove Helm templates (`k3d/helm/templates/fastapi/`)
-  - [ ] Remove `fastapi` section from `values.yaml`
-- [ ] Update navbar Services dropdown (remove FastAPI Analytics submenu)
-- [ ] Update architecture diagram in TODO.md
+**Completed Tasks:**
+- [x] Move data endpoints to River service (`/sample`, `/unique_values`, `/initial_sample`)
+- [x] Move River-specific endpoints to River service (`/get_ordinal_encoder`, `/cluster_counts`, `/cluster_feature_counts`)
+- [x] Add `/mlflow_metrics` to River service (for incremental models)
+- [x] Update Reflex state.py to use River endpoints instead of FastAPI
+- [x] Update Reflex resources.py - removed FASTAPI_BASE_URL references
+- [x] Remove FastAPI Analytics service:
+  - [x] Deleted `apps/fastapi/` directory
+  - [x] Removed Helm templates (`k3d/helm/templates/fastapi/`)
+  - [x] Removed `fastapi` section from `values.yaml`
+- [x] Update navbar Services dropdown (removed FastAPI Analytics submenu)
 
-**Benefits:**
+**Benefits Achieved:**
 - 2 services instead of 3 (simpler architecture)
 - Clear separation: Incremental ML (River) vs Batch ML (Sklearn)
 - No code duplication
@@ -241,25 +230,35 @@ apps/sklearn/
   - [ ] Track which models users prefer
   - [ ] Log prediction accuracy per model version
 
-### Phase 9: Data Lake & SQL Analytics (Priority: MEDIUM)
+### Phase 9: Data Lake & SQL Analytics (COMPLETED)
 **Goal:** Enable SQL queries on streaming data with Delta Lake
 
-- [ ] Add PySpark to project (separate container or sidecar)
-- [ ] Configure Spark to use MinIO (S3A connector)
-- [ ] Implement Delta Lake tables:
-  - [ ] `transactions` - TFD historical data
-  - [ ] `trips` - ETA historical data
-  - [ ] `customer_interactions` - ECCI historical data
-- [ ] Create Kafka → Delta Lake pipeline (batch or micro-batch)
-- [ ] Add SQL query interface to Reflex (optional)
-- [ ] Test Delta Lake ACID transactions on MinIO
+- [x] Add PySpark to project (Bitnami Spark Helm chart with bitnamilegacy/spark:4.0.0)
+- [x] Configure Spark to use MinIO (S3A connector with hadoop-aws, aws-java-sdk-bundle)
+- [x] Implement Delta Lake tables:
+  - [x] `transaction_fraud_detection` - TFD streaming data
+  - [x] `estimated_time_of_arrival` - ETA streaming data
+  - [x] `e_commerce_customer_interactions` - ECCI streaming data
+- [x] Create Kafka → Delta Lake pipeline (Spark Structured Streaming)
+- [x] Add Spark to Services dropdown in navbar
+- [x] Add Spark Grafana dashboards (Performance Metrics + Structured Streaming)
+- [x] Update Sklearn to read from Delta Lake instead of parquet files
+- [x] Remove parquet saving from River service (freed from data persistence)
+- [ ] Add SQL query interface to Reflex (optional - future enhancement)
 
-**Delta Lake + MinIO Configuration:**
-```python
-spark.conf.set("spark.hadoop.fs.s3a.endpoint", "http://minio:9000")
-spark.conf.set("spark.hadoop.fs.s3a.path.style.access", "true")
-spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
+**Spark + Delta Lake Architecture:**
 ```
+Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehouse/delta/*)
+                                                    ↓
+                                              Sklearn Service (reads via deltalake Python library)
+```
+
+**Components:**
+- Spark Master (bitnamilegacy/spark:4.0.0) - port 4040
+- Spark Worker (1 replica)
+- Spark Streaming Deployment (3 jobs: TFD, ETA, ECCI)
+- Delta Lake 4.0.0 JARs (downloaded via initContainers)
+- Kafka clients 3.9.0, Hadoop AWS 3.4.2, AWS SDK 1.12.790
 
 ### Phase 10: Batch ML Studies (Priority: LOW - Study phase)
 **Goal:** Complement incremental ML with batch ML techniques
@@ -285,10 +284,20 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
   - Test all three project pages (TFD, ETA, ECCI)
 
 ### Code Quality
-- [ ] Add unit tests for FastAPI endpoints
+- [ ] Add unit tests for River/Sklearn endpoints
 - [ ] Add integration tests for Reflex pages
 - [ ] Add type hints throughout codebase
 - [ ] Set up pre-commit hooks (black, isort, mypy)
+
+### Cleanup Tasks
+- [ ] Update historical documentation in `docs/` folder:
+  - [ ] `docs/DEPLOYMENT.md` - Remove FastAPI/Streamlit references
+  - [ ] `docs/ARGOCD_INTEGRATION_ROADMAP.md` - Update CI/CD examples
+  - [ ] `docs/secrets_instructions_k3d.md` - Update port mappings
+  - [ ] `docs/ROADMAP.md` - Update or archive
+- [ ] Clean up old test notebooks in `tests/`:
+  - [ ] Update paths from `../fastapi_app/` to current structure
+  - [ ] Or archive/delete if no longer needed
 
 ### Documentation
 - [ ] Create README.md with project overview
@@ -301,6 +310,15 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 - [ ] Optimize Kafka consumer batch sizes
 - [ ] Add caching for expensive computations
 - [ ] Consider Redis for Reflex state (already configured)
+- [ ] **Optimize River/Sklearn Docker builds** (Priority: HIGH)
+  - Currently installing dependencies at runtime via `entrypoint.sh` (slow, OOM-prone)
+  - Move `uv pip install -r requirements.txt` to Dockerfile build stage
+  - Benefits: Faster pod startup, no OOM during dependency installation
+- [x] **Polars instead of PySpark for Delta Lake queries** (COMPLETED)
+  - River and Sklearn now use Polars for Delta Lake queries
+  - Benefits achieved: No JVM overhead, faster startup, lower memory footprint
+  - River memory limits reduced from 4Gi back to 2Gi
+  - Using `pl.scan_delta()` with lazy evaluation for optimized queries
 
 ### Infrastructure
 - [x] Update MinIO volume mount to use dynamic project path instead of hardcoded `/data/minio`
@@ -338,35 +356,43 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 │                         k3d Kubernetes Cluster                       │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                      │
-│  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐      │
-│  │  Reflex  │◄──►│  FastAPI │    │  Kafka   │◄──►│ Producers│      │
-│  │ Frontend │    │(Analytics)    │          │    │ (Python) │      │
-│  └────┬─────┘    └──────────┘    └────┬─────┘    └──────────┘      │
-│       │                               │                              │
-│       │    ┌──────────┐               │                              │
-│       ├───►│  River   │◄──────────────┘                              │
-│       │    │(ML Train)│                                              │
-│       │    └────┬─────┘                                              │
-│       │         │                                                    │
-│       │         ▼                                                    │
-│       │    ┌──────────┐    ┌──────────┐    ┌──────────┐             │
-│       │    │  MLflow  │◄──►│PostgreSQL│    │  MinIO   │             │
-│       │    │          │    │(metadata)│    │(artifacts)│             │
-│       │    └──────────┘    └──────────┘    └────┬─────┘             │
-│       │                                         │                    │
-│       │                                         ▼                    │
-│       │                                    ┌──────────┐             │
-│       │                                    │  Delta   │ (future)    │
-│       │                                    │  Lake    │             │
-│       │                                    └──────────┘             │
-│       │                                                              │
-│       ▼                                                              │
-│  ┌──────────┐    ┌──────────┐    ┌──────────┐                       │
-│  │Prometheus│◄──►│ Grafana  │◄──►│Alertmgr  │                       │
-│  │  :9090   │    │  :3001   │    │  :9094   │                       │
-│  └──────────┘    └──────────┘    └──────────┘                       │
+│  ┌──────────┐                        ┌──────────┐    ┌──────────┐  │
+│  │  Reflex  │◄──────────────────────►│  Kafka   │◄──►│ Producers│  │
+│  │ Frontend │                        │          │    │ (Python) │  │
+│  │  :3000   │                        └────┬─────┘    └──────────┘  │
+│  └────┬─────┘                             │                         │
+│       │                                   │                         │
+│       │    ┌──────────┐    ┌──────────┐  │                         │
+│       ├───►│  River   │◄───┤  Sklearn │  │                         │
+│       │    │(Incr. ML)│    │(Batch ML)│  │                         │
+│       │    │  :8002   │    │  :8003   │  │                         │
+│       │    └────┬─────┘    └────┬─────┘  │                         │
+│       │         │               │        │                          │
+│       │         └───────┬───────┘        │                          │
+│       │                 │                │                          │
+│       │                 ▼                ▼                          │
+│       │    ┌──────────┐    ┌──────────┐    ┌──────────┐            │
+│       │    │  MLflow  │◄──►│PostgreSQL│    │  MinIO   │            │
+│       │    │  :5000   │    │(metadata)│    │(artifacts)│            │
+│       │    └──────────┘    └──────────┘    └────┬─────┘            │
+│       │                                         │                   │
+│       │                                         ▼                   │
+│       │                                    ┌──────────┐            │
+│       │                                    │  Delta   │            │
+│       │                                    │  Lake    │            │
+│       │                                    └──────────┘            │
+│       │                                                             │
+│       ▼                                                             │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐                      │
+│  │Prometheus│◄──►│ Grafana  │◄──►│Alertmgr  │                      │
+│  │  :9090   │    │  :3001   │    │  :9094   │                      │
+│  └──────────┘    └──────────┘    └──────────┘                      │
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
+
+Services Removed:
+- FastAPI Analytics (8001) → Merged into River/Sklearn
+- Streamlit (8501) → Replaced by Reflex
 ```
 
 ---
@@ -392,7 +418,7 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 
 ## Notes
 
-- **ML Training Service (DONE):** River service now handles real-time ML training separately from FastAPI
+- **ML Training Service (DONE):** River service handles real-time ML training
 - **Kafka Migration (DONE):** Bitnami Kafka 4.0.0 with KRaft mode, JMX disabled due to compatibility
 - **Observability Stack (90% DONE):** kube-prometheus-stack v80.6.0 with dashboards and alerting rules
   - PostgreSQL, Redis, MinIO metrics exporters enabled and working
@@ -400,11 +426,14 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 - **Scikit-Learn Service (DONE):** Batch ML service with YellowBrick visualizations
   - Reflex TFD page now has Batch ML tab with XGBClassifier predictions
   - YellowBrick visualizations available (Classification, Target, Model Selection)
-  - Sklearn option enabled in navbar Services dropdown
-- **Service Consolidation (PLANNED):** Phase 6b will deprecate FastAPI Analytics
-  - Move data endpoints (`/sample`, `/unique_values`) to River
-  - Keep YellowBrick and batch ML in Sklearn
+- **Service Consolidation (DONE - Phase 6b):** FastAPI Analytics deprecated
+  - Data endpoints (`/sample`, `/unique_values`, `/initial_sample`) moved to River
+  - Cluster endpoints (`/cluster_counts`, `/cluster_feature_counts`) moved to River
+  - YellowBrick and batch ML remain in Sklearn
   - Result: 2 services (River + Sklearn) instead of 3
+- **Streamlit Removal (DONE):** Streamlit app fully replaced by Reflex
+  - All pages migrated: TFD, ETA, ECCI
+  - `apps/streamlit/` and Helm templates deleted
 - **MLflow Integration:** Phase 5 enables production-ready model serving from MLflow registry
 - **Next Quick Wins:** Alertmanager notifications (low effort, high value) or Phase 5 (MLflow model serving)
 - **Dependencies:** Delta Lake and A/B Testing require MinIO to be set up first
@@ -420,4 +449,4 @@ spark.conf.set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
 
 ---
 
-*Last updated: 2025-12-26 (Phase 6 Scikit-Learn Service completed, Phase 6b Service Consolidation planned)*
+*Last updated: 2025-12-27 (Phase 6b Service Consolidation completed, FastAPI removed, Streamlit removed)*

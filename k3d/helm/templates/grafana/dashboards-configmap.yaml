@@ -85,5 +85,33 @@ metadata:
 data:
   kafka.json: |
 {{ .Files.Get "files/grafana/dashboards/kafka.json" | indent 4 }}
+---
+# ConfigMap for Spark Dashboard
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-grafana-dashboard-spark
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: grafana
+    release: {{ .Release.Name }}
+    grafana_dashboard: "1"
+data:
+  spark.json: |
+{{ .Files.Get "files/grafana/dashboards/spark.json" | indent 4 }}
+---
+# ConfigMap for Spark Streaming Dashboard
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-grafana-dashboard-spark-streaming
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: grafana
+    release: {{ .Release.Name }}
+    grafana_dashboard: "1"
+data:
+  spark-streaming.json: |
+{{ .Files.Get "files/grafana/dashboards/spark-streaming.json" | indent 4 }}
 {{- end }}
 {{- end }}

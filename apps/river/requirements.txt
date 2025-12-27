@@ -3,11 +3,18 @@
 fastapi
 uvicorn
 prometheus-fastapi-instrumentator
+pydantic
+starlette
 
 # ML Training
 pandas
+numpy
 mlflow
 kafka-python
 river
 boto3
 pyarrow
+
+# Delta Lake / Polars (lightweight, lazy evaluation, no JVM)
+polars
+deltalake

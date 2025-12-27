@@ -1,0 +1,83 @@
+{{- if and .Values.spark.enabled (index .Values "kube-prometheus-stack" "enabled") }}
+# Spark Master ServiceMonitor
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}-spark-master
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: spark
+    release: {{ .Release.Name }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: spark
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: master
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: http
+      interval: 15s
+      path: /metrics/prometheus
+      scheme: http
+---
+# Spark Worker ServiceMonitor
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}-spark-worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: spark
+    release: {{ .Release.Name }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: spark
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: worker
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: http
+      interval: 15s
+      path: /metrics/prometheus
+      scheme: http
+---
+# Spark Streaming Driver ServiceMonitor
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}-spark-streaming
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: spark-streaming
+    release: {{ .Release.Name }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "coelho-realtime.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: spark-streaming
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    # Transaction Fraud Detection app (port 4040)
+    - port: spark-ui-tfd
+      interval: 15s
+      path: /metrics/prometheus
+      scheme: http
+    # Estimated Time of Arrival app (port 4041)
+    - port: spark-ui-eta
+      interval: 15s
+      path: /metrics/prometheus
+      scheme: http
+    # E-Commerce Customer Interactions app (port 4042)
+    - port: spark-ui-ecci
+      interval: 15s
+      path: /metrics/prometheus
+      scheme: http
+{{- end }}

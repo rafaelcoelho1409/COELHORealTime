@@ -1,6 +1,6 @@
 {{/*
 Generate image name based on environment
-Usage: {{ include "coelho-realtime.imageName" (dict "appName" "fastapi" "root" .) }}
+Usage: {{ include "coelho-realtime.imageName" (dict "appName" "river" "root" .) }}
 */}}
 {{- define "coelho-realtime.imageName" -}}
 {{- $image := index .root.Values .appName "image" -}}
@@ -18,16 +18,19 @@ Usage: {{ include "coelho-realtime.imageName" (dict "appName" "fastapi" "root" .
 
 {{/*
 Common environment variables for all services
+NOTE: FASTAPI service (port 8001) has been terminated and merged into River/Sklearn services
 */}}
 {{- define "coelho-realtime.commonEnvVars" -}}
-FASTAPI_HOST: "coelho-realtime-fastapi"
 KAFKA_HOST: "coelho-realtime-kafka"
 MLFLOW_HOST: "coelho-realtime-mlflow"
-STREAMLIT_HOST: "coelho-realtime-streamlit"
 REFLEX_HOST: "coelho-realtime-reflex"
 RIVER_HOST: "coelho-realtime-river"
 SKLEARN_HOST: "coelho-realtime-sklearn"
 REDIS_HOST: "redis://coelho-realtime-redis-master:6379"
+MINIO_HOST: "coelho-realtime-minio"
+MINIO_ACCESS_KEY: "{{ .Values.minio.rootUser }}"
+MINIO_SECRET_KEY: "{{ .Values.minio.rootPassword }}"
+SPARK_MASTER_HOST: "coelho-realtime-spark-master-svc"
 {{- end -}}
 
 
@@ -138,3 +141,30 @@ resources:
     memory: {{ index .root.Values .appName "resources" "limits" "memory" }}
     cpu: {{ index .root.Values .appName "resources" "limits" "cpu" }}
 {{- end -}}
+
+
+{{/*
+Generate fullname for resources
+*/}}
+{{- define "coelho-realtime.fullname" -}}
+{{- .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+
+{{/*
+Common labels
+*/}}
+{{- define "coelho-realtime.labels" -}}
+helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+{{ include "coelho-realtime.selectorLabels" . }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+
+{{/*
+Selector labels
+*/}}
+{{- define "coelho-realtime.selectorLabels" -}}
+app.kubernetes.io/name: {{ .Chart.Name }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}

@@ -2,8 +2,8 @@
 Transaction Fraud Detection - Batch ML Training Script
 
 This script trains an XGBClassifier model for fraud detection using batch learning.
-It consumes data from Kafka, trains the model, logs to MLflow, and saves artifacts.
-Supports graceful shutdown via SIGTERM/SIGINT signals.
+Reads data from Delta Lake on MinIO (with Kafka fallback), trains the model,
+logs to MLflow, and saves artifacts. Supports graceful shutdown via SIGTERM/SIGINT.
 """
 import pickle
 import os
@@ -34,13 +34,11 @@ MLFLOW_HOST = os.environ.get("MLFLOW_HOST", "localhost")
 
 PROJECT_NAME = "Transaction Fraud Detection"
 MODEL_NAME = "XGBClassifier"
-DATA_PATH = "data/transaction_fraud_detection.parquet"
 MODEL_FOLDER = "models/transaction_fraud_detection"
 ENCODERS_PATH = "encoders/sklearn/transaction_fraud_detection.pkl"
 
 os.makedirs(MODEL_FOLDER, exist_ok=True)
 os.makedirs("encoders/sklearn", exist_ok=True)
-os.makedirs("data", exist_ok=True)
 
 # Global flag for graceful shutdown
 _shutdown_requested = False

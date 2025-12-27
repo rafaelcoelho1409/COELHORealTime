@@ -12,43 +12,7 @@ registry:
 # Image configurations
 # Note: Skaffold overrides these with local builds during 'skaffold dev'
 # ArgoCD Image Updater updates these tags when new images are pushed to registry
-fastapi:
-  image: coelho-realtime-fastapi:latest
-  imagePullPolicy: IfNotPresent
-  replicas: 1
-  resources:
-    requests:
-      memory: "8Gi"
-      cpu: "2000m"
-    limits:
-      memory: "16Gi"
-      cpu: "4000m"
-  portsSettings:
-    ports:
-      - name: http
-        port: 8001
-        targetPort: 8001
-        nodePort: 30000
-        protocol: TCP
-    type: LoadBalancer #ClusterIP
-  livenessProbeSettings:
-    livenessProbe:
-      httpGet:
-        path: /health
-        port: 8001
-      initialDelaySeconds: 120  # Wait 2 minutes for startup (model loading)
-      periodSeconds: 30         # Check every 30 seconds
-      timeoutSeconds: 10        # Allow 10 seconds for response (was 1s default!)
-      failureThreshold: 5       # Restart after 5 failures (150 seconds of unresponsiveness)
-  readinessProbeSettings:
-    readinessProbe:
-      httpGet:
-        path: /health
-        port: 8001
-      initialDelaySeconds: 60
-      periodSeconds: 10
-      timeoutSeconds: 5
-      failureThreshold: 3
+# NOTE: fastapi service (port 8001) has been terminated and merged into river/sklearn services
 
 
 # Bitnami Kafka chart configuration (https://github.com/bitnami/charts/tree/main/bitnami/kafka)
@@ -147,44 +111,7 @@ kafka-producers:
       cpu: "250m"
 
 
-# DEPRECATED: Streamlit has been replaced by Reflex
-# Set enabled: true to re-enable if needed for reference
-streamlit:
-  enabled: false
-  image: coelho-realtime-streamlit:latest
-  imagePullPolicy: IfNotPresent
-  replicas: 1
-  resources:
-    requests:
-      memory: "256Mi"
-      cpu: "125m"
-    limits:
-      memory: "512Mi"
-      cpu: "250m"
-  portsSettings:
-    ports:
-      - name: http
-        port: 8501
-        targetPort: 8501
-        nodePort: 30003
-        protocol: TCP
-    type: LoadBalancer #ClusterIP
-  livenessProbeSettings:
-    livenessProbe:
-      httpGet:
-        path: /_stcore/health
-        port: 8501
-      initialDelaySeconds: 30
-      periodSeconds: 15
-      failureThreshold: 3
-  readinessProbeSettings:
-    readinessProbe:
-      httpGet:
-        path: /_stcore/health
-        port: 8501
-      initialDelaySeconds: 10
-      periodSeconds: 10
-      failureThreshold: 3
+# NOTE: Streamlit has been removed - fully replaced by Reflex
 
 
 # MLflow subchart configuration (community-charts/mlflow)
@@ -432,9 +359,14 @@ minio:
       memory: 512Mi
   # Replicas (standalone mode = 1)
   replicas: 1
-  # Disable ALL post-install job triggers (causes timing issues with ConfigMap)
-  # Bucket will be created by our custom bucket-job.yaml instead
-  buckets: []
+  # Buckets to create on MinIO startup (native MinIO chart provisioning)
+  buckets:
+    - name: mlflow-artifacts
+      policy: none
+      purge: false
+    - name: lakehouse
+      policy: none
+      purge: false
   users: []
   policies: []
   customCommands: []
@@ -776,3 +708,146 @@ kube-prometheus-stack:
       prometheus: true
       prometheusOperator: true
       windows: false
+
+
+# Bitnami Spark configuration (https://github.com/bitnami/charts/tree/main/bitnami/spark)
+# Used for Kafka → Delta Lake streaming pipeline
+# Delta Lake tables stored on MinIO (S3-compatible)
+# NOTE: Using bitnamilegacy due to Bitnami's August 2025 migration to paid model
+spark:
+  enabled: true
+  # Spark 4.0.0 image (from bitnamilegacy - free legacy images)
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/spark
+    tag: "4.0.0"
+  # Master configuration
+  master:
+    # Resource limits for local k3d
+    resources:
+      requests:
+        memory: "1Gi"
+        cpu: "500m"
+      limits:
+        memory: "2Gi"
+        cpu: "1000m"
+    # Extra environment variables for Spark configuration
+    extraEnvVars:
+      # Delta Lake and S3 configuration
+      - name: SPARK_EXTRA_CLASSPATH
+        value: "/opt/bitnami/spark/jars/extra/*"
+    # Init container to download Delta Lake, Kafka, and Hadoop-AWS JARs
+    initContainers:
+      - name: download-delta-jars
+        image: curlimages/curl:8.11.1
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            echo "Downloading Delta Lake JARs for Spark 4.0..."
+            mkdir -p /jars
+
+            # Delta Lake 4.0.0 (for Spark 4.0)
+            curl -L -o /jars/delta-spark_2.13-4.0.0.jar \
+              https://repo1.maven.org/maven2/io/delta/delta-spark_2.13/4.0.0/delta-spark_2.13-4.0.0.jar
+            curl -L -o /jars/delta-storage-4.0.0.jar \
+              https://repo1.maven.org/maven2/io/delta/delta-storage/4.0.0/delta-storage-4.0.0.jar
+
+            # Kafka Structured Streaming (Spark 4.0)
+            curl -L -o /jars/spark-sql-kafka-0-10_2.13-4.0.0.jar \
+              https://repo1.maven.org/maven2/org/apache/spark/spark-sql-kafka-0-10_2.13/4.0.0/spark-sql-kafka-0-10_2.13-4.0.0.jar
+            curl -L -o /jars/spark-token-provider-kafka-0-10_2.13-4.0.0.jar \
+              https://repo1.maven.org/maven2/org/apache/spark/spark-token-provider-kafka-0-10_2.13/4.0.0/spark-token-provider-kafka-0-10_2.13-4.0.0.jar
+            curl -L -o /jars/kafka-clients-3.9.0.jar \
+              https://repo1.maven.org/maven2/org/apache/kafka/kafka-clients/3.9.0/kafka-clients-3.9.0.jar
+            curl -L -o /jars/commons-pool2-2.12.0.jar \
+              https://repo1.maven.org/maven2/org/apache/commons/commons-pool2/2.12.0/commons-pool2-2.12.0.jar
+
+            # Hadoop AWS (S3A) for MinIO connectivity
+            curl -L -o /jars/hadoop-aws-3.4.2.jar \
+              https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.4.2/hadoop-aws-3.4.2.jar
+            curl -L -o /jars/aws-java-sdk-bundle-1.12.790.jar \
+              https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.790/aws-java-sdk-bundle-1.12.790.jar
+
+            echo "All JARs downloaded successfully!"
+            ls -la /jars/
+        volumeMounts:
+          - name: spark-extra-jars
+            mountPath: /jars
+    extraVolumes:
+      - name: spark-extra-jars
+        emptyDir: {}
+    extraVolumeMounts:
+      - name: spark-extra-jars
+        mountPath: /opt/bitnami/spark/jars/extra
+  # Worker configuration
+  worker:
+    # Single worker for local development
+    replicaCount: 1
+    # Resource limits
+    resources:
+      requests:
+        memory: "2Gi"
+        cpu: "1000m"
+      limits:
+        memory: "4Gi"
+        cpu: "2000m"
+    # Same init container for workers
+    extraEnvVars:
+      - name: SPARK_EXTRA_CLASSPATH
+        value: "/opt/bitnami/spark/jars/extra/*"
+    initContainers:
+      - name: download-delta-jars
+        image: curlimages/curl:8.11.1
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            echo "Downloading Delta Lake JARs for Spark 4.0..."
+            mkdir -p /jars
+
+            # Delta Lake 4.0.0 (for Spark 4.0)
+            curl -L -o /jars/delta-spark_2.13-4.0.0.jar \
+              https://repo1.maven.org/maven2/io/delta/delta-spark_2.13/4.0.0/delta-spark_2.13-4.0.0.jar
+            curl -L -o /jars/delta-storage-4.0.0.jar \
+              https://repo1.maven.org/maven2/io/delta/delta-storage/4.0.0/delta-storage-4.0.0.jar
+
+            # Kafka Structured Streaming (Spark 4.0)
+            curl -L -o /jars/spark-sql-kafka-0-10_2.13-4.0.0.jar \
+              https://repo1.maven.org/maven2/org/apache/spark/spark-sql-kafka-0-10_2.13/4.0.0/spark-sql-kafka-0-10_2.13-4.0.0.jar
+            curl -L -o /jars/spark-token-provider-kafka-0-10_2.13-4.0.0.jar \
+              https://repo1.maven.org/maven2/org/apache/spark/spark-token-provider-kafka-0-10_2.13/4.0.0/spark-token-provider-kafka-0-10_2.13-4.0.0.jar
+            curl -L -o /jars/kafka-clients-3.9.0.jar \
+              https://repo1.maven.org/maven2/org/apache/kafka/kafka-clients/3.9.0/kafka-clients-3.9.0.jar
+            curl -L -o /jars/commons-pool2-2.12.0.jar \
+              https://repo1.maven.org/maven2/org/apache/commons/commons-pool2/2.12.0/commons-pool2-2.12.0.jar
+
+            # Hadoop AWS (S3A) for MinIO connectivity
+            curl -L -o /jars/hadoop-aws-3.4.2.jar \
+              https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.4.2/hadoop-aws-3.4.2.jar
+            curl -L -o /jars/aws-java-sdk-bundle-1.12.780.jar \
+              https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle-1.12.780/aws-java-sdk-bundle-1.12.780.jar
+
+            echo "All JARs downloaded successfully!"
+            ls -la /jars/
+        volumeMounts:
+          - name: spark-extra-jars
+            mountPath: /jars
+    extraVolumes:
+      - name: spark-extra-jars
+        emptyDir: {}
+    extraVolumeMounts:
+      - name: spark-extra-jars
+        mountPath: /opt/bitnami/spark/jars/extra
+  # Service configuration
+  service:
+    type: ClusterIP
+  # Prometheus metrics
+  metrics:
+    enabled: true
+    masterAnnotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "8080"
+      prometheus.io/path: "/metrics/master/prometheus"
+    workerAnnotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "8080"
+      prometheus.io/path: "/metrics/worker/prometheus"

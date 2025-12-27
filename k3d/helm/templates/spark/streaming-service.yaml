@@ -1,0 +1,33 @@
+{{- if .Values.spark.enabled }}
+# Service for Spark Streaming Driver metrics
+# Each streaming app exposes Spark UI on a different port (4040, 4041, 4042)
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "coelho-realtime.fullname" . }}-spark-streaming
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "coelho-realtime.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spark-streaming
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "coelho-realtime.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: spark-streaming
+  ports:
+    # Transaction Fraud Detection Spark UI
+    - name: spark-ui-tfd
+      port: 4040
+      targetPort: 4040
+      protocol: TCP
+    # Estimated Time of Arrival Spark UI
+    - name: spark-ui-eta
+      port: 4041
+      targetPort: 4041
+      protocol: TCP
+    # E-Commerce Customer Interactions Spark UI
+    - name: spark-ui-ecci
+      port: 4042
+      targetPort: 4042
+      protocol: TCP
+{{- end }}

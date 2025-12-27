@@ -2,17 +2,19 @@
 River ML Training Helper Functions
 
 Functions for incremental machine learning training using River library.
+Reads data from Delta Lake on MinIO (S3-compatible storage) via Polars.
 """
 import pickle
 import os
 import sys
 import time
-from typing import Any, Dict, Hashable
+from typing import Any, Dict, Hashable, Optional, List
 from kafka import KafkaConsumer
 from kafka.errors import NoBrokersAvailable
 import json
-import pandas as pd
 import datetime as dt
+import pandas as pd
+import polars as pl
 from river import (
     base,
     compose,
@@ -26,11 +28,146 @@ from river import (
 )
 
 
-KAFKA_HOST = os.environ["KAFKA_HOST"]
+KAFKA_HOST = os.environ.get("KAFKA_HOST", "localhost")
 
+# MinIO (S3-compatible) configuration for Delta Lake
+MINIO_HOST = os.environ.get("MINIO_HOST", "localhost")
+MINIO_ENDPOINT = f"http://{MINIO_HOST}:9000"
+MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
+MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "minioadmin123")
+
+# Delta Lake storage options for Polars/deltalake
+DELTA_STORAGE_OPTIONS = {
+    "AWS_ENDPOINT_URL": MINIO_ENDPOINT,
+    "AWS_ACCESS_KEY_ID": MINIO_ACCESS_KEY,
+    "AWS_SECRET_ACCESS_KEY": MINIO_SECRET_KEY,
+    "AWS_REGION": "us-east-1",
+    "AWS_S3_ALLOW_UNSAFE_RENAME": "true",
+    "AWS_ALLOW_HTTP": "true",
+}
 
 # Configuration
 KAFKA_BROKERS = f'{KAFKA_HOST}:9092'
+
+# Delta Lake paths (using s3:// for Polars, not s3a://)
+DELTA_PATHS = {
+    "Transaction Fraud Detection": "s3://lakehouse/delta/transaction_fraud_detection",
+    "Estimated Time of Arrival": "s3://lakehouse/delta/estimated_time_of_arrival",
+    "E-Commerce Customer Interactions": "s3://lakehouse/delta/e_commerce_customer_interactions",
+    "Sales Forecasting": "s3://lakehouse/delta/sales_forecasting",
+}
+
+
+# =============================================================================
+# Optimized Delta Lake Queries via Polars (Lazy Evaluation)
+# =============================================================================
+def get_delta_lazyframe(project_name: str) -> Optional[pl.LazyFrame]:
+    """Get a lazy Polars LazyFrame for a Delta Lake table.
+
+    LazyFrame doesn't load data until .collect() is called.
+    """
+    delta_path = DELTA_PATHS.get(project_name)
+    if not delta_path:
+        print(f"Unknown project: {project_name}")
+        return None
+    try:
+        return pl.scan_delta(delta_path, storage_options=DELTA_STORAGE_OPTIONS)
+    except Exception as e:
+        print(f"Error loading Delta table for {project_name}: {e}")
+        return None
+
+
+def get_unique_values_polars(project_name: str, column_name: str, limit: int = 100) -> List[str]:
+    """Get unique values for a column using Polars (optimized with lazy evaluation).
+
+    Polars will only read the necessary column and compute distinct values efficiently.
+    """
+    try:
+        lf = get_delta_lazyframe(project_name)
+        if lf is None:
+            return []
+
+        # Optimized query: select only the column, get unique, limit
+        # Polars pushes this down for efficient execution
+        unique_df = (
+            lf.select(pl.col(column_name).cast(pl.Utf8))
+            .filter(pl.col(column_name).is_not_null())
+            .unique()
+            .limit(limit)
+            .collect()
+        )
+        return unique_df[column_name].to_list()
+    except Exception as e:
+        print(f"Error getting unique values via Polars for {column_name}: {e}")
+        return []
+
+
+def get_sample_polars(project_name: str, n: int = 1) -> Optional[pd.DataFrame]:
+    """Get a sample using Polars (optimized)."""
+    try:
+        lf = get_delta_lazyframe(project_name)
+        if lf is None:
+            return None
+
+        # Use limit for speed - gets first N rows (very fast)
+        sample_df = lf.limit(n).collect()
+        return sample_df.to_pandas()
+    except Exception as e:
+        print(f"Error getting sample via Polars: {e}")
+        return None
+
+
+def precompute_all_unique_values_polars(project_name: str) -> Dict[str, List[str]]:
+    """Precompute unique values for all columns of a project using Polars.
+
+    This runs once at startup and caches results for instant access.
+    """
+    try:
+        lf = get_delta_lazyframe(project_name)
+        if lf is None:
+            return {}
+
+        # Get schema to know column names
+        schema = lf.collect_schema()
+        columns = schema.names()
+        unique_values_cache = {}
+
+        for col_name in columns:
+            try:
+                unique_df = (
+                    lf.select(pl.col(col_name).cast(pl.Utf8))
+                    .filter(pl.col(col_name).is_not_null())
+                    .unique()
+                    .limit(100)
+                    .collect()
+                )
+                unique_values_cache[col_name] = unique_df[col_name].to_list()
+            except Exception as e:
+                print(f"Error getting unique values for column {col_name}: {e}")
+                unique_values_cache[col_name] = []
+
+        print(f"Precomputed unique values for {project_name}: {len(columns)} columns")
+        return unique_values_cache
+    except Exception as e:
+        print(f"Error precomputing unique values for {project_name}: {e}")
+        return {}
+
+
+def get_initial_sample_polars(project_name: str) -> Optional[dict]:
+    """Get a single sample row as a dictionary using Polars."""
+    try:
+        lf = get_delta_lazyframe(project_name)
+        if lf is None:
+            return None
+
+        # Get first row - very fast operation
+        row_df = lf.limit(1).collect()
+        if row_df.height > 0:
+            return row_df.row(0, named=True)
+        return None
+    except Exception as e:
+        print(f"Error getting initial sample via Polars: {e}")
+        return None
 
 ###---Functions----####
 #Data processing functions
@@ -553,42 +690,40 @@ def create_consumer(project_name, max_retries: int = 5, retry_delay: float = 5.0
     return None
 
 
-def load_or_create_data(consumer, project_name):
-    """Load existing data or create from Kafka consumer."""
-    data_name_dict = {
-        "Transaction Fraud Detection": "transaction_fraud_detection.parquet",
-        "Estimated Time of Arrival": "estimated_time_of_arrival.parquet",
-        "E-Commerce Customer Interactions": "e_commerce_customer_interactions.parquet",
-        #"Sales Forecasting": "sales_forecasting.parquet"
+def load_or_create_data(consumer, project_name: str) -> pd.DataFrame:
+    """Load data from Delta Lake on MinIO or fallback to Kafka."""
+    delta_path_dict = {
+        "Transaction Fraud Detection": "s3://lakehouse/delta/transaction_fraud_detection",
+        "Estimated Time of Arrival": "s3://lakehouse/delta/estimated_time_of_arrival",
+        "E-Commerce Customer Interactions": "s3://lakehouse/delta/e_commerce_customer_interactions",
+        "Sales Forecasting": "s3://lakehouse/delta/sales_forecasting",
     }
-    DATA_PATH = f"data/{data_name_dict[project_name]}"
+    DELTA_PATH = delta_path_dict.get(project_name, "")
 
-    # Try to load from disk first
+    # Try loading from Delta Lake on MinIO first
     try:
-        data_df = pd.read_parquet(DATA_PATH)
-        print("Data loaded from disk.")
+        print(f"Attempting to load data from Delta Lake: {DELTA_PATH}")
+        dt = deltalake.DeltaTable(DELTA_PATH, storage_options=DELTA_STORAGE_OPTIONS)
+        data_df = dt.to_pandas()
+        print(f"Data loaded from Delta Lake for {project_name}: {len(data_df)} rows")
         return data_df
-    except FileNotFoundError:
-        print(f"Data file not found at {DATA_PATH}, attempting to load from Kafka...")
     except Exception as e:
-        print(f"Error loading data from disk: {e}")
+        print(f"Delta Lake not available for {project_name}: {e}")
+        print("Falling back to Kafka...")
 
-    # Fall back to Kafka consumer if available
+    # Fallback to Kafka if Delta Lake is not available
     if consumer is not None:
         try:
-            transaction = None  # Initialize to prevent unbound variable error
+            transaction = None
             for message in consumer:
                 transaction = message.value
                 break
             if transaction is not None:
                 data_df = pd.DataFrame([transaction])
-                print(f"Creating data from Kafka: {project_name}", file=sys.stderr)
+                print(f"Created data from Kafka for {project_name}")
                 return data_df
-            else:
-                print(f"No messages received from Kafka for {project_name}")
         except Exception as e:
             print(f"Error loading data from Kafka: {e}")
 
-    # Return empty DataFrame if all else fails
-    print(f"Warning: No data available for {project_name}, returning empty DataFrame")
+    print(f"Warning: No data available for {project_name}")
     return pd.DataFrame()

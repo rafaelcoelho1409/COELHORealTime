@@ -32,3 +32,7 @@ dependencies:
     version: "32.4.3"
     repository: "https://charts.bitnami.com/bitnami"
     condition: kafka.enabled
+  - name: spark
+    version: "10.0.3"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: spark.enabled

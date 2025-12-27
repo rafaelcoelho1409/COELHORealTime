@@ -2,6 +2,7 @@
 Scikit-Learn Batch ML Helper Functions
 
 Functions for batch machine learning training and YellowBrick visualizations.
+Reads data from Delta Lake on MinIO (S3-compatible storage) via Polars.
 """
 import pickle
 import os
@@ -9,13 +10,14 @@ import sys
 import time
 import io
 import base64
-from typing import Any, Dict
+from typing import Any, Dict, Optional, List
 from kafka import KafkaConsumer
 from kafka.errors import NoBrokersAvailable
 import json
 import pandas as pd
 import numpy as np
 import datetime as dt
+import polars as pl
 from sklearn.preprocessing import (
     StandardScaler,
     OneHotEncoder,
@@ -39,6 +41,29 @@ import matplotlib.pyplot as plt
 
 KAFKA_HOST = os.environ.get("KAFKA_HOST", "localhost")
 KAFKA_BROKERS = f'{KAFKA_HOST}:9092'
+
+# MinIO (S3-compatible) configuration for Delta Lake
+MINIO_HOST = os.environ.get("MINIO_HOST", "localhost")
+MINIO_ENDPOINT = f"http://{MINIO_HOST}:9000"
+MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
+MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "minioadmin123")
+
+# Delta Lake storage options for Polars/deltalake
+DELTA_STORAGE_OPTIONS = {
+    "AWS_ENDPOINT_URL": MINIO_ENDPOINT,
+    "AWS_ACCESS_KEY_ID": MINIO_ACCESS_KEY,
+    "AWS_SECRET_ACCESS_KEY": MINIO_SECRET_KEY,
+    "AWS_REGION": "us-east-1",
+    "AWS_S3_ALLOW_UNSAFE_RENAME": "true",
+    "AWS_ALLOW_HTTP": "true",
+}
+
+# Delta Lake paths (using s3:// for Polars)
+DELTA_PATHS = {
+    "Transaction Fraud Detection": "s3://lakehouse/delta/transaction_fraud_detection",
+    "Estimated Time of Arrival": "s3://lakehouse/delta/estimated_time_of_arrival",
+    "E-Commerce Customer Interactions": "s3://lakehouse/delta/e_commerce_customer_interactions",
+}
 
 
 # =============================================================================
@@ -148,23 +173,21 @@ def create_consumer(project_name: str, max_retries: int = 5, retry_delay: float 
 
 
 def load_or_create_data(consumer, project_name: str) -> pd.DataFrame:
-    """Load data from disk or Kafka."""
-    data_name_dict = {
-        "Transaction Fraud Detection": "transaction_fraud_detection.parquet",
-        "Estimated Time of Arrival": "estimated_time_of_arrival.parquet",
-        "E-Commerce Customer Interactions": "e_commerce_customer_interactions.parquet",
-    }
-    DATA_PATH = f"data/{data_name_dict.get(project_name, '')}"
+    """Load data from Delta Lake on MinIO via Polars or fallback to Kafka."""
+    DELTA_PATH = DELTA_PATHS.get(project_name, "")
 
+    # Try loading from Delta Lake via Polars (fast, lazy evaluation)
     try:
-        data_df = pd.read_parquet(DATA_PATH)
-        print(f"Data loaded from disk for {project_name}")
+        print(f"Attempting to load data from Delta Lake via Polars: {DELTA_PATH}")
+        lf = pl.scan_delta(DELTA_PATH, storage_options=DELTA_STORAGE_OPTIONS)
+        data_df = lf.collect().to_pandas()
+        print(f"Data loaded from Delta Lake for {project_name}: {len(data_df)} rows")
         return data_df
-    except FileNotFoundError:
-        print(f"Data file not found at {DATA_PATH}, attempting Kafka...")
     except Exception as e:
-        print(f"Error loading data from disk: {e}")
+        print(f"Delta Lake not available for {project_name}: {e}")
+        print("Falling back to Kafka...")
 
+    # Fallback to Kafka if Delta Lake is not available
     if consumer is not None:
         try:
             transaction = None

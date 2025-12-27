@@ -5,7 +5,6 @@ import pickle
 import json
 import os
 import signal
-import pandas as pd
 import mlflow
 from collections import (
     Counter,
@@ -16,7 +15,6 @@ from functions import (
     process_sample,
     load_or_create_model,
     create_consumer,
-    load_or_create_data,
     load_or_create_encoders,
 )
 
@@ -41,7 +39,6 @@ signal.signal(signal.SIGINT, signal_handler)
 MLFLOW_HOST = os.environ["MLFLOW_HOST"]
 
 
-DATA_PATH = "data/e_commerce_customer_interactions.parquet"
 MODEL_FOLDER = "models/e_commerce_customer_interactions"
 ENCODERS_PATH = "encoders/river/e_commerce_customer_interactions.pkl"
 CLUSTER_COUNTS_PATH = "data/cluster_counts.json"
@@ -104,17 +101,9 @@ def main():
     # Create consumer
     consumer = create_consumer(PROJECT_NAME)
     print("Consumer started. Waiting for transactions...")
-    data_df = load_or_create_data(
-        consumer,
-        PROJECT_NAME)
     # Batch sizes for different operations (tuned for performance)
     PROGRESS_LOG_INTERVAL = 100     # Log progress every N messages
     ARTIFACT_SAVE_INTERVAL = 1000   # Save model/encoders/cluster data to S3 every N messages
-    DATA_SAVE_INTERVAL = 5000       # Save parquet data every N messages
-
-    # Buffer for efficient DataFrame building (avoid pd.concat on every message)
-    pending_rows = []
-    BUFFER_FLUSH_SIZE = 500  # Flush buffer to DataFrame every N rows
 
     print(f"Starting MLflow run with model: {model.__class__.__name__}")
     with mlflow.start_run(run_name = model.__class__.__name__):
@@ -128,12 +117,6 @@ def main():
                         print("Shutdown requested, breaking out of consumer loop...")
                         break
                     interaction_event = message.value
-                    # Buffer rows instead of concat on every message (major performance fix)
-                    pending_rows.append(interaction_event)
-                    # Flush buffer periodically to avoid memory buildup
-                    if len(pending_rows) >= BUFFER_FLUSH_SIZE:
-                        data_df = pd.concat([data_df, pd.DataFrame(pending_rows)], ignore_index=True)
-                        pending_rows = []
                     # Process the transaction
                     x = {
                          'customer_id':            interaction_event['customer_id'],
@@ -211,23 +194,13 @@ def main():
                         mlflow.log_artifact(CLUSTER_COUNTS_PATH)
                         mlflow.log_artifact(CLUSTER_FEATURE_COUNTS_PATH)
                         print(f"Artifacts saved at offset {message.offset}")
-                    # Save data even less frequently (parquet write is heavy)
-                    if message.offset % DATA_SAVE_INTERVAL == 0 and message.offset > 0:
-                        # Flush pending rows before saving
-                        if pending_rows:
-                            data_df = pd.concat([data_df, pd.DataFrame(pending_rows)], ignore_index=True)
-                            pending_rows = []
-                        data_df.to_parquet(DATA_PATH)
-                        print(f"Data saved at offset {message.offset}")
                 # Consumer timeout reached, loop continues if not shutdown
             print("Graceful shutdown completed.")
         except Exception as e:
             print(f"Error processing message: {str(e)}")
             print("Stopping consumer...")
         finally:
-            # Flush any remaining buffered rows
-            if pending_rows:
-                data_df = pd.concat([data_df, pd.DataFrame(pending_rows)], ignore_index=True)
+            # Save model, encoders, and cluster data on shutdown
             MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
             with open(MODEL_VERSION, 'wb') as f:
                 pickle.dump(model, f)
@@ -241,7 +214,6 @@ def main():
             }
             with open(CLUSTER_FEATURE_COUNTS_PATH, 'w') as f:
                 json.dump(plain_dict_feature_counts, f, indent = 4)
-            data_df.to_parquet(DATA_PATH)
             if consumer is not None:
                 consumer.close()
             mlflow.end_run()

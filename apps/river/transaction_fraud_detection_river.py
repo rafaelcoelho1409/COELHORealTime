@@ -5,13 +5,11 @@ import pickle
 import os
 import signal
 import sys
-import pandas as pd
 import mlflow
 from functions import (
     process_sample,
     load_or_create_model,
     create_consumer,
-    load_or_create_data,
     load_or_create_encoders,
 )
 
@@ -19,14 +17,12 @@ from functions import (
 MLFLOW_HOST = os.environ["MLFLOW_HOST"]
 
 
-DATA_PATH = "data/transaction_fraud_detection.parquet"
 MODEL_FOLDER = "models/transaction_fraud_detection"
 ENCODERS_PATH = "encoders/river/transaction_fraud_detection.pkl"
 PROJECT_NAME = "Transaction Fraud Detection"
 
 os.makedirs(MODEL_FOLDER, exist_ok = True)
 os.makedirs("encoders/river", exist_ok = True)
-os.makedirs("data", exist_ok = True)
 
 # Global flag for graceful shutdown
 _shutdown_requested = False
@@ -65,10 +61,6 @@ def main():
     # Create consumer
     consumer = create_consumer(PROJECT_NAME)
     print("Consumer started. Waiting for transactions...")
-    data_df = load_or_create_data(
-        consumer,
-        PROJECT_NAME)
-    print(f"Initial data loaded with {len(data_df)} rows")
     binary_classification_metrics = [
         'Accuracy',
         'Precision',          # Typically for the positive class (Fraud)
@@ -83,11 +75,6 @@ def main():
     # Batch sizes for different operations (tuned for performance)
     METRICS_LOG_INTERVAL = 100      # Log metrics to MLflow every N messages
     ARTIFACT_SAVE_INTERVAL = 1000   # Save model/encoders to S3 every N messages
-    DATA_SAVE_INTERVAL = 5000       # Save parquet data every N messages
-
-    # Buffer for efficient DataFrame building (avoid pd.concat on every message)
-    pending_rows = []
-    BUFFER_FLUSH_SIZE = 500  # Flush buffer to DataFrame every N rows
 
     print(f"Starting MLflow run with model: {model.__class__.__name__}")
     with mlflow.start_run(run_name = model.__class__.__name__):
@@ -101,12 +88,6 @@ def main():
                         print("Shutdown requested, breaking out of consumer loop...")
                         break
                     transaction = message.value
-                    # Buffer rows instead of concat on every message (major performance fix)
-                    pending_rows.append(transaction)
-                    # Flush buffer periodically to avoid memory buildup
-                    if len(pending_rows) >= BUFFER_FLUSH_SIZE:
-                        data_df = pd.concat([data_df, pd.DataFrame(pending_rows)], ignore_index=True)
-                        pending_rows = []
                     # Process the transaction
                     x = {
                         'transaction_id':        transaction['transaction_id'],
@@ -159,29 +140,18 @@ def main():
                         mlflow.log_artifact(MODEL_VERSION)
                         mlflow.log_artifact(ENCODERS_PATH)
                         print(f"Artifacts saved at offset {message.offset}")
-                    # Save data even less frequently (parquet write is heavy)
-                    if message.offset % DATA_SAVE_INTERVAL == 0 and message.offset > 0:
-                        # Flush pending rows before saving
-                        if pending_rows:
-                            data_df = pd.concat([data_df, pd.DataFrame(pending_rows)], ignore_index=True)
-                            pending_rows = []
-                        data_df.to_parquet(DATA_PATH)
-                        print(f"Data saved at offset {message.offset}")
                 # Consumer timeout reached, loop continues if not shutdown
             print("Graceful shutdown completed.")
         except Exception as e:
             print(f"Error processing message: {str(e)}")
             print("Stopping consumer...")
         finally:
-            # Flush any remaining buffered rows
-            if pending_rows:
-                data_df = pd.concat([data_df, pd.DataFrame(pending_rows)], ignore_index=True)
+            # Save model and encoders on shutdown
             MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
             with open(MODEL_VERSION, 'wb') as f:
                 pickle.dump(model, f)
             with open(ENCODERS_PATH, 'wb') as f:
                 pickle.dump(encoders, f)
-            data_df.to_parquet(DATA_PATH)
             if consumer is not None:
                 consumer.close()
             mlflow.end_run()
