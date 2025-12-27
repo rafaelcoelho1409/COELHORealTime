@@ -2,27 +2,28 @@ from river import (
     metrics
 )
 import pickle
+import json
 import os
 import signal
 import sys
+import tempfile
 import mlflow
 from functions import (
     process_sample,
     load_or_create_model,
     create_consumer,
     load_or_create_encoders,
+    load_kafka_offset_from_mlflow,
+    MLFLOW_MODEL_NAMES,
+    ENCODER_ARTIFACT_NAMES,
+    KAFKA_OFFSET_ARTIFACT,
 )
 
 
 MLFLOW_HOST = os.environ["MLFLOW_HOST"]
-
-
-MODEL_FOLDER = "models/transaction_fraud_detection"
-ENCODERS_PATH = "encoders/river/transaction_fraud_detection.pkl"
 PROJECT_NAME = "Transaction Fraud Detection"
-
-os.makedirs(MODEL_FOLDER, exist_ok = True)
-os.makedirs("encoders/river", exist_ok = True)
+MODEL_NAME = MLFLOW_MODEL_NAMES[PROJECT_NAME]
+ENCODER_ARTIFACT_NAME = ENCODER_ARTIFACT_NAMES[PROJECT_NAME]
 
 # Global flag for graceful shutdown
 _shutdown_requested = False
@@ -47,20 +48,17 @@ def main():
     mlflow.set_tracking_uri(f"http://{MLFLOW_HOST}:5000")
     mlflow.set_experiment(PROJECT_NAME)
     print(f"MLflow experiment '{PROJECT_NAME}' set successfully")
-    encoders = load_or_create_encoders(
-        PROJECT_NAME,
-        "river"
-    )
+    encoders = load_or_create_encoders(PROJECT_NAME, "river")
     print("Encoders loaded")
-    model = load_or_create_model(
-        PROJECT_NAME,
-        "ARFClassifier",
-        MODEL_FOLDER
-    )
+    model = load_or_create_model(PROJECT_NAME, MODEL_NAME)
     print(f"Model loaded: {model.__class__.__name__}")
-    # Create consumer
-    consumer = create_consumer(PROJECT_NAME)
+    # Load last processed Kafka offset from MLflow
+    last_offset = load_kafka_offset_from_mlflow(PROJECT_NAME)
+    # Create consumer with starting offset
+    consumer = create_consumer(PROJECT_NAME, start_offset=last_offset)
     print("Consumer started. Waiting for transactions...")
+    # Track current offset for persistence
+    current_offset = last_offset if last_offset is not None else -1
     binary_classification_metrics = [
         'Accuracy',
         'Precision',          # Typically for the positive class (Fraud)
@@ -115,6 +113,8 @@ def main():
                     # Update the model
                     model.learn_one(x, y)
                     prediction = model.predict_one(x)
+                    # Track current offset for persistence
+                    current_offset = message.offset
                     # Update metrics (once per message, not twice)
                     for metric in binary_classification_metrics:
                         try:
@@ -130,28 +130,43 @@ def main():
                             for metric in binary_classification_metrics
                         }
                         mlflow.log_metrics(metrics_to_log, step=message.offset)
-                    # Save artifacts less frequently (S3 uploads are expensive)
+                    # Save artifacts to MLflow (using temp files)
                     if message.offset % ARTIFACT_SAVE_INTERVAL == 0 and message.offset > 0:
-                        MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
-                        with open(MODEL_VERSION, 'wb') as f:
-                            pickle.dump(model, f)
-                        with open(ENCODERS_PATH, 'wb') as f:
-                            pickle.dump(encoders, f)
-                        mlflow.log_artifact(MODEL_VERSION)
-                        mlflow.log_artifact(ENCODERS_PATH)
-                        print(f"Artifacts saved at offset {message.offset}")
+                        with tempfile.TemporaryDirectory() as tmpdir:
+                            model_path = os.path.join(tmpdir, f"{MODEL_NAME}.pkl")
+                            encoder_path = os.path.join(tmpdir, ENCODER_ARTIFACT_NAME)
+                            offset_path = os.path.join(tmpdir, KAFKA_OFFSET_ARTIFACT)
+                            with open(model_path, 'wb') as f:
+                                pickle.dump(model, f)
+                            with open(encoder_path, 'wb') as f:
+                                pickle.dump(encoders, f)
+                            with open(offset_path, 'w') as f:
+                                json.dump({"last_offset": current_offset}, f)
+                            mlflow.log_artifact(model_path)
+                            mlflow.log_artifact(encoder_path)
+                            mlflow.log_artifact(offset_path)
+                        print(f"Artifacts saved to MLflow at offset {message.offset}")
                 # Consumer timeout reached, loop continues if not shutdown
             print("Graceful shutdown completed.")
         except Exception as e:
             print(f"Error processing message: {str(e)}")
             print("Stopping consumer...")
         finally:
-            # Save model and encoders on shutdown
-            MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
-            with open(MODEL_VERSION, 'wb') as f:
-                pickle.dump(model, f)
-            with open(ENCODERS_PATH, 'wb') as f:
-                pickle.dump(encoders, f)
+            # Save final model, encoders, and offset to MLflow on shutdown
+            with tempfile.TemporaryDirectory() as tmpdir:
+                model_path = os.path.join(tmpdir, f"{MODEL_NAME}.pkl")
+                encoder_path = os.path.join(tmpdir, ENCODER_ARTIFACT_NAME)
+                offset_path = os.path.join(tmpdir, KAFKA_OFFSET_ARTIFACT)
+                with open(model_path, 'wb') as f:
+                    pickle.dump(model, f)
+                with open(encoder_path, 'wb') as f:
+                    pickle.dump(encoders, f)
+                with open(offset_path, 'w') as f:
+                    json.dump({"last_offset": current_offset}, f)
+                mlflow.log_artifact(model_path)
+                mlflow.log_artifact(encoder_path)
+                mlflow.log_artifact(offset_path)
+            print(f"Final artifacts saved to MLflow (offset={current_offset})")
             if consumer is not None:
                 consumer.close()
             mlflow.end_run()

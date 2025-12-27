@@ -3,11 +3,13 @@ River ML Training Helper Functions
 
 Functions for incremental machine learning training using River library.
 Reads data from Delta Lake on MinIO (S3-compatible storage) via Polars.
+Models and encoders are loaded from MLflow artifacts (with local fallback).
 """
 import pickle
 import os
 import sys
 import time
+import tempfile
 from typing import Any, Dict, Hashable, Optional, List
 from kafka import KafkaConsumer
 from kafka.errors import NoBrokersAvailable
@@ -15,6 +17,8 @@ import json
 import datetime as dt
 import pandas as pd
 import polars as pl
+import deltalake
+import mlflow
 from river import (
     base,
     compose,
@@ -56,6 +60,302 @@ DELTA_PATHS = {
     "E-Commerce Customer Interactions": "s3://lakehouse/delta/e_commerce_customer_interactions",
     "Sales Forecasting": "s3://lakehouse/delta/sales_forecasting",
 }
+
+# MLflow configuration
+MLFLOW_HOST = os.environ.get("MLFLOW_HOST", "localhost")
+mlflow.set_tracking_uri(f"http://{MLFLOW_HOST}:5000")
+
+# Model name mapping for MLflow
+MLFLOW_MODEL_NAMES = {
+    "Transaction Fraud Detection": "ARFClassifier",
+    "Estimated Time of Arrival": "ARFRegressor",
+    "E-Commerce Customer Interactions": "DBSTREAM",
+    "Sales Forecasting": "SNARIMAX",
+}
+
+# Encoder artifact names
+ENCODER_ARTIFACT_NAMES = {
+    "Transaction Fraud Detection": "transaction_fraud_detection.pkl",
+    "Estimated Time of Arrival": "estimated_time_of_arrival.pkl",
+    "E-Commerce Customer Interactions": "e_commerce_customer_interactions.pkl",
+    "Sales Forecasting": "sales_forecasting.pkl",
+}
+
+# Kafka offset artifact name (stores last processed offset for continuation)
+KAFKA_OFFSET_ARTIFACT = "kafka_offset.json"
+
+# Best metric selection criteria per project
+# Format: {"metric_name": str, "maximize": bool}
+# - maximize=True: higher is better (e.g., F1, R2, Accuracy)
+# - maximize=False: lower is better (e.g., MAE, RMSE, MSE)
+BEST_METRIC_CRITERIA = {
+    "Transaction Fraud Detection": {"metric_name": "F1", "maximize": True},
+    "Estimated Time of Arrival": {"metric_name": "MAE", "maximize": False},
+    "E-Commerce Customer Interactions": None,  # Clustering - no metrics, use latest
+    "Sales Forecasting": {"metric_name": "MAE", "maximize": False},
+}
+
+
+# =============================================================================
+# MLflow Artifact Loading Functions
+# =============================================================================
+def get_latest_mlflow_run(project_name: str, model_name: str) -> Optional[str]:
+    """Get the latest MLflow run ID for a project and model."""
+    try:
+        experiment = mlflow.get_experiment_by_name(project_name)
+        if experiment is None:
+            print(f"No MLflow experiment found for {project_name}")
+            return None
+
+        runs_df = mlflow.search_runs(
+            experiment_ids=[experiment.experiment_id],
+            max_results=100,
+            order_by=["start_time DESC"]
+        )
+
+        if runs_df.empty:
+            print(f"No runs found in MLflow for {project_name}")
+            return None
+
+        # Filter by model name
+        filtered_runs = runs_df[runs_df["tags.mlflow.runName"] == model_name]
+
+        if filtered_runs.empty:
+            print(f"No runs found for model {model_name} in {project_name}")
+            return None
+
+        return filtered_runs.iloc[0]["run_id"]
+    except Exception as e:
+        print(f"Error getting MLflow run for {project_name}/{model_name}: {e}")
+        return None
+
+
+def get_best_mlflow_run(project_name: str, model_name: str) -> Optional[str]:
+    """Get the MLflow run ID with the best metrics for a project and model.
+
+    Uses BEST_METRIC_CRITERIA to determine which metric to optimize:
+    - For classification: maximize F1
+    - For regression: minimize MAE
+    - For clustering: use latest run (no metrics)
+
+    Returns None if no runs exist (new model will be created from scratch).
+    """
+    try:
+        experiment = mlflow.get_experiment_by_name(project_name)
+        if experiment is None:
+            print(f"No MLflow experiment found for {project_name}")
+            return None
+
+        runs_df = mlflow.search_runs(
+            experiment_ids=[experiment.experiment_id],
+            max_results=1000,  # Get more runs to find the best
+            order_by=["start_time DESC"],
+            filter_string="attributes.status = 'FINISHED'"  # Only completed runs with full artifacts
+        )
+
+        if runs_df.empty:
+            print(f"No FINISHED runs found in MLflow for {project_name}")
+            return None
+
+        # Filter by model name
+        filtered_runs = runs_df[runs_df["tags.mlflow.runName"] == model_name]
+
+        if filtered_runs.empty:
+            print(f"No runs found for model {model_name} in {project_name}")
+            return None
+
+        # Get metric criteria for this project
+        criteria = BEST_METRIC_CRITERIA.get(project_name)
+
+        if criteria is None:
+            # No metric criteria (e.g., clustering) - use latest run
+            print(f"No metric criteria for {project_name}, using latest run")
+            return filtered_runs.iloc[0]["run_id"]
+
+        metric_name = criteria["metric_name"]
+        maximize = criteria["maximize"]
+        metric_column = f"metrics.{metric_name}"
+
+        # Check if metric column exists in the runs
+        if metric_column not in filtered_runs.columns:
+            print(f"Metric {metric_name} not found in runs for {project_name}, using latest run")
+            return filtered_runs.iloc[0]["run_id"]
+
+        # Filter out runs without the metric
+        runs_with_metric = filtered_runs[filtered_runs[metric_column].notna()]
+
+        if runs_with_metric.empty:
+            print(f"No runs with metric {metric_name} for {project_name}, using latest run")
+            return filtered_runs.iloc[0]["run_id"]
+
+        # Find the best run based on metric
+        if maximize:
+            best_idx = runs_with_metric[metric_column].idxmax()
+        else:
+            best_idx = runs_with_metric[metric_column].idxmin()
+
+        best_run = runs_with_metric.loc[best_idx]
+        best_run_id = best_run["run_id"]
+        best_metric_value = best_run[metric_column]
+
+        print(f"Best run for {project_name}/{model_name}: {best_run_id} "
+              f"({metric_name}={best_metric_value:.4f}, maximize={maximize})")
+
+        return best_run_id
+
+    except Exception as e:
+        print(f"Error getting best MLflow run for {project_name}/{model_name}: {e}")
+        return None
+
+
+def load_model_from_mlflow(project_name: str, model_name: str) -> Optional[Any]:
+    """Load model from the best MLflow run based on metrics.
+
+    Uses get_best_mlflow_run to find the run with optimal metrics,
+    allowing new training to continue from the best existing model.
+    """
+    try:
+        run_id = get_best_mlflow_run(project_name, model_name)
+        if run_id is None:
+            return None
+
+        # Download model artifact
+        artifact_path = f"{model_name}.pkl"
+        local_path = mlflow.artifacts.download_artifacts(
+            run_id=run_id,
+            artifact_path=artifact_path
+        )
+
+        with open(local_path, 'rb') as f:
+            model = pickle.load(f)
+
+        print(f"Model loaded from best MLflow run: {project_name}/{model_name} (run_id={run_id})")
+        return model
+    except Exception as e:
+        print(f"Error loading model from MLflow: {e}")
+        return None
+
+
+def load_encoders_from_mlflow(project_name: str) -> Optional[Dict]:
+    """Load encoders from the best MLflow run based on metrics.
+
+    Uses get_best_mlflow_run to find the run with optimal metrics,
+    ensuring encoders are loaded from the same run as the best model.
+    """
+    try:
+        model_name = MLFLOW_MODEL_NAMES.get(project_name)
+        if not model_name:
+            print(f"Unknown project for encoder loading: {project_name}")
+            return None
+
+        run_id = get_best_mlflow_run(project_name, model_name)
+        if run_id is None:
+            return None
+
+        # Download encoder artifact
+        artifact_name = ENCODER_ARTIFACT_NAMES.get(project_name)
+        if not artifact_name:
+            print(f"No encoder artifact name for {project_name}")
+            return None
+
+        local_path = mlflow.artifacts.download_artifacts(
+            run_id=run_id,
+            artifact_path=artifact_name
+        )
+
+        with open(local_path, 'rb') as f:
+            encoders = pickle.load(f)
+
+        print(f"Encoders loaded from best MLflow run: {project_name} (run_id={run_id})")
+        return encoders
+    except Exception as e:
+        print(f"Error loading encoders from MLflow: {e}")
+        return None
+
+
+def load_kafka_offset_from_mlflow(project_name: str) -> Optional[int]:
+    """Load Kafka offset from MLflow runs.
+
+    Strategy:
+    1. First try to load from the best run (same source as model/encoders)
+    2. If best run doesn't have offset, search all FINISHED runs for highest offset
+
+    This handles the case where the best model was trained with old code
+    that didn't save offsets, but newer runs do have offset data.
+
+    Returns None if no offset is stored (new training from scratch).
+    """
+    try:
+        model_name = MLFLOW_MODEL_NAMES.get(project_name)
+        if not model_name:
+            print(f"Unknown project for offset loading: {project_name}")
+            return None
+
+        # First, try the best run (same as model/encoder source)
+        best_run_id = get_best_mlflow_run(project_name, model_name)
+        if best_run_id is not None:
+            try:
+                local_path = mlflow.artifacts.download_artifacts(
+                    run_id=best_run_id,
+                    artifact_path=KAFKA_OFFSET_ARTIFACT
+                )
+                with open(local_path, 'r') as f:
+                    offset_data = json.load(f)
+                offset = offset_data.get("last_offset")
+                if offset is not None:
+                    print(f"Kafka offset loaded from best run: {project_name} offset={offset} (run_id={best_run_id})")
+                    return offset
+            except Exception as e:
+                print(f"Best run doesn't have offset artifact, searching other runs...")
+
+        # Fallback: search all FINISHED runs for the highest offset
+        experiment = mlflow.get_experiment_by_name(project_name)
+        if experiment is None:
+            print(f"No MLflow experiment found for {project_name}, starting from offset 0")
+            return None
+
+        runs_df = mlflow.search_runs(
+            experiment_ids=[experiment.experiment_id],
+            max_results=100,
+            order_by=["start_time DESC"],
+            filter_string="attributes.status = 'FINISHED'"
+        )
+
+        if runs_df.empty:
+            print(f"No FINISHED runs found for {project_name}, starting from offset 0")
+            return None
+
+        # Search runs for highest offset
+        highest_offset = None
+        source_run_id = None
+
+        for _, row in runs_df.iterrows():
+            run_id = row["run_id"]
+            try:
+                local_path = mlflow.artifacts.download_artifacts(
+                    run_id=run_id,
+                    artifact_path=KAFKA_OFFSET_ARTIFACT
+                )
+                with open(local_path, 'r') as f:
+                    offset_data = json.load(f)
+                offset = offset_data.get("last_offset")
+                if offset is not None and (highest_offset is None or offset > highest_offset):
+                    highest_offset = offset
+                    source_run_id = run_id
+            except Exception:
+                # This run doesn't have offset artifact, continue searching
+                continue
+
+        if highest_offset is not None:
+            print(f"Kafka offset loaded from run with highest offset: {project_name} offset={highest_offset} (run_id={source_run_id})")
+            return highest_offset
+
+        print(f"No runs with offset artifact found for {project_name}, starting from offset 0")
+        return None
+
+    except Exception as e:
+        print(f"Error loading Kafka offset from MLflow for {project_name}: {e}")
+        return None
 
 
 # =============================================================================
@@ -319,28 +619,15 @@ def extract_coordinates(x):
     }
 
 def load_or_create_encoders(project_name, library="river"):
-    """Load encoders from disk or create new ones for River incremental learning."""
-    encoders_folders = {
-        "Transaction Fraud Detection": "encoders/river/transaction_fraud_detection.pkl",
-        "Estimated Time of Arrival": "encoders/river/estimated_time_of_arrival.pkl",
-        "E-Commerce Customer Interactions": "encoders/river/e_commerce_customer_interactions.pkl",
-        "Sales Forecasting": "encoders/river/sales_forecasting.pkl"
-    }
-    encoder_path = encoders_folders.get(project_name)
-    if not encoder_path:
-        raise ValueError(f"Unknown project: {project_name}")
+    """Load encoders from MLflow artifacts or create new ones."""
+    # Load from MLflow
+    encoders = load_encoders_from_mlflow(project_name)
+    if encoders is not None:
+        return encoders
 
-    try:
-        with open(encoder_path, 'rb') as f:
-            encoders = pickle.load(f)
-        print(f"Encoders loaded from disk for {project_name}.")
-    except FileNotFoundError as e:
-        encoders = _create_default_encoders(project_name)
-        print(f"Creating new encoders for {project_name}: {e}", file=sys.stderr)
-    except Exception as e:
-        encoders = _create_default_encoders(project_name)
-        print(f"Error loading encoders, creating new: {e}", file=sys.stderr)
-    return encoders
+    # No encoders in MLflow, create new ones
+    print(f"No encoders in MLflow for {project_name}, creating new ones.")
+    return _create_default_encoders(project_name)
 
 
 def _create_default_encoders(project_name):
@@ -588,66 +875,71 @@ def process_sample(x, encoders, project_name):
         }
 
 
-def load_or_create_model(project_name, model_name, folder_path = None):
-    """Load existing model or create a new one"""
-    try:
-        model_files = os.listdir(folder_path)
-        model_files = [
-            os.path.join(folder_path, entry) 
-            for entry 
-            in model_files 
-            if os.path.isfile(os.path.join(folder_path, entry)) and entry.endswith(".pkl")]
-        MODEL_PATH = [x for x in model_files if model_name in x][0]
-        with open(MODEL_PATH, 'rb') as f:
-            model = pickle.load(f)
-        print("Model loaded from disk.")
-    except:
-        if project_name == "Transaction Fraud Detection":
-            model = forest.ARFClassifier(
-                n_models = 10,                  # More models = better accuracy but higher latency
-                drift_detector = drift.ADWIN(),  # Auto-detects concept drift
-                warning_detector = drift.ADWIN(),
-                metric = metrics.ROCAUC(),       # Optimizes for imbalanced data
-                max_features = "sqrt",           # Better for high-dimensional data
-                lambda_value = 6,               # Controls tree depth (higher = more complex)
-                seed = 42
-            )
-        elif project_name == "Estimated Time of Arrival":
-            model = forest.ARFRegressor(
-                n_models = 10,                  # More models = better accuracy but higher latency
-                drift_detector = drift.ADWIN(),  # Auto-detects concept drift
-                warning_detector = drift.ADWIN(),
-                metric = metrics.RMSE(),       # Optimizes for imbalanced data
-                max_features = "sqrt",           # Better for high-dimensional data
-                lambda_value = 6,               # Controls tree depth (higher = more complex)
-                seed = 42
-            )
-        elif project_name == "E-Commerce Customer Interactions":
-            model = cluster.DBSTREAM(
-                clustering_threshold = 1.0,
-                fading_factor = 0.01,
-                cleanup_interval = 2,
-            )
-        elif project_name == "Sales Forecasting":
-            regressor_snarimax = linear_model.PARegressor(
-                    C = 0.01, 
-                    mode = 1)
-            model = time_series.SNARIMAX(
-                p = 2,          # Start with a slightly lower non-seasonal AR
-                d = 1,          # For trend
-                q = 1,          # Start with a slightly lower non-seasonal MA
-                m = 7,          # Weekly seasonality
-                sp = 1,         # Seasonal AR
-                sd = 0,         # No seasonal differencing initially
-                sq = 1,         # Seasonal MA
-                regressor = regressor_snarimax # The pipeline defined above
-            )
-        print(f"Creating model: {project_name}", file = sys.stderr)
-    return model
+def load_or_create_model(project_name, model_name, folder_path=None):
+    """Load model from MLflow artifacts or create a new one."""
+    # Load from MLflow
+    model = load_model_from_mlflow(project_name, model_name)
+    if model is not None:
+        return model
+
+    # No model in MLflow, create new one
+    print(f"No model in MLflow for {project_name}/{model_name}, creating new one.")
+    return _create_default_model(project_name)
 
 
-def create_consumer(project_name, max_retries: int = 5, retry_delay: float = 5.0):
+def _create_default_model(project_name):
+    """Create default model based on project type."""
+    if project_name == "Transaction Fraud Detection":
+        return forest.ARFClassifier(
+            n_models=10,
+            drift_detector=drift.ADWIN(),
+            warning_detector=drift.ADWIN(),
+            metric=metrics.ROCAUC(),
+            max_features="sqrt",
+            lambda_value=6,
+            seed=42
+        )
+    elif project_name == "Estimated Time of Arrival":
+        return forest.ARFRegressor(
+            n_models=10,
+            drift_detector=drift.ADWIN(),
+            warning_detector=drift.ADWIN(),
+            metric=metrics.RMSE(),
+            max_features="sqrt",
+            lambda_value=6,
+            seed=42
+        )
+    elif project_name == "E-Commerce Customer Interactions":
+        return cluster.DBSTREAM(
+            clustering_threshold=1.0,
+            fading_factor=0.01,
+            cleanup_interval=2,
+        )
+    elif project_name == "Sales Forecasting":
+        regressor_snarimax = linear_model.PARegressor(C=0.01, mode=1)
+        return time_series.SNARIMAX(
+            p=2,
+            d=1,
+            q=1,
+            m=7,
+            sp=1,
+            sd=0,
+            sq=1,
+            regressor=regressor_snarimax
+        )
+    else:
+        raise ValueError(f"Unknown project: {project_name}")
+
+
+def create_consumer(project_name, max_retries: int = 5, retry_delay: float = 5.0, start_offset: Optional[int] = None):
     """Create and return Kafka consumer with manual partition assignment.
+
+    Args:
+        project_name: Name of the project for topic selection.
+        max_retries: Maximum connection retry attempts.
+        retry_delay: Delay between retries in seconds.
+        start_offset: If provided, seek to this offset + 1 to continue from last processed.
+                     If None, seeks to beginning (replay all messages).
 
     Note: Uses manual partition assignment instead of group-based subscription
     due to Kafka 4.0 compatibility issues with kafka-python's consumer group protocol.
@@ -676,8 +968,16 @@ def create_consumer(project_name, max_retries: int = 5, retry_delay: float = 5.0
             tp = TopicPartition(KAFKA_TOPIC, 0)
             consumer.assign([tp])
 
-            # Seek to beginning to read all messages (or use stored offset file)
-            consumer.seek_to_beginning(tp)
+            # Seek to appropriate offset
+            if start_offset is not None:
+                # Continue from the next message after last processed
+                next_offset = start_offset + 1
+                consumer.seek(tp, next_offset)
+                print(f"Kafka consumer seeking to offset {next_offset} (continuing from {start_offset})")
+            else:
+                # No stored offset - start from beginning
+                consumer.seek_to_beginning(tp)
+                print(f"Kafka consumer seeking to beginning (no stored offset)")
 
             print(f"Kafka consumer created for {project_name} (manual assignment)")
             return consumer

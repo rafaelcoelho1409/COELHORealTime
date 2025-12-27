@@ -3,8 +3,10 @@ from river import (
     drift
 )
 import pickle
+import json
 import os
 import signal
+import tempfile
 import pandas as pd
 import mlflow
 from functions import (
@@ -13,20 +15,17 @@ from functions import (
     create_consumer,
     load_or_create_data,
     load_or_create_encoders,
+    load_kafka_offset_from_mlflow,
+    MLFLOW_MODEL_NAMES,
+    ENCODER_ARTIFACT_NAMES,
+    KAFKA_OFFSET_ARTIFACT,
 )
 
 
 MLFLOW_HOST = os.environ["MLFLOW_HOST"]
-
-
-DATA_PATH = "data/sales_forecasting.parquet"
-MODEL_FOLDER = "models/sales_forecasting"
-ENCODERS_PATH = "encoders/sales_forecasting.pkl"
 PROJECT_NAME = "Sales Forecasting"
-
-os.makedirs(MODEL_FOLDER, exist_ok = True)
-os.makedirs("encoders", exist_ok = True)
-os.makedirs("data", exist_ok = True)
+MODEL_NAME = MLFLOW_MODEL_NAMES[PROJECT_NAME]
+ENCODER_ARTIFACT_NAME = ENCODER_ARTIFACT_NAMES[PROJECT_NAME]
 
 # Global flag for graceful shutdown
 _shutdown_requested = False
@@ -49,16 +48,15 @@ def main():
     # Initialize model and metrics
     mlflow.set_tracking_uri(f"http://{MLFLOW_HOST}:5000")
     mlflow.set_experiment(PROJECT_NAME)
-    encoders = load_or_create_encoders(
-        PROJECT_NAME
-    )
-    model = load_or_create_model(
-        PROJECT_NAME,
-        MODEL_FOLDER
-    )
-    # Create consumer
-    consumer = create_consumer(PROJECT_NAME)
+    encoders = load_or_create_encoders(PROJECT_NAME)
+    model = load_or_create_model(PROJECT_NAME, MODEL_NAME)
+    # Load last processed Kafka offset from MLflow
+    last_offset = load_kafka_offset_from_mlflow(PROJECT_NAME)
+    # Create consumer with starting offset
+    consumer = create_consumer(PROJECT_NAME, start_offset=last_offset)
     print("Consumer started. Waiting for transactions...")
+    # Track current offset for persistence
+    current_offset = last_offset if last_offset is not None else -1
     data_df = load_or_create_data(
         consumer,
         PROJECT_NAME)
@@ -124,6 +122,8 @@ def main():
                     # Update the model
                     model.learn_one(x = x, y = y)
                     prediction = model.forecast(horizon = 1, xs = [x])[0]
+                    # Track current offset for persistence
+                    current_offset = message.offset
                     # Update metrics (once per message, not twice)
                     for metric in regression_metrics:
                         try:
@@ -139,24 +139,28 @@ def main():
                             for metric in regression_metrics
                         }
                         mlflow.log_metrics(metrics_to_log, step=message.offset)
-                    # Save artifacts less frequently (S3 uploads are expensive)
+                    # Save artifacts to MLflow (using temp files)
                     if message.offset % ARTIFACT_SAVE_INTERVAL == 0 and message.offset > 0:
-                        MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
-                        with open(MODEL_VERSION, 'wb') as f:
-                            pickle.dump(model, f)
-                        with open(ENCODERS_PATH, 'wb') as f:
-                            pickle.dump(encoders, f)
-                        mlflow.log_artifact(MODEL_VERSION)
-                        mlflow.log_artifact(ENCODERS_PATH)
-                        print(f"Artifacts saved at offset {message.offset}")
-                    # Save data even less frequently (parquet write is heavy)
+                        with tempfile.TemporaryDirectory() as tmpdir:
+                            model_path = os.path.join(tmpdir, f"{MODEL_NAME}.pkl")
+                            encoder_path = os.path.join(tmpdir, ENCODER_ARTIFACT_NAME)
+                            offset_path = os.path.join(tmpdir, KAFKA_OFFSET_ARTIFACT)
+                            with open(model_path, 'wb') as f:
+                                pickle.dump(model, f)
+                            with open(encoder_path, 'wb') as f:
+                                pickle.dump(encoders, f)
+                            with open(offset_path, 'w') as f:
+                                json.dump({"last_offset": current_offset}, f)
+                            mlflow.log_artifact(model_path)
+                            mlflow.log_artifact(encoder_path)
+                            mlflow.log_artifact(offset_path)
+                        print(f"Artifacts saved to MLflow at offset {message.offset}")
+                    # Flush pending rows periodically
                     if message.offset % DATA_SAVE_INTERVAL == 0 and message.offset > 0:
-                        # Flush pending rows before saving
                         if pending_rows:
                             data_df = pd.concat([data_df, pd.DataFrame(pending_rows)], ignore_index=True)
                             pending_rows = []
-                        data_df.to_parquet(DATA_PATH)
-                        print(f"Data saved at offset {message.offset}")
+                        print(f"Data flushed at offset {message.offset}")
                 # Consumer timeout reached, loop continues if not shutdown
             print("Graceful shutdown completed.")
         except Exception as e:
@@ -166,12 +170,21 @@ def main():
             # Flush any remaining buffered rows
             if pending_rows:
                 data_df = pd.concat([data_df, pd.DataFrame(pending_rows)], ignore_index=True)
-            MODEL_VERSION = f"{MODEL_FOLDER}/{model.__class__.__name__}.pkl"
-            with open(MODEL_VERSION, 'wb') as f:
-                pickle.dump(model, f)
-            with open(ENCODERS_PATH, 'wb') as f:
-                pickle.dump(encoders, f)
-            data_df.to_parquet(DATA_PATH)
+            # Save final model, encoders, and offset to MLflow on shutdown
+            with tempfile.TemporaryDirectory() as tmpdir:
+                model_path = os.path.join(tmpdir, f"{MODEL_NAME}.pkl")
+                encoder_path = os.path.join(tmpdir, ENCODER_ARTIFACT_NAME)
+                offset_path = os.path.join(tmpdir, KAFKA_OFFSET_ARTIFACT)
+                with open(model_path, 'wb') as f:
+                    pickle.dump(model, f)
+                with open(encoder_path, 'wb') as f:
+                    pickle.dump(encoders, f)
+                with open(offset_path, 'w') as f:
+                    json.dump({"last_offset": current_offset}, f)
+                mlflow.log_artifact(model_path)
+                mlflow.log_artifact(encoder_path)
+                mlflow.log_artifact(offset_path)
+            print(f"Final artifacts saved to MLflow (offset={current_offset})")
             if consumer is not None:
                 consumer.close()
             mlflow.end_run()

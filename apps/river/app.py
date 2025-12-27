@@ -397,8 +397,8 @@ async def lifespan(app: FastAPI):
         unique_values_cache, \
         healthcheck
 
-    # 1. Initialize SparkSession and precompute unique values (FAST - uses Spark)
-    print("Initializing SparkSession and precomputing unique values...")
+    # 1. Initialize and precompute unique values (deferred - non-blocking startup)
+    print("Starting River ML service...", flush=True)
     data_load_status = {}
     data_message_dict = {}
     initial_data_sample_loaded_status = {}
@@ -410,106 +410,93 @@ async def lifespan(app: FastAPI):
         "E-Commerce Customer Interactions": ECommerceCustomerInteractions,
     }
 
+    # Defer data preloading - don't block startup on Delta Lake connection
+    # Data will be loaded on-demand when endpoints are called
     for project_name in PROJECT_NAMES:
         try:
-            # Precompute unique values using Spark (cached for instant access)
-            print(f"Precomputing unique values for {project_name}...")
-            unique_values_cache[project_name] = precompute_all_unique_values_polars(project_name)
+            print(f"Attempting to precompute unique values for {project_name}...", flush=True)
+            # Use asyncio.to_thread with timeout to prevent blocking
+            try:
+                unique_values_cache[project_name] = await asyncio.wait_for(
+                    asyncio.to_thread(precompute_all_unique_values_polars, project_name),
+                    timeout=10.0  # 10 second timeout per project
+                )
+            except asyncio.TimeoutError:
+                print(f"Timeout precomputing unique values for {project_name}, skipping...", flush=True)
+                unique_values_cache[project_name] = {}
 
             if unique_values_cache[project_name]:
                 data_load_status[project_name] = "success"
                 data_message_dict[project_name] = f"Unique values cached ({len(unique_values_cache[project_name])} columns)"
             else:
-                data_load_status[project_name] = "warning"
-                data_message_dict[project_name] = "No unique values found"
+                data_load_status[project_name] = "deferred"
+                data_message_dict[project_name] = "Data loading deferred to on-demand"
 
-            # Get initial sample using Spark (fast - only 1 row)
-            print(f"Getting initial sample for {project_name}...")
-            sample_dict = get_initial_sample_polars(project_name)
+            # Get initial sample with timeout
+            print(f"Getting initial sample for {project_name}...", flush=True)
+            try:
+                sample_dict = await asyncio.wait_for(
+                    asyncio.to_thread(get_initial_sample_polars, project_name),
+                    timeout=10.0
+                )
+            except asyncio.TimeoutError:
+                print(f"Timeout getting initial sample for {project_name}, skipping...", flush=True)
+                sample_dict = None
+
             if sample_dict:
                 model_class = project_model_mapping.get(project_name)
                 if model_class:
                     initial_sample_dict[project_name] = model_class(**sample_dict)
                     initial_data_sample_loaded_status[project_name] = True
-                    initial_data_sample_message_dict[project_name] = "Initial sample created via Spark."
+                    initial_data_sample_message_dict[project_name] = "Initial sample loaded."
                 else:
                     initial_data_sample_loaded_status[project_name] = False
                     initial_data_sample_message_dict[project_name] = "No model class for project."
             else:
                 initial_data_sample_loaded_status[project_name] = False
-                initial_data_sample_message_dict[project_name] = "Could not get initial sample from Spark."
+                initial_data_sample_message_dict[project_name] = "Sample loading deferred."
 
         except Exception as e:
             data_load_status[project_name] = "failed"
             data_message_dict[project_name] = f"Error: {e}"
             initial_data_sample_loaded_status[project_name] = False
             initial_data_sample_message_dict[project_name] = f"Error: {e}"
-            print(f"Error initializing data for {project_name}: {e}", file=sys.stderr)
+            print(f"Error initializing data for {project_name}: {e}", file=sys.stderr, flush=True)
 
     healthcheck.data_load = data_load_status
     healthcheck.data_message = data_message_dict
     healthcheck.initial_data_sample_loaded = initial_data_sample_loaded_status
     healthcheck.initial_data_sample_message = initial_data_sample_message_dict
 
-    # 2. Create Kafka consumers (for fallback/training scripts)
-    print("Creating Kafka consumers...")
-    consumer_dict = {x: create_consumer(x) for x in PROJECT_NAMES}
+    # 2. Skip Kafka consumers at startup - create on-demand for training scripts
+    print("Kafka consumers will be created on-demand for training scripts.", flush=True)
+    # consumer_dict is already initialized with None values
 
-    # 3. Load models
+    # 3. Skip model preloading - models are loaded on-demand via MLflow
     model_load_status = {}
     model_message_dict = {}
     for project_name in PROJECT_NAMES:
-        try:
-            print(f"Loading models for {project_name}...")
-            model_folder_name = project_name.lower().replace(' ', '_').replace("-", "_")
-            model_folder = f"models/{model_folder_name}"
-            if os.path.exists(model_folder):
-                model_names = [
-                    x.replace(".pkl", "")
-                    for x in os.listdir(model_folder)
-                    if x.endswith(".pkl")
-                ]
-                for model_name in model_names:
-                    model_dict[project_name][model_name] = load_or_create_model(
-                        project_name, model_name, model_folder
-                    )
-                model_load_status[project_name] = "success"
-                model_message_dict[project_name] = f"Loaded {len(model_names)} models"
-            else:
-                model_load_status[project_name] = "warning"
-                model_message_dict[project_name] = "Model folder not found"
-        except Exception as e:
-            model_load_status[project_name] = "failed"
-            model_message_dict[project_name] = f"Error: {e}"
-            print(f"Error loading models for {project_name}: {e}", file=sys.stderr)
+        model_load_status[project_name] = "deferred"
+        model_message_dict[project_name] = "Models loaded on-demand from MLflow"
     healthcheck.model_load = model_load_status
     healthcheck.model_message = model_message_dict
 
-    # 4. Load encoders
+    # 4. Skip encoder preloading - encoders are loaded on-demand via MLflow
     encoders_load_status = {}
-    print("Loading encoders...")
+    print("Encoders will be loaded on-demand from MLflow.", flush=True)
     for project_name in PROJECT_NAMES:
-        try:
-            encoders_dict[project_name] = {}
-            for library in ENCODER_LIBRARIES:
-                try:
-                    encoders_dict[project_name][library] = load_or_create_encoders(project_name, library)
-                except Exception as e:
-                    print(f"Could not load {library} encoders for {project_name}: {e}")
-            encoders_load_status[project_name] = "success"
-        except Exception as e:
-            encoders_load_status[project_name] = "failed"
-            print(f"Error loading encoders for {project_name}: {e}", file=sys.stderr)
+        encoders_dict[project_name] = {}
+        encoders_load_status[project_name] = "deferred"
     healthcheck.encoders_load = encoders_load_status
 
-    # 5. Configure MLflow
+    # 5. Configure MLflow (non-blocking - just sets URI)
     try:
-        print("Configuring MLflow...")
+        print("Configuring MLflow...", flush=True)
         mlflow.set_tracking_uri(f"http://{MLFLOW_HOST}:5000")
     except Exception as e:
-        print(f"Error configuring MLflow: {e}", file=sys.stderr)
+        print(f"Error configuring MLflow: {e}", file=sys.stderr, flush=True)
 
-    print("River ML service startup complete.")
+    print("River ML service startup complete.", flush=True)
     yield
     print("River ML service shutting down...")
 
@@ -639,7 +626,7 @@ async def get_current_model():
 @app.post("/predict")
 async def predict(payload: dict):
     """
-    Make predictions using the latest model from disk.
+    Make predictions using the latest model from MLflow artifacts.
     Reloads model before each prediction to stay synchronized with training.
     Payload format: {project_name, model_name, ...feature_data}
     """
@@ -651,17 +638,15 @@ async def predict(payload: dict):
             status_code = 400,
             detail = "Missing required fields: project_name and model_name"
         )
-    # Reload model from disk to get the latest trained version
-    model_folder_name = project_name.lower().replace(' ', '_').replace("-", "_")
-    model_folder = f"models/{model_folder_name}"
+    # Load model from MLflow artifacts
     try:
-        model = load_or_create_model(project_name, model_name, model_folder)
+        model = load_or_create_model(project_name, model_name)
         # Update in-memory cache
         if project_name not in model_dict:
             model_dict[project_name] = {}
         model_dict[project_name][model_name] = model
     except Exception as e:
-        print(f"Error reloading model from disk: {e}", file=sys.stderr)
+        print(f"Error loading model from MLflow: {e}", file=sys.stderr)
         # Fall back to cached model if available
         if project_name in model_dict and model_name in model_dict.get(project_name, {}):
             model = model_dict[project_name][model_name]
@@ -669,18 +654,18 @@ async def predict(payload: dict):
         else:
             raise HTTPException(
                 status_code = 503,
-                detail = f"Model '{model_name}' for project '{project_name}' could not be loaded: {e}"
+                detail = f"Model '{model_name}' for project '{project_name}' not found in MLflow. Train a model first."
             )
-    # Reload encoders from disk to stay synchronized with training
+    # Load encoders from MLflow artifacts
     try:
         for library in ENCODER_LIBRARIES:
             encoders_dict[project_name][library] = load_or_create_encoders(project_name, library)
     except Exception as e:
-        print(f"Error reloading encoders: {e}", file=sys.stderr)
+        print(f"Error loading encoders from MLflow: {e}", file=sys.stderr)
         if project_name not in encoders_dict:
             raise HTTPException(
                 status_code = 503,
-                detail = f"Encoders for project '{project_name}' could not be loaded: {e}"
+                detail = f"Encoders for project '{project_name}' not found in MLflow. Train a model first."
             )
     # Extract feature data (remove metadata fields)
     x = {k: v for k, v in payload.items() if k not in ["project_name", "model_name"]}

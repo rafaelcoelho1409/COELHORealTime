@@ -79,22 +79,39 @@ Kafka → River ML Training Scripts → MLflow
 - [ ] Test model logging and retrieval from MinIO
 - [x] Add MinIO to Services dropdown in navbar
 
-### Phase 5: MLflow Model Integration (Priority: HIGH)
-**Goal:** Connect Reflex pages to latest models registered on MLflow instead of loading in-memory models
+### Phase 5: MLflow Model Integration (Priority: HIGH) - PARTIALLY COMPLETED
+**Goal:** Connect Reflex pages to latest/best models registered on MLflow instead of loading in-memory models
 
-- [ ] Update FastAPI to load models from MLflow registry:
-  - [ ] Query MLflow for latest model version per project
-  - [ ] Load model artifacts from MinIO via MLflow
-  - [ ] Cache loaded models to avoid repeated downloads
+- [x] Update River to load models from MLflow registry:
+  - [x] Query MLflow for **best model** per project (by metrics)
+  - [x] Load model artifacts from MinIO via MLflow
+  - [x] Implement `get_best_mlflow_run()` with metric-based selection:
+    - Transaction Fraud Detection: Maximize F1
+    - Estimated Time of Arrival: Minimize MAE
+    - Sales Forecasting: Minimize MAE
+    - E-Commerce Customer Interactions: Latest run (no metrics yet)
+  - [x] Load encoders from the same best run as the model
+  - [x] Load cluster data (ECCI) from MLflow artifacts
+- [x] Best model continuation training:
+  - [x] New training runs load the best existing model and continue training
+  - [x] Encoders are loaded from the same run to maintain consistency
+  - [x] Old runs are preserved (not deleted)
 - [ ] Implement model hot-reloading:
   - [ ] Periodic check for new model versions
   - [ ] Graceful model swap without downtime
-- [ ] Update prediction endpoints:
-  - [ ] Use MLflow-loaded models for inference
+- [x] Update prediction endpoints:
+  - [x] Use MLflow-loaded models for inference
   - [ ] Return model version in prediction response
 - [ ] Add model info to Reflex UI:
   - [ ] Display current model version on each page
   - [ ] Show last model update timestamp
+- [ ] **ECCI Clustering Metrics** (Priority: MEDIUM)
+  - [ ] Add clustering metrics to ECCI training script:
+    - Silhouette Score (via cluster membership)
+    - Number of clusters formed
+    - Samples per cluster distribution
+  - [ ] Log metrics to MLflow for best model selection
+  - [ ] Update `BEST_METRIC_CRITERIA["E-Commerce Customer Interactions"]` to use cluster metrics
 
 ### Phase 6: Scikit-Learn Service (COMPLETED)
 **Goal:** Create dedicated Scikit-Learn FastAPI service for batch ML
@@ -320,6 +337,18 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
   - Currently installing dependencies at runtime via `entrypoint.sh` (slow, OOM-prone)
   - Move `uv pip install -r requirements.txt` to Dockerfile build stage
   - Benefits: Faster pod startup, no OOM during dependency installation
+- [ ] **Spark Metadata Job for Delta Lake** (Priority: HIGH)
+  - Problem: Polars queries to Delta Lake are slow (seconds per request)
+  - Affects: "Randomize All Fields" button, unique values dropdowns, sample data
+  - Solution: Spark Job to precompute and cache metadata
+  - Implementation:
+    - [ ] Create Spark job that runs every 5-10 minutes
+    - [ ] Precompute unique values per column (for form dropdowns)
+    - [ ] Precompute sample pool (e.g., 1000 random rows)
+    - [ ] Precompute column statistics (min, max, distributions)
+    - [ ] Write to `s3://lakehouse/metadata/{project_name}/` as small JSON/Parquet
+    - [ ] Update River to read from metadata files instead of querying Delta Lake
+  - Benefits: Instant UI responses, reduced MinIO/Delta Lake load
 - [x] **Polars instead of PySpark for Delta Lake queries** (COMPLETED)
   - River and Sklearn now use Polars for Delta Lake queries
   - Benefits achieved: No JVM overhead, faster startup, lower memory footprint
@@ -422,6 +451,40 @@ Services Removed:
 
 ---
 
+## Big Wins Achieved 🎉
+
+### MLflow-Only Storage Architecture (December 2025)
+- **Removed all local disk storage** for models and encoders
+- All artifacts now stored exclusively in MLflow (backed by MinIO S3)
+- Training scripts use `tempfile.TemporaryDirectory()` for artifact logging
+- Enabled **best model continuation** - new training loads best existing model
+
+### Best Model Selection from MLflow
+- Implemented `get_best_mlflow_run()` function with metric-based selection
+- Classification models: Maximize F1 score
+- Regression models: Minimize MAE
+- Clustering models: Use latest run (pending metrics implementation)
+- Encoders loaded from same run as model for consistency
+
+### Reflex UI Improvements
+- MLflow model availability checking with real-time validation
+- Warning messages when no trained model is available
+- MLflow button with logo to redirect to experiment page
+- Standardized predict buttons across all forms
+- Model badge showing current River ML model name
+
+### Delta Lake + Polars Integration
+- Replaced PySpark for data queries with Polars (lighter, faster)
+- Lazy evaluation with `pl.scan_delta()` for optimized queries
+- River memory limits reduced from 4Gi to 2Gi
+
+### Service Architecture Simplification
+- Consolidated from 3 services to 2 (River + Sklearn)
+- FastAPI Analytics deprecated and merged into River
+- Clear separation: Incremental ML (River) vs Batch ML (Sklearn)
+
+---
+
 ## Notes
 
 - **ML Training Service (DONE):** River service handles real-time ML training
@@ -440,8 +503,11 @@ Services Removed:
 - **Streamlit Removal (DONE):** Streamlit app fully replaced by Reflex
   - All pages migrated: TFD, ETA, ECCI
   - `apps/streamlit/` and Helm templates deleted
-- **MLflow Integration:** Phase 5 enables production-ready model serving from MLflow registry
-- **Next Quick Wins:** Alertmanager notifications (low effort, high value) or Phase 5 (MLflow model serving)
+- **MLflow Integration (PARTIALLY DONE):** Best model selection implemented
+  - Models and encoders loaded from MLflow based on best metrics
+  - New training runs continue from best existing model
+  - Pending: UI model version display, hot-reloading, ECCI clustering metrics
+- **Next Quick Wins:** Alertmanager notifications (low effort, high value) or ECCI clustering metrics
 - **Dependencies:** Delta Lake and A/B Testing require MinIO to be set up first
 - **Pending Metrics:** Kafka JMX (waiting for Bitnami update), MLflow (needs exporter), Reflex (needs instrumentation)
 
@@ -455,4 +521,4 @@ Services Removed:
 
 ---
 
-*Last updated: 2025-12-27 (Fixed form field display errors - Spark schemas, JSON parsing, Pydantic validators)*
+*Last updated: 2025-12-27 (MLflow best model selection, MLflow-only storage, non-blocking River startup)*

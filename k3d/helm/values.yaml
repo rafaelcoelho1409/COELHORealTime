@@ -210,11 +210,11 @@ river:
   replicas: 1
   resources:
     requests:
-      memory: "1Gi"
-      cpu: "500m"
-    limits:
       memory: "2Gi"
       cpu: "1000m"
+    limits:
+      memory: "4Gi"
+      cpu: "2000m"
   portsSettings:
     ports:
       - name: http
@@ -228,7 +228,7 @@ river:
       httpGet:
         path: /health
         port: 8002
-      initialDelaySeconds: 60
+      initialDelaySeconds: 180
       periodSeconds: 30
       failureThreshold: 5
   readinessProbeSettings:
@@ -236,7 +236,7 @@ river:
       httpGet:
         path: /health
         port: 8002
-      initialDelaySeconds: 30
+      initialDelaySeconds: 120
       periodSeconds: 10
       failureThreshold: 3
 
