@@ -2,6 +2,7 @@ import reflex as rx
 import os
 import asyncio
 import datetime as dt
+import json
 import plotly.graph_objects as go
 import folium
 from .utils import httpx_client_post, httpx_client_get
@@ -44,6 +45,24 @@ def get_str(data: dict, key: str, default: str = "") -> str:
 def get_nested_str(data: dict, key1: str, key2: str, default: str = "") -> str:
     """Get nested string value from dict, converting None to default."""
     return data.get(key1, {}).get(key2) or default
+
+def parse_json_field(data: dict, key: str) -> dict:
+    """Parse a JSON string field from Delta Lake into a dict.
+
+    Delta Lake stores nested objects (location, device_info, origin, destination)
+    as JSON strings. This function safely parses them back to dicts.
+    """
+    value = data.get(key)
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+    return {}
 
 
 class State(rx.State):
@@ -1113,12 +1132,16 @@ class State(rx.State):
                 timestamp_date = dt.datetime.now().strftime("%Y-%m-%d")
                 timestamp_time = dt.datetime.now().strftime("%H:%M")
 
+        # Parse JSON string fields from Delta Lake
+        location = parse_json_field(sample, "location")
+        device_info = parse_json_field(sample, "device_info")
+
         form_data = {
             # Numeric fields - convert to string for proper display
             "amount": safe_float_str(sample.get("amount"), 0.0),
             "account_age_days": safe_int_str(sample.get("account_age_days"), 0),
-            "lat": safe_float_str(sample.get("location", {}).get("lat"), 0.0),
-            "lon": safe_float_str(sample.get("location", {}).get("lon"), 0.0),
+            "lat": safe_float_str(location.get("lat"), 0.0),
+            "lon": safe_float_str(location.get("lon"), 0.0),
             # Timestamp fields
             "timestamp_date": timestamp_date,
             "timestamp_time": timestamp_time,
@@ -1128,8 +1151,8 @@ class State(rx.State):
             "product_category": get_str(sample, "product_category"),
             "transaction_type": get_str(sample, "transaction_type"),
             "payment_method": get_str(sample, "payment_method"),
-            "browser": get_nested_str(sample, "device_info", "browser"),
-            "os": get_nested_str(sample, "device_info", "os"),
+            "browser": device_info.get("browser") or "",
+            "os": device_info.get("os") or "",
             # Boolean fields
             "cvv_provided": safe_bool(sample.get("cvv_provided"), False),
             "billing_address_match": safe_bool(sample.get("billing_address_match"), False),
@@ -1398,6 +1421,10 @@ class State(rx.State):
             vehicle_type=vehicle_type
         )
 
+        # Parse JSON string fields from Delta Lake
+        origin = parse_json_field(sample, "origin")
+        destination = parse_json_field(sample, "destination")
+
         # Then set form data (after options are loaded so selects work correctly)
         form_data = {
             # Select fields (string)
@@ -1408,11 +1435,11 @@ class State(rx.State):
             # Timestamp fields
             "timestamp_date": timestamp_date,
             "timestamp_time": timestamp_time,
-            # Coordinate fields (float as string)
-            "origin_lat": safe_float_str(sample.get("origin", {}).get("lat"), 29.8),
-            "origin_lon": safe_float_str(sample.get("origin", {}).get("lon"), -95.4),
-            "destination_lat": safe_float_str(sample.get("destination", {}).get("lat"), 29.8),
-            "destination_lon": safe_float_str(sample.get("destination", {}).get("lon"), -95.4),
+            # Coordinate fields (float as string) - parsed from JSON
+            "origin_lat": safe_float_str(origin.get("lat"), 29.8),
+            "origin_lon": safe_float_str(origin.get("lon"), -95.4),
+            "destination_lat": safe_float_str(destination.get("lat"), 29.8),
+            "destination_lon": safe_float_str(destination.get("lon"), -95.4),
             # Integer fields (as string for proper display)
             "hour_of_day": safe_int_str(sample.get("hour_of_day"), 12),
             "debug_incident_delay_seconds": safe_int_str(sample.get("debug_incident_delay_seconds"), 0),
@@ -1647,14 +1674,18 @@ class State(rx.State):
                 timestamp_date = dt.datetime.now().strftime("%Y-%m-%d")
                 timestamp_time = dt.datetime.now().strftime("%H:%M")
 
+        # Parse JSON string fields from Delta Lake
+        device_info = parse_json_field(sample, "device_info")
+        location = parse_json_field(sample, "location")
+
         form_data = {
-            # Device info (nested structure) - select fields
-            "browser": get_nested_str(sample, "device_info", "browser"),
-            "device_type": get_nested_str(sample, "device_info", "device_type"),
-            "os": get_nested_str(sample, "device_info", "os"),
-            # Location (float as string)
-            "lat": safe_float_str(sample.get("location", {}).get("lat"), 29.8),
-            "lon": safe_float_str(sample.get("location", {}).get("lon"), -95.4),
+            # Device info (parsed from JSON string) - select fields
+            "browser": device_info.get("browser") or "",
+            "device_type": device_info.get("device_type") or "",
+            "os": device_info.get("os") or "",
+            # Location (parsed from JSON string)
+            "lat": safe_float_str(location.get("lat"), 29.8),
+            "lon": safe_float_str(location.get("lon"), -95.4),
             # Select/string fields
             "event_type": get_str(sample, "event_type"),
             "product_category": get_str(sample, "product_category"),
@@ -1785,6 +1816,7 @@ class State(rx.State):
         # Prepare request payload from current form state
         payload = {
             "project_name": project_name,
+            "model_name": "DBSTREAM",
             "customer_id": current_form.get("customer_id", ""),
             "device_info": {
                 "device_type": current_form.get("device_type", ""),

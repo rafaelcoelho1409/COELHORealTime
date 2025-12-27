@@ -250,7 +250,9 @@ apps/sklearn/
 ```
 Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehouse/delta/*)
                                                     ↓
-                                              Sklearn Service (reads via deltalake Python library)
+                                              Polars LazyFrame (pl.scan_delta)
+                                                    ↓
+                                              River / Sklearn Services
 ```
 
 **Components:**
@@ -279,9 +281,13 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
 ## Technical Debt & Improvements
 
 ### Bug Fixes
-- [ ] Fix Reflex form field display errors (some fields not showing values correctly)
-  - Revisit 0 values, None handling, and edge cases
-  - Test all three project pages (TFD, ETA, ECCI)
+- [x] Fix Reflex form field display errors (some fields not showing values correctly)
+  - [x] Fixed Spark Streaming schemas to match Kafka producers exactly
+  - [x] Added JSON parsing for nested fields (location, device_info, origin, destination)
+  - [x] Added Pydantic validators in River to parse JSON strings from Delta Lake
+  - [x] Fixed /sample and /initial_sample endpoints to validate all projects
+  - [x] Added hot-reload (--reload flag) to River entrypoint.sh
+  - [x] All three project pages (TFD, ETA, ECCI) now display values correctly
 
 ### Code Quality
 - [ ] Add unit tests for River/Sklearn endpoints
@@ -449,4 +455,4 @@ Services Removed:
 
 ---
 
-*Last updated: 2025-12-27 (Phase 6b Service Consolidation completed, FastAPI removed, Streamlit removed)*
+*Last updated: 2025-12-27 (Fixed form field display errors - Spark schemas, JSON parsing, Pydantic validators)*

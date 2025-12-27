@@ -103,14 +103,18 @@ def get_unique_values_polars(project_name: str, column_name: str, limit: int = 1
 
 
 def get_sample_polars(project_name: str, n: int = 1) -> Optional[pd.DataFrame]:
-    """Get a sample using Polars (optimized)."""
+    """Get a random sample using Polars (optimized)."""
     try:
         lf = get_delta_lazyframe(project_name)
         if lf is None:
             return None
 
-        # Use limit for speed - gets first N rows (very fast)
-        sample_df = lf.limit(n).collect()
+        # Collect to DataFrame then sample randomly
+        df = lf.collect()
+        if df.is_empty():
+            return None
+        # Use Polars sample for true random sampling
+        sample_df = df.sample(n=min(n, len(df)))
         return sample_df.to_pandas()
     except Exception as e:
         print(f"Error getting sample via Polars: {e}")

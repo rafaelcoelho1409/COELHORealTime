@@ -14,4 +14,4 @@ mkdir -p /app/logs
 
 # Start River ML Training API
 # Training scripts are spawned on-demand via /switch_model endpoint
-uvicorn app:app --host 0.0.0.0 --port 8002
+uvicorn app:app --host 0.0.0.0 --port 8002 --reload

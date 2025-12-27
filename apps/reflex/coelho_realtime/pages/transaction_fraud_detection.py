@@ -30,15 +30,8 @@ def index() -> rx.Component:
                     spacing = "4",
                     width = "100%"
                 ),
-                # Incremental ML tab content
-                rx.vstack(
-                    # ML Training switch - user controls when to start/stop
-                    ml_training_switch(MODEL_KEY, PROJECT_NAME),
-                    # Main form content
-                    transaction_fraud_detection_form(),
-                    spacing = "4",
-                    width = "100%"
-                ),
+                # Incremental ML tab content - form includes ML training switch
+                transaction_fraud_detection_form(MODEL_KEY, PROJECT_NAME),
             ),
             padding = "2em",
             width = "100%"

@@ -122,6 +122,21 @@ class TransactionFraudDetection(BaseModel):
     cvv_provided: bool
     billing_address_match: bool
 
+    @field_validator('location', 'device_info', mode='before')
+    @classmethod
+    def parse_json_string(cls, v: Any) -> dict:
+        """Parse JSON string from Delta Lake into dict."""
+        if v is None:
+            return {}
+        if isinstance(v, dict):
+            return v
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except (json.JSONDecodeError, TypeError):
+                return {}
+        return {}
+
 
 class EstimatedTimeOfArrival(BaseModel):
     trip_id: str
@@ -144,6 +159,21 @@ class EstimatedTimeOfArrival(BaseModel):
     debug_incident_delay_seconds: float
     debug_driver_factor: float
 
+    @field_validator('origin', 'destination', mode='before')
+    @classmethod
+    def parse_json_string(cls, v: Any) -> dict:
+        """Parse JSON string from Delta Lake into dict."""
+        if v is None:
+            return {}
+        if isinstance(v, dict):
+            return v
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except (json.JSONDecodeError, TypeError):
+                return {}
+        return {}
+
 
 class ECommerceCustomerInteractions(BaseModel):
     """Pydantic model for validating e-commerce customer interaction events."""
@@ -163,6 +193,42 @@ class ECommerceCustomerInteractions(BaseModel):
     session_id: Optional[str] = None
     time_on_page_seconds: Optional[int] = None
     timestamp: Optional[str] = None
+
+    @field_validator('device_info', mode='before')
+    @classmethod
+    def parse_device_info_json(cls, v: Any) -> Optional[DeviceInfo]:
+        """Parse JSON string from Delta Lake into DeviceInfo."""
+        if v is None:
+            return None
+        if isinstance(v, DeviceInfo):
+            return v
+        if isinstance(v, dict):
+            return DeviceInfo(**v)
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+                return DeviceInfo(**parsed) if parsed else None
+            except (json.JSONDecodeError, TypeError):
+                return None
+        return None
+
+    @field_validator('location', mode='before')
+    @classmethod
+    def parse_location_json(cls, v: Any) -> Optional[Location]:
+        """Parse JSON string from Delta Lake into Location."""
+        if v is None:
+            return None
+        if isinstance(v, Location):
+            return v
+        if isinstance(v, dict):
+            return Location(**v)
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+                return Location(**parsed) if parsed else None
+            except (json.JSONDecodeError, TypeError):
+                return None
+        return None
 
     @field_validator('quantity', mode='before')
     @classmethod
@@ -680,7 +746,12 @@ async def get_sample(request: SampleRequest):
         if sample_df is None or sample_df.empty:
             raise HTTPException(status_code=503, detail="Could not get sample from Spark.")
         sample = sample_df.to_dict(orient='records')[0]
-        if request.project_name == "E-Commerce Customer Interactions":
+        # Validate through Pydantic to parse JSON string fields from Delta Lake
+        if request.project_name == "Transaction Fraud Detection":
+            sample = TransactionFraudDetection.model_validate(sample)
+        elif request.project_name == "Estimated Time of Arrival":
+            sample = EstimatedTimeOfArrival.model_validate(sample)
+        elif request.project_name == "E-Commerce Customer Interactions":
             sample = ECommerceCustomerInteractions.model_validate(sample)
         return sample
     except HTTPException:
@@ -725,17 +796,17 @@ async def get_unique_values(request: UniqueValuesRequest):
 
 @app.post("/initial_sample")
 async def get_initial_sample(request: InitialSampleRequest):
-    """Get the initial sample created at startup."""
+    """Get the initial sample created at startup.
+
+    Returns validated Pydantic models with JSON fields parsed from Delta Lake strings.
+    """
     global initial_sample_dict
     if initial_sample_dict.get(request.project_name) is None:
         raise HTTPException(
             status_code=503,
             detail="Initial data sample is not loaded."
         )
-    if request.project_name == "E-Commerce Customer Interactions":
-        return ECommerceCustomerInteractions.model_validate(
-            initial_sample_dict[request.project_name]
-        )
+    # Return the already-validated Pydantic model (validated at startup)
     return initial_sample_dict[request.project_name]
 
 

@@ -21,14 +21,8 @@ def index() -> rx.Component:
             width = "100%"
         ),
         rx.box(
-            rx.vstack(
-                # ML Training switch - user controls when to start/stop
-                ml_training_switch(MODEL_KEY, PROJECT_NAME),
-                estimated_time_of_arrival_form(),
-                spacing = "4",
-                align_items = "start",
-                width = "100%"
-            ),
+            # Form includes ML training switch in left column
+            estimated_time_of_arrival_form(MODEL_KEY, PROJECT_NAME),
             padding = "2em",
             width = "100%"
         ),
