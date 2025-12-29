@@ -60,13 +60,13 @@ Kafka → River ML Training Scripts → MLflow
 
 ## Upcoming Phases
 
-### Phase 4: Storage & Persistence (Priority: HIGH)
+### Phase 4: Storage & Persistence (COMPLETED)
 **Goal:** Proper artifact storage with MinIO
 
 - [x] Add MinIO Helm dependency (Bitnami chart)
-- [ ] Configure MinIO buckets:
+- [x] Configure MinIO buckets:
   - `mlflow-artifacts` - MLflow models and artifacts
-  - `delta-lake` - Delta Lake tables (future)
+  - `delta-lake` - Delta Lake tables
   - `raw-data` - Raw Kafka data snapshots
 - [x] Update MLflow to use MinIO as artifact store
 - [x] Configure MLflow environment variables:
@@ -75,8 +75,10 @@ Kafka → River ML Training Scripts → MLflow
   AWS_ACCESS_KEY_ID=<minio-access-key>
   AWS_SECRET_ACCESS_KEY=<minio-secret-key>
   ```
-- [ ] **Transfer existing saved models and encoders to MLflow/MinIO**
-- [ ] Test model logging and retrieval from MinIO
+- [x] **Transfer existing saved models and encoders to MLflow/MinIO**
+  - All models now saved exclusively to MLflow (backed by MinIO S3)
+  - Local `apps/river/encoders/` and `apps/river/models/` directories deprecated and can be deleted
+- [x] Test model logging and retrieval from MinIO
 - [x] Add MinIO to Services dropdown in navbar
 
 ### Phase 5: MLflow Model Integration (Priority: HIGH) - PARTIALLY COMPLETED
@@ -186,8 +188,8 @@ apps/sklearn/
   - [x] Redis metrics (Bitnami exporter)
   - [x] MinIO metrics (ServiceMonitor with cluster/node metrics)
   - [ ] Kafka metrics (disabled - JMX exporter incompatible with Kafka 4.0)
-  - [ ] MLflow metrics (disabled - no /metrics endpoint, needs exporter)
-  - [ ] Reflex backend metrics (disabled - no /metrics endpoint, needs instrumentation)
+  - [x] MLflow metrics (enabled via Bitnami chart `tracking.metrics.enabled`)
+  - [x] Reflex backend metrics (prometheus-fastapi-instrumentator added)
 - [x] Create custom Grafana dashboards:
   - [x] COELHORealTime Overview (service health, CPU, memory, network)
   - [x] ML Pipeline Dashboard (FastAPI/River metrics, training, predictions)
@@ -203,16 +205,33 @@ apps/sklearn/
 
 #### Pending Observability Enhancements
 
-- [ ] **Set up Alertmanager notifications** (Priority: HIGH)
-  - Currently alerts fire but notifications go nowhere
-  - Configure receivers in `kube-prometheus-stack.alertmanager.config`:
-    - [ ] Slack webhook integration
-    - [ ] Email (SMTP) notifications
-    - [ ] PagerDuty integration (optional)
-  - Set up routing rules for different severity levels:
-    - `critical` → immediate notification
-    - `warning` → batched notifications
-  - Test alert delivery with `amtool` or firing a test alert
+- [x] **Set up Alertmanager notifications** (COMPLETED)
+  - [x] Configured Alertmanager receivers in `kube-prometheus-stack.alertmanager.config`
+  - [x] Slack, Discord, Email, PagerDuty receivers defined (commented out - not needed for now)
+  - [x] Routing rules for severity levels configured:
+    - `critical` → 10s group_wait, 1h repeat
+    - `warning` → 1m group_wait, 6h repeat
+    - `info` → 5m group_wait, 24h repeat
+  - [x] Inhibition rules to prevent alert flooding:
+    - Critical suppresses warning for same alertname
+    - KafkaDown suppresses Kafka-related alerts
+    - PostgreSQLDown suppresses MLflow alerts
+    - MinIODown suppresses MLflow and River alerts
+  - [x] All microservices connected to Alertmanager:
+    - [x] River ML - ServiceMonitor + alerting rules
+    - [x] Sklearn - ServiceMonitor + alerting rules (new)
+    - [x] Kafka Producers - Pod-level alerting rules (new)
+    - [x] Reflex - Prometheus instrumentation added + ServiceMonitor enabled
+    - [x] MLflow - Bitnami chart metrics enabled + ServiceMonitor
+    - [x] Spark - ServiceMonitor + alerting rules (new)
+  - **Note:** To enable notifications, uncomment receivers in `values.yaml` and add webhook URLs
+  - **Testing Alerting Rules:**
+    - Test PromQL queries: `./scripts/test-alerting-rules.sh`
+    - Test Alertmanager routing: `./scripts/test-alertmanager-routing.sh`
+    - Validate YAML syntax: `promtool check rules k3d/helm/files/prometheus/rules/application-rules.yaml`
+    - Prometheus UI (rules & alerts): `kubectl port-forward -n coelho-realtime svc/coelho-realtime-kube-prome-prometheus 9090:9090`
+    - Alertmanager UI (routing & silences): `kubectl port-forward -n coelho-realtime svc/coelho-realtime-kube-prome-alertmanager 9094:9094`
+    - Check resources: `kubectl get prometheusrules,servicemonitors -n coelho-realtime`
 
 - [ ] **Create custom application dashboards** (Priority: MEDIUM)
   - [ ] FastAPI Analytics Dashboard - request latency histograms, error rates by endpoint, throughput
@@ -220,32 +239,6 @@ apps/sklearn/
   - [ ] Reflex Frontend Dashboard - WebSocket connections, page load times, backend API calls
   - [ ] Kafka Producers Dashboard - messages produced per topic, producer lag, batch sizes
   - Consider using Grafana dashboard provisioning via ConfigMaps
-
-- [ ] **Add centralized logging stack** (Priority: MEDIUM)
-  - [ ] Deploy Grafana Loki for log aggregation
-  - [ ] Deploy Promtail as DaemonSet for log collection
-  - [ ] Configure Loki datasource in Grafana
-  - [ ] Create log exploration dashboards
-  - [ ] Set up log-based alerting for error patterns
-  - Benefits: Correlate logs with metrics, search across all services, debug issues faster
-
-### Phase 8: Model A/B Testing (Priority: MEDIUM)
-**Goal:** Allow users to compare different MLflow models in production
-
-- [ ] Design A/B testing UI in Reflex:
-  - [ ] Model selector dropdown on each page
-  - [ ] Side-by-side prediction comparison view
-  - [ ] Model performance metrics display
-- [ ] Backend implementation:
-  - [ ] FastAPI endpoint to list available MLflow models per project
-  - [ ] Dynamic model loading based on user selection
-  - [ ] Caching strategy for loaded models
-- [ ] MLflow integration:
-  - [ ] Model versioning and staging (Staging → Production)
-  - [ ] Model comparison metrics in MLflow UI
-- [ ] Analytics:
-  - [ ] Track which models users prefer
-  - [ ] Log prediction accuracy per model version
 
 ### Phase 9: Data Lake & SQL Analytics (COMPLETED)
 **Goal:** Enable SQL queries on streaming data with Delta Lake
@@ -436,17 +429,15 @@ Services Removed:
 
 | Phase | Priority | Effort | Value | Dependencies |
 |-------|----------|--------|-------|--------------|
-| 4. MinIO | ~~HIGH~~ DONE | Medium | High | None |
+| 4. MinIO + Storage | ~~HIGH~~ DONE | Medium | High | None |
 | 5. MLflow Model Integration | HIGH | Medium | Very High | MinIO |
 | 6. Scikit-Learn Service | ~~LOW~~ DONE | Medium | Medium | None |
-| 6b. Consolidate FastAPI Services | MEDIUM | Medium | High | Phase 6 |
-| 7. Prometheus/Grafana | ~~HIGH~~ 90% DONE | Medium | High | None |
-| 7a. Alertmanager Notifications | HIGH | Low | High | Phase 7 |
+| 6b. Consolidate FastAPI Services | ~~MEDIUM~~ DONE | Medium | High | Phase 6 |
+| 7. Prometheus/Grafana | ~~HIGH~~ 95% DONE | Medium | High | None |
+| 7a. Alertmanager Notifications | ~~HIGH~~ DONE | Low | High | Phase 7 |
 | 7b. Custom App Dashboards | MEDIUM | Medium | Medium | Phase 7 |
-| 7c. Logging Stack (Loki) | MEDIUM | Medium | High | Phase 7 |
-| 8. A/B Testing | MEDIUM | Medium | High | MLflow, MinIO |
-| 9. Delta Lake | MEDIUM | High | Medium | MinIO |
-| 10. Batch ML | LOW | Medium | Low | Delta Lake |
+| 9. Delta Lake | ~~MEDIUM~~ DONE | High | Medium | MinIO |
+| 10. Batch ML Studies | LOW | Medium | Low | Delta Lake |
 | Kafka Migration | ~~MEDIUM~~ DONE | Medium | High | None |
 
 ---
@@ -489,9 +480,11 @@ Services Removed:
 
 - **ML Training Service (DONE):** River service handles real-time ML training
 - **Kafka Migration (DONE):** Bitnami Kafka 4.0.0 with KRaft mode, JMX disabled due to compatibility
-- **Observability Stack (90% DONE):** kube-prometheus-stack v80.6.0 with dashboards and alerting rules
+- **Observability Stack (95% DONE):** kube-prometheus-stack v80.6.0 with dashboards and alerting rules
   - PostgreSQL, Redis, MinIO metrics exporters enabled and working
-  - Pending: Alertmanager notifications, custom app dashboards, logging stack
+  - Alertmanager notifications configured (receivers commented out, routing rules active)
+  - All microservices connected: River, Sklearn, Reflex, MLflow, Spark, Kafka Producers
+  - Pending: custom app dashboards
 - **Scikit-Learn Service (DONE):** Batch ML service with YellowBrick visualizations
   - Reflex TFD page now has Batch ML tab with XGBClassifier predictions
   - YellowBrick visualizations available (Classification, Target, Model Selection)
@@ -507,18 +500,17 @@ Services Removed:
   - Models and encoders loaded from MLflow based on best metrics
   - New training runs continue from best existing model
   - Pending: UI model version display, hot-reloading, ECCI clustering metrics
-- **Next Quick Wins:** Alertmanager notifications (low effort, high value) or ECCI clustering metrics
-- **Dependencies:** Delta Lake and A/B Testing require MinIO to be set up first
-- **Pending Metrics:** Kafka JMX (waiting for Bitnami update), MLflow (needs exporter), Reflex (needs instrumentation)
+- **Next Quick Wins:** ECCI clustering metrics (for best-model selection) or custom Grafana dashboards
+- **Pending Metrics:** Kafka JMX (waiting for Bitnami update)
 
 ---
 
 ## Original Todo Items (from /todo file)
-- [ ] Transfer saved models and encoders to MLflow or to MinIO → Phase 4 (pending)
+- [x] ~~Transfer saved models and encoders to MLflow or to MinIO~~ → Phase 4 (done)
 - [x] ~~Configure MLflow to use MinIO as backend~~ → Phase 4 (done)
 - [x] ~~Create a separated service to process ML training in real-time~~ → Phase 6 (done)
-- [ ] Give users options to choose different MLflow models (A/B test) → Phase 8 (pending)
+- [x] ~~Best model auto-selection from MLflow~~ → Phase 5 (done, replaced A/B testing)
 
 ---
 
-*Last updated: 2025-12-27 (MLflow best model selection, MLflow-only storage, non-blocking River startup)*
+*Last updated: 2025-12-29 (Phase 8 removed - auto best-model approach preferred over A/B testing)*

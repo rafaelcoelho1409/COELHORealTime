@@ -11,13 +11,11 @@ from pprint import pprint
 
 
 KAFKA_HOST = os.environ["KAFKA_HOST"]
-
+KAFKA_TOPIC = 'e_commerce_customer_interactions' # Topic name remains the same
+KAFKA_BROKERS = f'{KAFKA_HOST}:9092'
 
 # Use US English locale for fake data
 fake = Faker('en_US')
-
-KAFKA_TOPIC = 'e_commerce_customer_interactions' # Topic name remains the same
-KAFKA_BROKERS = f'{KAFKA_HOST}:9092'
 
 # --- Constants ---
 EVENT_TYPES = ['page_view', 'add_to_cart', 'purchase', 'search', 'leave_review']
@@ -133,17 +131,22 @@ def generate_customer_event(event_rate_per_minute):
     product_focus = session_data['current_product_focus']
     # Simple state machine for event flow
     if events_so_far == 0:
-        event_type = random.choices(['page_view', 'search'], weights=[0.8, 0.2], k=1)[0]
+        event_type = random.choices(
+            ['page_view', 'search'], 
+            weights = [0.8, 0.2], 
+            k = 1)[0]
     elif product_focus and random.random() < 0.4: # 40% chance to interact with focused product
         event_type = random.choices(
             ['add_to_cart', 'page_view', 'leave_review'], # Can view related items or add
-            weights=[0.6, 0.35, 0.05], k=1)[0]
+            weights = [0.6, 0.35, 0.05], 
+            k = 1)[0]
         if event_type == 'add_to_cart' and random.random() < 0.3: # 30% chance to purchase after adding
              event_type = 'purchase'
     else: # Generic next action
         event_type = random.choices(
             ['page_view', 'search', 'add_to_cart'],
-            weights=[0.6, 0.2, 0.2], k=1)[0]
+            weights = [0.6, 0.2, 0.2], 
+            k = 1)[0]
     # --- Generate Event Details ---
     event_id = str(uuid.uuid4())
     timestamp = now.isoformat()
@@ -246,7 +249,7 @@ def run_producer(event_rate_per_minute):
             # Generate event
             interaction_event = generate_customer_event(event_rate_per_minute)
             if interaction_event:
-                producer.send(KAFKA_TOPIC, value=interaction_event)
+                producer.send(KAFKA_TOPIC, value = interaction_event)
                 message_count += 1
                 # Print sample every 60 seconds
                 current_time = time.time()

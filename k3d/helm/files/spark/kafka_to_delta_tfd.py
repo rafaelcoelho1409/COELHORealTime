@@ -65,7 +65,6 @@ def main():
     print(f"MinIO Endpoint: {MINIO_ENDPOINT}")
     print(f"Delta Path: {DELTA_PATH}")
     print(f"Checkpoint Path: {CHECKPOINT_PATH}")
-
     # Build Spark session with Delta Lake and S3 support
     builder = SparkSession.builder \
         .appName("KafkaToDelta-TransactionFraudDetection") \
@@ -77,12 +76,9 @@ def main():
         .config("spark.hadoop.fs.s3a.path.style.access", "true") \
         .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
         .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
-
     spark = builder.getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
-
     print("Spark session created successfully")
-
     try:
         # Read from Kafka
         kafka_df = spark.readStream \
@@ -92,13 +88,11 @@ def main():
             .option("startingOffsets", "earliest") \
             .option("failOnDataLoss", "false") \
             .load()
-
         # Parse JSON and extract fields
         parsed_df = kafka_df \
             .selectExpr("CAST(value AS STRING) as json_value") \
             .select(from_json(col("json_value"), tfd_schema).alias("data")) \
             .select("data.*")
-
         # Write to Delta Lake
         query = parsed_df.writeStream \
             .format("delta") \
@@ -106,19 +100,15 @@ def main():
             .option("checkpointLocation", CHECKPOINT_PATH) \
             .option("mergeSchema", "true") \
             .start(DELTA_PATH)
-
         print(f"Streaming query started, writing to {DELTA_PATH}")
-
         # Wait for termination or shutdown signal
         while not shutdown_requested:
-            if query.awaitTermination(timeout=5):
+            if query.awaitTermination(timeout = 5):
                 break
-
         if shutdown_requested:
             print("Graceful shutdown initiated, stopping query...")
             query.stop()
             print("Query stopped successfully")
-
     except Exception as e:
         print(f"Error in streaming job: {e}")
         raise

@@ -9,7 +9,6 @@ from .utils import httpx_client_post, httpx_client_get
 
 RIVER_HOST = os.getenv("RIVER_HOST", "localhost")
 RIVER_BASE_URL = f"http://{RIVER_HOST}:8002"
-
 SKLEARN_HOST = os.getenv("SKLEARN_HOST", "localhost")
 SKLEARN_BASE_URL = f"http://{SKLEARN_HOST}:8003"
 

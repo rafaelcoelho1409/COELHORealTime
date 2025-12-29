@@ -92,11 +92,12 @@ ordinal_encoders/
 *.parquet
 *.log
 .env
-*.json
-*.png
 .claude/
 **/helm/charts/
 Chart.lock
+
+cluster_counts.json
+cluster_feature_counts.json
 
 # Persistent data directories (MinIO, PostgreSQL)
 # Keep .gitkeep files but ignore actual data

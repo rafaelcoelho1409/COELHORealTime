@@ -14,7 +14,6 @@ groups:
         annotations:
           summary: "River ML Training service is down"
           description: "River instance {{ $labels.instance }} has been down for more than 1 minute."
-
       - alert: RiverTrainingStalled
         expr: rate(river_samples_processed_total[10m]) == 0
         for: 15m
@@ -23,7 +22,6 @@ groups:
         annotations:
           summary: "River ML training has stalled"
           description: "No samples have been processed in the last 15 minutes."
-
       - alert: RiverHighPredictionLatency
         expr: histogram_quantile(0.99, rate(river_prediction_duration_seconds_bucket[5m])) > 0.5
         for: 5m
@@ -32,7 +30,42 @@ groups:
         annotations:
           summary: "River predictions are slow"
           description: "River p99 prediction latency is {{ $value }}s (threshold: 0.5s)."
-
+  # Scikit-Learn Batch ML Service Alerts
+  - name: sklearn.rules
+    interval: 30s
+    rules:
+      - alert: SklearnDown
+        expr: up{job="sklearn"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Scikit-Learn Batch ML service is down"
+          description: "Sklearn instance {{ $labels.instance }} has been down for more than 1 minute."
+      - alert: SklearnHighPredictionLatency
+        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job="sklearn", handler="/predict"}[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sklearn batch predictions are slow"
+          description: "Sklearn p99 prediction latency is {{ $value }}s (threshold: 2s)."
+      - alert: SklearnHighErrorRate
+        expr: rate(http_requests_total{job="sklearn", status=~"5.."}[5m]) / rate(http_requests_total{job="sklearn"}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sklearn has high error rate"
+          description: "Sklearn error rate is {{ $value | printf \"%.1f\" }}% (threshold: 5%)."
+      - alert: SklearnYellowBrickTimeout
+        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job="sklearn", handler="/yellowbrick_metric"}[5m])) > 30
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "YellowBrick visualizations are timing out"
+          description: "YellowBrick p99 latency is {{ $value }}s (threshold: 30s)."
   # Kafka Data Pipeline Alerts (JMX Exporter metrics)
   - name: kafka.rules
     interval: 30s
@@ -45,7 +78,6 @@ groups:
         annotations:
           summary: "Kafka broker is down"
           description: "Kafka instance {{ $labels.instance }} has been down for more than 1 minute."
-
       - alert: KafkaJvmMemoryHigh
         expr: (jvm_memory_bytes_used{area="heap",job=~".*kafka.*"} / jvm_memory_bytes_max{area="heap",job=~".*kafka.*"}) * 100 > 80
         for: 5m
@@ -54,7 +86,6 @@ groups:
         annotations:
           summary: "Kafka JVM heap memory usage is high"
           description: "Kafka broker {{ $labels.instance }} heap usage is {{ $value | printf \"%.1f\" }}%."
-
       - alert: KafkaNoActiveController
         expr: kafka_controller_kafkacontroller_activecontrollercount{job=~".*kafka.*"} != 1
         for: 1m
@@ -63,7 +94,6 @@ groups:
         annotations:
           summary: "Kafka has no active controller"
           description: "Kafka cluster has {{ $value }} active controllers (expected: 1)."
-
       - alert: KafkaUnderReplicatedPartitions
         expr: kafka_server_replicamanager_underreplicatedpartitions{job=~".*kafka.*"} > 0
         for: 5m
@@ -72,7 +102,6 @@ groups:
         annotations:
           summary: "Kafka has under-replicated partitions"
           description: "Kafka broker {{ $labels.instance }} has {{ $value }} under-replicated partitions."
-
       - alert: KafkaOfflinePartitions
         expr: kafka_controller_kafkacontroller_offlinepartitionscount{job=~".*kafka.*"} > 0
         for: 1m
@@ -81,7 +110,6 @@ groups:
         annotations:
           summary: "Kafka has offline partitions"
           description: "Kafka cluster has {{ $value }} offline partitions."
-
       - alert: KafkaNetworkProcessorIdleHigh
         expr: kafka_network_socketserver_networkprocessoravgidlepercent{job=~".*kafka.*"} < 0.3
         for: 5m
@@ -90,7 +118,6 @@ groups:
         annotations:
           summary: "Kafka network processors are busy"
           description: "Kafka network processor idle is {{ $value | printf \"%.1f\" }}% (threshold: 30%)."
-
       - alert: KafkaRequestHandlerIdleLow
         expr: kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent_total{job=~".*kafka.*"} < 0.3
         for: 5m
@@ -99,7 +126,34 @@ groups:
         annotations:
           summary: "Kafka request handlers are busy"
           description: "Kafka request handler idle is {{ $value | printf \"%.1f\" }}% (threshold: 30%)."
-
+  # Kafka Producers Alerts (Python data generators - pod-level monitoring)
+  - name: kafka-producers.rules
+    interval: 30s
+    rules:
+      - alert: KafkaProducersDown
+        expr: kube_deployment_status_replicas_available{deployment="coelho-realtime-kafka-producers", namespace="coelho-realtime"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kafka producers deployment is down"
+          description: "No Kafka producer pods are available. Data streaming has stopped."
+      - alert: KafkaProducersCrashLooping
+        expr: rate(kube_pod_container_status_restarts_total{pod=~"coelho-realtime-kafka-producers.*", namespace="coelho-realtime"}[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka producers pod is crash looping"
+          description: "Kafka producers pod {{ $labels.pod }} is restarting frequently."
+      - alert: KafkaProducersHighMemory
+        expr: (container_memory_working_set_bytes{pod=~"coelho-realtime-kafka-producers.*", namespace="coelho-realtime"} / container_spec_memory_limit_bytes{pod=~"coelho-realtime-kafka-producers.*", namespace="coelho-realtime"}) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka producers memory usage is high"
+          description: "Kafka producers memory usage is {{ $value | printf \"%.1f\" }}%."
   # MLflow Tracking Server Alerts
   - name: mlflow.rules
     interval: 30s
@@ -112,7 +166,6 @@ groups:
         annotations:
           summary: "MLflow Tracking server is down"
           description: "MLflow instance {{ $labels.instance }} has been down for more than 1 minute."
-
       - alert: MLflowHighLatency
         expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job="mlflow"}[5m])) > 5
         for: 5m
@@ -121,7 +174,6 @@ groups:
         annotations:
           summary: "MLflow has high latency"
           description: "MLflow p99 latency is {{ $value }}s (threshold: 5s)."
-
   # PostgreSQL Database Alerts (used by MLflow and Grafana)
   - name: postgresql.rules
     interval: 30s
@@ -134,7 +186,6 @@ groups:
         annotations:
           summary: "PostgreSQL database is down"
           description: "PostgreSQL instance {{ $labels.instance }} has been down for more than 1 minute."
-
       - alert: PostgreSQLTooManyConnections
         expr: sum by (instance) (pg_stat_activity_count) > (pg_settings_max_connections * 0.8)
         for: 2m
@@ -143,7 +194,6 @@ groups:
         annotations:
           summary: "PostgreSQL has too many connections"
           description: "PostgreSQL instance {{ $labels.instance }} is using {{ $value }}% of max connections."
-
       - alert: PostgreSQLDeadLocks
         expr: rate(pg_stat_database_deadlocks[5m]) > 0
         for: 2m
@@ -152,7 +202,6 @@ groups:
         annotations:
           summary: "PostgreSQL has deadlocks"
           description: "PostgreSQL instance {{ $labels.instance }} has {{ $value }} deadlocks."
-
   # Redis Alerts (used by Reflex)
   - name: redis.rules
     interval: 30s
@@ -165,7 +214,6 @@ groups:
         annotations:
           summary: "Redis instance is down"
           description: "Redis instance {{ $labels.instance }} has been down for more than 1 minute."
-
       - alert: RedisHighMemoryUsage
         expr: (redis_memory_used_bytes / redis_memory_max_bytes) * 100 > 90
         for: 5m
@@ -174,7 +222,6 @@ groups:
         annotations:
           summary: "Redis memory usage is high"
           description: "Redis instance {{ $labels.instance }} memory usage is {{ $value }}%."
-
       - alert: RedisRejectedConnections
         expr: rate(redis_rejected_connections_total[1m]) > 0
         for: 2m
@@ -183,7 +230,6 @@ groups:
         annotations:
           summary: "Redis is rejecting connections"
           description: "Redis instance {{ $labels.instance }} is rejecting {{ $value }} connections per second."
-
   # MinIO Object Storage Alerts
   - name: minio.rules
     interval: 30s
@@ -196,7 +242,6 @@ groups:
         annotations:
           summary: "MinIO instance is down"
           description: "MinIO instance {{ $labels.instance }} has been down for more than 1 minute."
-
       - alert: MinIODiskOffline
         expr: minio_cluster_disk_offline_total > 0
         for: 1m
@@ -205,7 +250,6 @@ groups:
         annotations:
           summary: "MinIO has offline disks"
           description: "MinIO has {{ $value }} offline disks."
-
       - alert: MinIOHighStorageUsage
         expr: (minio_bucket_usage_total_bytes / minio_cluster_capacity_raw_total_bytes) * 100 > 80
         for: 5m
@@ -214,7 +258,6 @@ groups:
         annotations:
           summary: "MinIO storage usage is high"
           description: "MinIO storage usage is {{ $value }}%."
-
   # Reflex Frontend Alerts
   - name: reflex.rules
     interval: 30s
@@ -227,7 +270,6 @@ groups:
         annotations:
           summary: "Reflex frontend is down"
           description: "Reflex instance {{ $labels.instance }} has been down for more than 1 minute."
-
       - alert: ReflexHighLatency
         expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job="reflex"}[5m])) > 3
         for: 5m
@@ -236,7 +278,66 @@ groups:
         annotations:
           summary: "Reflex has high latency"
           description: "Reflex p99 latency is {{ $value }}s (threshold: 3s)."
-
+  # Spark Data Pipeline Alerts (Master, Worker, and Streaming jobs)
+  - name: spark.rules
+    interval: 30s
+    rules:
+      - alert: SparkMasterDown
+        expr: up{job=~".*spark-master.*"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Spark Master is down"
+          description: "Spark Master {{ $labels.instance }} has been down for more than 2 minutes."
+      - alert: SparkWorkerDown
+        expr: up{job=~".*spark-worker.*"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Spark Worker is down"
+          description: "Spark Worker {{ $labels.instance }} has been down for more than 2 minutes."
+      - alert: SparkStreamingDown
+        expr: kube_deployment_status_replicas_available{deployment="coelho-realtime-spark-streaming", namespace="coelho-realtime"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Spark Streaming deployment is down"
+          description: "No Spark Streaming pods are available. Delta Lake ingestion has stopped."
+      - alert: SparkStreamingCrashLooping
+        expr: rate(kube_pod_container_status_restarts_total{pod=~"coelho-realtime-spark-streaming.*", namespace="coelho-realtime"}[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Spark Streaming pod is crash looping"
+          description: "Spark Streaming pod {{ $labels.pod }} is restarting frequently."
+      - alert: SparkHighExecutorMemory
+        expr: (spark_executor_memoryUsed_bytes / spark_executor_maxMemory_bytes) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Spark executor memory usage is high"
+          description: "Spark executor {{ $labels.executor_id }} memory usage is {{ $value | printf \"%.1f\" }}%."
+      - alert: SparkStreamingBatchProcessingDelay
+        expr: spark_streaming_lastCompletedBatch_processingTime_ms > 60000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Spark Streaming batch processing is slow"
+          description: "Spark Streaming batch processing time is {{ $value | printf \"%.0f\" }}ms (threshold: 60000ms)."
+      - alert: SparkStreamingNoProgress
+        expr: rate(spark_streaming_totalProcessedRecords[10m]) == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Spark Streaming has no progress"
+          description: "No records have been processed by Spark Streaming in the last 15 minutes."
   # General Application Health
   - name: application-general.rules
     interval: 30s
@@ -249,7 +350,6 @@ groups:
         annotations:
           summary: "High memory usage on {{ $labels.instance }}"
           description: "Memory usage is above 85% (current: {{ $value | printf \"%.1f\" }}%)"
-
       - alert: HighCpuUsage
         expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
         for: 5m
@@ -258,7 +358,6 @@ groups:
         annotations:
           summary: "High CPU usage on {{ $labels.instance }}"
           description: "CPU usage is above 85% (current: {{ $value | printf \"%.1f\" }}%)"
-
       - alert: PodCrashLooping
         expr: rate(kube_pod_container_status_restarts_total{namespace="coelho-realtime"}[15m]) > 0
         for: 5m

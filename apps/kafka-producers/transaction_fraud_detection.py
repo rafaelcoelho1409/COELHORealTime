@@ -11,12 +11,10 @@ import os
 
 
 KAFKA_HOST = os.environ["KAFKA_HOST"]
-
-
-fake = Faker()
-
 KAFKA_TOPIC = 'transaction_fraud_detection'
 KAFKA_BROKERS = f'{KAFKA_HOST}:9092'
+
+fake = Faker()
 
 # --- Constants ---
 # Realistic choices for categorical features

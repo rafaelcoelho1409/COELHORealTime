@@ -2,20 +2,20 @@
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: {{ .Release.Name }}-reflex
+  name: {{ .Release.Name }}-sklearn
   namespace: {{ .Release.Namespace }}
   labels:
-    app: coelho-realtime-reflex
+    app: coelho-realtime-sklearn
     release: {{ .Release.Name }}
 spec:
   selector:
     matchLabels:
-      app: coelho-realtime-reflex
+      app: coelho-realtime-sklearn
   namespaceSelector:
     matchNames:
       - {{ .Release.Namespace }}
   endpoints:
-    - port: backend
+    - port: http
       interval: 30s
       path: /metrics
       scheme: http

@@ -52,37 +52,33 @@ CLUSTER_FEATURE_COUNTS_ARTIFACT = "cluster_feature_counts.json"
 
 def load_cluster_data_from_mlflow():
     """Load cluster counts and feature counts from the best MLflow run.
-
     For clustering, since there are no metrics, get_best_mlflow_run
     will return the latest run.
     """
     cluster_counts = Counter()
     cluster_feature_counts = defaultdict(lambda: defaultdict(Counter))
-
     try:
         mlflow.set_tracking_uri(f"http://{MLFLOW_HOST}:5000")
         run_id = get_best_mlflow_run(PROJECT_NAME, MODEL_NAME)
         if run_id is None:
             print("No MLflow run found, starting with empty cluster data.")
             return cluster_counts, cluster_feature_counts
-
         # Load cluster counts
         try:
             local_path = mlflow.artifacts.download_artifacts(
-                run_id=run_id,
-                artifact_path=CLUSTER_COUNTS_ARTIFACT
+                run_id = run_id,
+                artifact_path = CLUSTER_COUNTS_ARTIFACT
             )
             with open(local_path, 'r') as f:
                 cluster_counts = Counter(json.load(f))
             print("Cluster counts loaded from MLflow.")
         except Exception as e:
             print(f"Could not load cluster counts from MLflow: {e}")
-
         # Load cluster feature counts
         try:
             local_path = mlflow.artifacts.download_artifacts(
-                run_id=run_id,
-                artifact_path=CLUSTER_FEATURE_COUNTS_ARTIFACT
+                run_id = run_id,
+                artifact_path = CLUSTER_FEATURE_COUNTS_ARTIFACT
             )
             with open(local_path, 'r') as f:
                 loaded_counts_str_keys = json.load(f)
@@ -96,10 +92,8 @@ def load_cluster_data_from_mlflow():
             print("Cluster feature counts loaded from MLflow.")
         except Exception as e:
             print(f"Could not load cluster feature counts from MLflow: {e}")
-
     except Exception as e:
         print(f"Error loading cluster data from MLflow: {e}")
-
     return cluster_counts, cluster_feature_counts
 
 
@@ -123,7 +117,6 @@ def main():
     # Batch sizes for different operations (tuned for performance)
     PROGRESS_LOG_INTERVAL = 100     # Log progress every N messages
     ARTIFACT_SAVE_INTERVAL = 1000   # Save model/encoders/cluster data to S3 every N messages
-
     print(f"Starting MLflow run with model: {model.__class__.__name__}")
     with mlflow.start_run(run_name = model.__class__.__name__):
         print("MLflow run started, entering consumer loop...")
@@ -240,13 +233,13 @@ def main():
                 with open(encoder_path, 'wb') as f:
                     pickle.dump(encoders, f)
                 with open(cluster_counts_path, 'w') as f:
-                    json.dump(dict(cluster_counts), f, indent=4)
+                    json.dump(dict(cluster_counts), f, indent = 4)
                 plain_dict_feature_counts = {
                     k: {fk: dict(fv) for fk, fv in v.items()}
                     for k, v in cluster_feature_counts.items()
                 }
                 with open(cluster_feature_counts_path, 'w') as f:
-                    json.dump(plain_dict_feature_counts, f, indent=4)
+                    json.dump(plain_dict_feature_counts, f, indent = 4)
                 with open(offset_path, 'w') as f:
                     json.dump({"last_offset": current_offset}, f)
                 mlflow.log_artifact(model_path)

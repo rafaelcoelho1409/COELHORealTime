@@ -1,37 +1,10 @@
 {{/*
-MLflow ServiceMonitor - DISABLED
+MLflow ServiceMonitor - Now provided by Bitnami MLflow subchart
 
-MLflow does not expose a /metrics endpoint by default.
-Prometheus scraping returns 404 NOT FOUND.
+Metrics are enabled via values.yaml:
+  mlflow.tracking.metrics.enabled: true
+  mlflow.tracking.metrics.serviceMonitor.enabled: true
 
-To enable MLflow metrics, options:
-1. Use mlflow-prometheus-exporter (https://github.com/azaurus1/mlflow-prometheus-exporter)
-2. Add custom metrics endpoint to MLflow server
-3. Use Gunicorn with prometheus-flask-exporter
-
-Uncomment below when MLflow has metrics endpoint.
+The Bitnami chart creates its own ServiceMonitor when these options are set.
+This file is kept for documentation purposes only.
 */}}
-{{- if false }}
-{{- if index .Values "kube-prometheus-stack" "enabled" }}
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: {{ .Release.Name }}-mlflow
-  namespace: {{ .Release.Namespace }}
-  labels:
-    app: mlflow
-    release: {{ .Release.Name }}
-spec:
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: mlflow
-  namespaceSelector:
-    matchNames:
-      - {{ .Release.Namespace }}
-  endpoints:
-    - port: http
-      interval: 30s
-      path: /metrics
-      scheme: http
-{{- end }}
-{{- end }}

@@ -12,12 +12,10 @@ from pprint import pprint
 
 
 KAFKA_HOST = os.environ["KAFKA_HOST"]
-
-
-fake = Faker('en_US') # Using Brazilian Portuguese locale for more relevant fake data
-
 KAFKA_TOPIC = 'estimated_time_of_arrival' # Changed topic name
 KAFKA_BROKERS = f'{KAFKA_HOST}:9092'
+
+fake = Faker('en_US') # Using Brazilian Portuguese locale for more relevant fake data
 
 # --- Constants ---
 VEHICLE_TYPES = ['Sedan', 'SUV', 'Hatchback', 'Motorcycle', 'Van']
@@ -106,8 +104,8 @@ def generate_eta_event(
     # Simulate Weather
     weather = random.choices(
         WEATHER_CONDITIONS,
-        weights=[0.6, 0.15, 0.1, 0.05, 0.05, 0.05], # Higher chance of Clear/Clouds
-        k=1)[0]
+        weights = [0.6, 0.15, 0.1, 0.05, 0.05, 0.05], # Higher chance of Clear/Clouds
+        k = 1)[0]
     is_bad_weather = random.random() < bad_weather_probability and weather in ['Rain', 'Heavy Rain', 'Fog', 'Thunderstorm', 'Snow'] # Snow less likely in SP but kept for generality
     # Simulate Traffic Conditions (based on time)
     is_rush_hour = (6 <= hour_of_day <= 9) or (16 <= hour_of_day <= 19) # Typical rush hours

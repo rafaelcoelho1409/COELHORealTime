@@ -37,19 +37,16 @@ from functions import (
 )
 
 
-MLFLOW_HOST = os.getenv("MLFLOW_HOST", "localhost")
-
+MLFLOW_HOST = os.environ["MLFLOW_HOST"]
 PROJECT_NAMES = [
     "Transaction Fraud Detection",
     "Estimated Time of Arrival",
     "E-Commerce Customer Interactions",
 ]
-
 MODEL_SCRIPTS = {
     f"{name.replace(' ', '_').replace('-', '_').lower()}_river.py": name
     for name in PROJECT_NAMES
 }
-
 ENCODER_LIBRARIES = ["river", "sklearn"]
 
 # Global caches for models, encoders, and data
@@ -77,10 +74,10 @@ class Healthcheck(BaseModel):
 
 # Initialize healthcheck with default state
 healthcheck = Healthcheck(
-    model_load={x: "not_attempted" for x in PROJECT_NAMES},
-    encoders_load={x: "not_attempted" for x in PROJECT_NAMES},
-    data_load={x: "not_attempted" for x in PROJECT_NAMES},
-    initial_data_sample_loaded={x: False for x in PROJECT_NAMES}
+    model_load = {x: "not_attempted" for x in PROJECT_NAMES},
+    encoders_load = {x: "not_attempted" for x in PROJECT_NAMES},
+    data_load = {x: "not_attempted" for x in PROJECT_NAMES},
+    initial_data_sample_loaded = {x: False for x in PROJECT_NAMES}
 )
 
 
@@ -96,7 +93,7 @@ class Location(BaseModel):
     lat: Optional[float] = None
     lon: Optional[float] = None
 
-    @field_validator('lat', 'lon', mode='before')
+    @field_validator('lat', 'lon', mode = 'before')
     @classmethod
     def check_location_coords_finite(cls, v: Any) -> Optional[float]:
         if isinstance(v, float) and not math.isfinite(v):
@@ -122,7 +119,7 @@ class TransactionFraudDetection(BaseModel):
     cvv_provided: bool
     billing_address_match: bool
 
-    @field_validator('location', 'device_info', mode='before')
+    @field_validator('location', 'device_info', mode = 'before')
     @classmethod
     def parse_json_string(cls, v: Any) -> dict:
         """Parse JSON string from Delta Lake into dict."""
@@ -159,7 +156,7 @@ class EstimatedTimeOfArrival(BaseModel):
     debug_incident_delay_seconds: float
     debug_driver_factor: float
 
-    @field_validator('origin', 'destination', mode='before')
+    @field_validator('origin', 'destination', mode = 'before')
     @classmethod
     def parse_json_string(cls, v: Any) -> dict:
         """Parse JSON string from Delta Lake into dict."""
@@ -194,7 +191,7 @@ class ECommerceCustomerInteractions(BaseModel):
     time_on_page_seconds: Optional[int] = None
     timestamp: Optional[str] = None
 
-    @field_validator('device_info', mode='before')
+    @field_validator('device_info', mode = 'before')
     @classmethod
     def parse_device_info_json(cls, v: Any) -> Optional[DeviceInfo]:
         """Parse JSON string from Delta Lake into DeviceInfo."""
@@ -212,7 +209,7 @@ class ECommerceCustomerInteractions(BaseModel):
                 return None
         return None
 
-    @field_validator('location', mode='before')
+    @field_validator('location', mode = 'before')
     @classmethod
     def parse_location_json(cls, v: Any) -> Optional[Location]:
         """Parse JSON string from Delta Lake into Location."""
@@ -230,21 +227,21 @@ class ECommerceCustomerInteractions(BaseModel):
                 return None
         return None
 
-    @field_validator('quantity', mode='before')
+    @field_validator('quantity', mode = 'before')
     @classmethod
     def check_quantity_is_finite_int(cls, v: Any) -> Optional[int]:
         if isinstance(v, float) and math.isnan(v):
             return None
         return v
 
-    @field_validator('price', mode='before')
+    @field_validator('price', mode = 'before')
     @classmethod
     def check_price_is_finite(cls, v: Any) -> Optional[float]:
         if isinstance(v, float) and not math.isfinite(v):
             return None
         return v
 
-    @field_validator('device_info', 'location', mode='before')
+    @field_validator('device_info', 'location', mode = 'before')
     @classmethod
     def ensure_dict_or_none(cls, v: Any) -> Optional[Dict]:
         if v is None or isinstance(v, dict):
@@ -308,7 +305,7 @@ class MLflowMetricsCache:
         self._cache.clear()
 
 
-mlflow_cache = MLflowMetricsCache(ttl_seconds=30)
+mlflow_cache = MLflowMetricsCache(ttl_seconds = 30)
 
 
 def _sync_get_mlflow_metrics(project_name: str, model_name: str) -> dict:
@@ -318,9 +315,9 @@ def _sync_get_mlflow_metrics(project_name: str, model_name: str) -> dict:
         raise ValueError(f"Experiment '{project_name}' not found in MLflow")
     experiment_id = experiment.experiment_id
     runs_df = mlflow.search_runs(
-        experiment_ids=[experiment_id],
-        max_results=100,
-        order_by=["start_time DESC"]
+        experiment_ids = [experiment_id],
+        max_results = 100,
+        order_by = ["start_time DESC"]
     )
     runs_df = runs_df[runs_df["tags.mlflow.runName"] == model_name]
     if runs_df.empty:
@@ -348,27 +345,22 @@ def stop_current_model() -> bool:
     if not state.current_process:
         state.status = "No model was active to stop."
         return True
-
     model_name = state.current_model_name
     process = state.current_process
     pid = process.pid
-
     print(f"Stopping model '{model_name}' (PID: {pid}) with SIGTERM...")
     state.status = f"Stopping '{model_name}'..."
-
     try:
         process.terminate()
-        process.wait(timeout=60)
-
+        process.wait(timeout = 60)
         if process.poll() is not None:
             print(f"Model '{model_name}' stopped gracefully (exit code: {process.returncode})")
             state.status = f"Model '{model_name}' stopped."
         else:
             print(f"SIGTERM failed, sending SIGKILL to PID {pid}")
             process.kill()
-            process.wait(timeout=10)
+            process.wait(timeout = 10)
             state.status = f"Model '{model_name}' force killed."
-
     except subprocess.TimeoutExpired:
         print(f"Timeout waiting for {model_name}, force killing...")
         process.kill()
@@ -379,7 +371,6 @@ def stop_current_model() -> bool:
     finally:
         state.current_process = None
         state.current_model_name = None
-
     return True
 
 
@@ -396,20 +387,17 @@ async def lifespan(app: FastAPI):
         initial_sample_dict, \
         unique_values_cache, \
         healthcheck
-
     # 1. Initialize and precompute unique values (deferred - non-blocking startup)
-    print("Starting River ML service...", flush=True)
+    print("Starting River ML service...", flush = True)
     data_load_status = {}
     data_message_dict = {}
     initial_data_sample_loaded_status = {}
     initial_data_sample_message_dict = {}
-
     project_model_mapping = {
         "Transaction Fraud Detection": TransactionFraudDetection,
         "Estimated Time of Arrival": EstimatedTimeOfArrival,
         "E-Commerce Customer Interactions": ECommerceCustomerInteractions,
     }
-
     # Defer data preloading - don't block startup on Delta Lake connection
     # Data will be loaded on-demand when endpoints are called
     for project_name in PROJECT_NAMES:
@@ -418,31 +406,30 @@ async def lifespan(app: FastAPI):
             # Use asyncio.to_thread with timeout to prevent blocking
             try:
                 unique_values_cache[project_name] = await asyncio.wait_for(
-                    asyncio.to_thread(precompute_all_unique_values_polars, project_name),
-                    timeout=10.0  # 10 second timeout per project
+                    asyncio.to_thread(
+                        precompute_all_unique_values_polars, 
+                        project_name),
+                    timeout = 10.0  # 10 second timeout per project
                 )
             except asyncio.TimeoutError:
                 print(f"Timeout precomputing unique values for {project_name}, skipping...", flush=True)
                 unique_values_cache[project_name] = {}
-
             if unique_values_cache[project_name]:
                 data_load_status[project_name] = "success"
                 data_message_dict[project_name] = f"Unique values cached ({len(unique_values_cache[project_name])} columns)"
             else:
                 data_load_status[project_name] = "deferred"
                 data_message_dict[project_name] = "Data loading deferred to on-demand"
-
             # Get initial sample with timeout
             print(f"Getting initial sample for {project_name}...", flush=True)
             try:
                 sample_dict = await asyncio.wait_for(
                     asyncio.to_thread(get_initial_sample_polars, project_name),
-                    timeout=10.0
+                    timeout = 10.0
                 )
             except asyncio.TimeoutError:
                 print(f"Timeout getting initial sample for {project_name}, skipping...", flush=True)
                 sample_dict = None
-
             if sample_dict:
                 model_class = project_model_mapping.get(project_name)
                 if model_class:
@@ -455,23 +442,19 @@ async def lifespan(app: FastAPI):
             else:
                 initial_data_sample_loaded_status[project_name] = False
                 initial_data_sample_message_dict[project_name] = "Sample loading deferred."
-
         except Exception as e:
             data_load_status[project_name] = "failed"
             data_message_dict[project_name] = f"Error: {e}"
             initial_data_sample_loaded_status[project_name] = False
             initial_data_sample_message_dict[project_name] = f"Error: {e}"
-            print(f"Error initializing data for {project_name}: {e}", file=sys.stderr, flush=True)
-
+            print(f"Error initializing data for {project_name}: {e}", file = sys.stderr, flush=True)
     healthcheck.data_load = data_load_status
     healthcheck.data_message = data_message_dict
     healthcheck.initial_data_sample_loaded = initial_data_sample_loaded_status
     healthcheck.initial_data_sample_message = initial_data_sample_message_dict
-
     # 2. Skip Kafka consumers at startup - create on-demand for training scripts
-    print("Kafka consumers will be created on-demand for training scripts.", flush=True)
+    print("Kafka consumers will be created on-demand for training scripts.", flush = True)
     # consumer_dict is already initialized with None values
-
     # 3. Skip model preloading - models are loaded on-demand via MLflow
     model_load_status = {}
     model_message_dict = {}
@@ -480,7 +463,6 @@ async def lifespan(app: FastAPI):
         model_message_dict[project_name] = "Models loaded on-demand from MLflow"
     healthcheck.model_load = model_load_status
     healthcheck.model_message = model_message_dict
-
     # 4. Skip encoder preloading - encoders are loaded on-demand via MLflow
     encoders_load_status = {}
     print("Encoders will be loaded on-demand from MLflow.", flush=True)
@@ -488,14 +470,12 @@ async def lifespan(app: FastAPI):
         encoders_dict[project_name] = {}
         encoders_load_status[project_name] = "deferred"
     healthcheck.encoders_load = encoders_load_status
-
     # 5. Configure MLflow (non-blocking - just sets URI)
     try:
-        print("Configuring MLflow...", flush=True)
+        print("Configuring MLflow...", flush = True)
         mlflow.set_tracking_uri(f"http://{MLFLOW_HOST}:5000")
     except Exception as e:
-        print(f"Error configuring MLflow: {e}", file=sys.stderr, flush=True)
-
+        print(f"Error configuring MLflow: {e}", file=sys.stderr, flush = True)
     print("River ML service startup complete.", flush=True)
     yield
     print("River ML service shutting down...")
@@ -505,18 +485,18 @@ async def lifespan(app: FastAPI):
 # FastAPI App
 # =============================================================================
 app = FastAPI(
-    title="River ML Training Service",
-    description="Manages incremental ML model training and data services",
-    version="2.0.0",
-    lifespan=lifespan
+    title = "River ML Training Service - COELHO RealTime",
+    description = "Manages incremental ML model training and data services",
+    version = "2.0.0",
+    lifespan = lifespan
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins = ["*"],
+    allow_credentials = True,
+    allow_methods = ["*"],
+    allow_headers = ["*"],
 )
 
 # Add Prometheus metrics instrumentation
@@ -563,57 +543,47 @@ async def switch_model(payload: dict):
         project_name: str - Project name for MLflow
     """
     model_key = payload.get("model_key")
-
     if model_key == state.current_model_name:
         return {"message": f"Model {model_key} is already running."}
-
     if state.current_process:
         print(f"Switching from {state.current_model_name} to {model_key}")
         stop_current_model()
     else:
         print(f"No model running, attempting to start {model_key}")
-
     if model_key == "none" or model_key not in MODEL_SCRIPTS:
         if model_key == "none":
             return {"message": "All models stopped."}
         else:
             raise HTTPException(
-                status_code=404,
-                detail=f"Model key '{model_key}' not found. Available: {list(MODEL_SCRIPTS.keys())}"
+                status_code = 404,
+                detail = f"Model key '{model_key}' not found. Available: {list(MODEL_SCRIPTS.keys())}"
             )
-
     command = ["/app/.venv/bin/python3", "-u", model_key]
-
     try:
         print(f"Starting model: {model_key}")
-
         log_dir = "/app/logs"
-        os.makedirs(log_dir, exist_ok=True)
+        os.makedirs(log_dir, exist_ok = True)
         log_file_path = f"{log_dir}/{model_key}.log"
-
         with open(log_file_path, "ab") as log_file:
             process = subprocess.Popen(
                 command,
-                stdout=log_file,
-                stderr=subprocess.STDOUT,
-                cwd="/app"
+                stdout = log_file,
+                stderr = subprocess.STDOUT,
+                cwd = "/app"
             )
-
         state.current_process = process
         state.current_model_name = model_key
         state.status = f"Running {model_key}"
-
         print(f"Model {model_key} started with PID: {process.pid}")
         return {"message": f"Started model: {model_key}", "pid": process.pid}
-
     except Exception as e:
         print(f"Failed to start model {model_key}: {e}")
         state.current_process = None
         state.current_model_name = None
         state.status = f"Failed to start: {e}"
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to start model {model_key}: {str(e)}"
+            status_code = 500,
+            detail = f"Failed to start model {model_key}: {str(e)}"
         )
 
 
@@ -646,7 +616,7 @@ async def predict(payload: dict):
             model_dict[project_name] = {}
         model_dict[project_name][model_name] = model
     except Exception as e:
-        print(f"Error loading model from MLflow: {e}", file=sys.stderr)
+        print(f"Error loading model from MLflow: {e}", file = sys.stderr)
         # Fall back to cached model if available
         if project_name in model_dict and model_name in model_dict.get(project_name, {}):
             model = model_dict[project_name][model_name]
@@ -707,22 +677,22 @@ async def predict(payload: dict):
 # =============================================================================
 # Data Endpoints (migrated from fastapi app)
 # =============================================================================
-@app.get("/healthcheck", response_model=Healthcheck)
+@app.get("/healthcheck", response_model = Healthcheck)
 async def get_healthcheck():
     """Get detailed healthcheck status."""
     if ("failed" in healthcheck.model_load.values()) or ("failed" in healthcheck.data_load.values()):
         raise HTTPException(
-            status_code=503,
-            detail="Service Unavailable: Core components failed to load."
+            status_code = 503,
+            detail = "Service Unavailable: Core components failed to load."
         )
     return healthcheck
 
 
-@app.put("/healthcheck", response_model=Healthcheck)
+@app.put("/healthcheck", response_model = Healthcheck)
 async def update_healthcheck(update_data: Healthcheck):
     """Update healthcheck status."""
     global healthcheck
-    update_dict = update_data.model_dump(exclude_unset=True)
+    update_dict = update_data.model_dump(exclude_unset = True)
     for field, value in update_dict.items():
         setattr(healthcheck, field, value)
     return healthcheck
@@ -732,10 +702,12 @@ async def update_healthcheck(update_data: Healthcheck):
 async def get_sample(request: SampleRequest):
     """Get a random sample from the dataset using Spark (fast)."""
     try:
-        sample_df = get_sample_polars(request.project_name, n=1)
+        sample_df = get_sample_polars(request.project_name, n = 1)
         if sample_df is None or sample_df.empty:
-            raise HTTPException(status_code=503, detail="Could not get sample from Spark.")
-        sample = sample_df.to_dict(orient='records')[0]
+            raise HTTPException(
+                status_code = 503, 
+                detail = "Could not get sample from Spark.")
+        sample = sample_df.to_dict(orient = 'records')[0]
         # Validate through Pydantic to parse JSON string fields from Delta Lake
         if request.project_name == "Transaction Fraud Detection":
             sample = TransactionFraudDetection.model_validate(sample)
@@ -747,7 +719,9 @@ async def get_sample(request: SampleRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error sampling data: {e}")
+        raise HTTPException(
+            status_code = 500, 
+            detail = f"Error sampling data: {e}")
 
 
 @app.post("/unique_values")
@@ -756,31 +730,32 @@ async def get_unique_values(request: UniqueValuesRequest):
     global unique_values_cache
     project_cache = unique_values_cache.get(request.project_name, {})
     column = request.column_name
-
     # First try the precomputed cache (instant)
     if column in project_cache:
         unique_values = project_cache[column]
         if len(unique_values) > request.limit:
             unique_values = unique_values[:request.limit]
         return {"unique_values": unique_values}
-
     # Fallback: query Spark directly if column not in cache
     try:
-        unique_values = get_unique_values_polars(request.project_name, column, request.limit)
+        unique_values = get_unique_values_polars(
+            request.project_name, 
+            column, 
+            request.limit)
         if unique_values:
             # Update cache for future requests
             unique_values_cache[request.project_name][column] = unique_values
             return {"unique_values": unique_values}
         raise HTTPException(
-            status_code=400,
-            detail=f"Column '{column}' not found or has no values."
+            status_code = 400,
+            detail = f"Column '{column}' not found or has no values."
         )
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
-            status_code=500,
-            detail=f"Error getting unique values for column '{column}': {e}"
+            status_code = 500,
+            detail = f"Error getting unique values for column '{column}': {e}"
         )
 
 
@@ -793,8 +768,8 @@ async def get_initial_sample(request: InitialSampleRequest):
     global initial_sample_dict
     if initial_sample_dict.get(request.project_name) is None:
         raise HTTPException(
-            status_code=503,
-            detail="Initial data sample is not loaded."
+            status_code = 503,
+            detail = "Initial data sample is not loaded."
         )
     # Return the already-validated Pydantic model (validated at startup)
     return initial_sample_dict[request.project_name]
@@ -806,8 +781,8 @@ async def get_ordinal_encoder(request: OrdinalEncoderRequest):
     encoders = load_or_create_encoders(request.project_name, "river")
     if None in encoders.values():
         raise HTTPException(
-            status_code=503,
-            detail="Ordinal encoder is not loaded."
+            status_code = 503,
+            detail = "Ordinal encoder is not loaded."
         )
     if request.project_name in ["Transaction Fraud Detection", "Estimated Time of Arrival"]:
         return {
@@ -818,8 +793,8 @@ async def get_ordinal_encoder(request: OrdinalEncoderRequest):
             "standard_scaler": encoders["standard_scaler"].counts,
         }
     raise HTTPException(
-        status_code=400,
-        detail=f"Unknown project: {request.project_name}"
+        status_code = 400,
+        detail = f"Unknown project: {request.project_name}"
     )
 
 
@@ -853,12 +828,10 @@ async def get_cluster_feature_counts(request: ClusterFeatureCountsRequest):
 async def get_mlflow_metrics(request: MLflowMetricsRequest):
     """Get MLflow metrics with caching and async execution."""
     cache_key = f"{request.project_name}:{request.model_name}"
-
     if not request.force_refresh:
         cached_result = mlflow_cache.get(cache_key)
         if cached_result is not None:
             return cached_result
-
     try:
         result = await asyncio.wait_for(
             asyncio.to_thread(
@@ -866,22 +839,24 @@ async def get_mlflow_metrics(request: MLflowMetricsRequest):
                 request.project_name,
                 request.model_name
             ),
-            timeout=30.0
+            timeout = 30.0
         )
         mlflow_cache.set(cache_key, result)
         return result
     except asyncio.TimeoutError:
         raise HTTPException(
-            status_code=504,
-            detail="MLflow query timed out after 30 seconds"
+            status_code = 504,
+            detail = "MLflow query timed out after 30 seconds"
         )
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(
+            status_code = 404, 
+            detail = str(e))
     except Exception as e:
         print(f"Error fetching MLflow metrics: {e}", file=sys.stderr)
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch MLflow metrics: {str(e)}"
+            status_code = 500,
+            detail = f"Failed to fetch MLflow metrics: {str(e)}"
         )
 
 
@@ -890,7 +865,6 @@ async def check_model_available(request: ModelAvailabilityRequest):
     """Check if a trained River model is available in MLflow."""
     project_name = request.project_name
     model_name = request.model_name
-
     try:
         experiment = mlflow.get_experiment_by_name(project_name)
         if experiment is None:
@@ -899,16 +873,13 @@ async def check_model_available(request: ModelAvailabilityRequest):
                 "message": f"No experiment found for {project_name}",
                 "experiment_url": None
             }
-
         experiment_url = f"http://localhost:5001/#/experiments/{experiment.experiment_id}"
-
         # Fetch runs and filter in Python (same approach as _sync_get_mlflow_metrics)
         runs_df = mlflow.search_runs(
-            experiment_ids=[experiment.experiment_id],
-            max_results=100,
-            order_by=["start_time DESC"]
+            experiment_ids = [experiment.experiment_id],
+            max_results = 100,
+            order_by = ["start_time DESC"]
         )
-
         if runs_df.empty:
             return {
                 "available": False,
@@ -916,10 +887,8 @@ async def check_model_available(request: ModelAvailabilityRequest):
                 "experiment_id": experiment.experiment_id,
                 "experiment_url": experiment_url
             }
-
         # Filter by model name tag
         filtered_runs = runs_df[runs_df["tags.mlflow.runName"] == model_name]
-
         if filtered_runs.empty:
             return {
                 "available": False,
@@ -927,7 +896,6 @@ async def check_model_available(request: ModelAvailabilityRequest):
                 "experiment_id": experiment.experiment_id,
                 "experiment_url": experiment_url
             }
-
         run = filtered_runs.iloc[0]
         return {
             "available": True,

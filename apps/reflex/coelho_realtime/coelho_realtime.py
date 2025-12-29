@@ -1,4 +1,5 @@
 import reflex as rx
+from prometheus_fastapi_instrumentator import Instrumentator
 from .pages import (
     home,
     transaction_fraud_detection,
@@ -7,6 +8,10 @@ from .pages import (
 )
 
 app = rx.App()
+
+# Add Prometheus metrics instrumentation to the underlying FastAPI backend
+# This exposes /metrics endpoint for Prometheus scraping
+Instrumentator().instrument(app.api).expose(app.api)
 
 # Register pages
 app.add_page(

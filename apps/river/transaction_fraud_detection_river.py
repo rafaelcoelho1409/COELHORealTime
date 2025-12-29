@@ -73,7 +73,6 @@ def main():
     # Batch sizes for different operations (tuned for performance)
     METRICS_LOG_INTERVAL = 100      # Log metrics to MLflow every N messages
     ARTIFACT_SAVE_INTERVAL = 1000   # Save model/encoders to S3 every N messages
-
     print(f"Starting MLflow run with model: {model.__class__.__name__}")
     with mlflow.start_run(run_name = model.__class__.__name__):
         print("MLflow run started, entering consumer loop...")
