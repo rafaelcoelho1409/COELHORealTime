@@ -21,6 +21,8 @@ dependencies = [
     # Delta Lake / Polars (lightweight, lazy evaluation, no JVM)
     "polars",
     "deltalake",
+    # Redis (live model caching for real-time predictions)
+    "redis",
 ]
 
 [build-system]

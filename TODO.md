@@ -321,6 +321,19 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
 - [ ] API documentation (FastAPI auto-docs)
 - [ ] Deployment guide for k3d
 
+### UI/UX Enhancements
+- [ ] **Add info tooltips for all form fields and metrics** (Priority: MEDIUM)
+  - [ ] Add small info icon (ℹ️) next to each form field label
+  - [ ] Add small info icon next to each metric card label
+  - [ ] On hover/click, show tooltip with detailed explanation of:
+    - What the field/metric means
+    - Expected value ranges (if applicable)
+    - How the metric is calculated (for ML metrics)
+    - Example values or use cases
+  - [ ] Implement for all pages: TFD, ETA, ECCI
+  - [ ] Use Reflex `rx.tooltip` or `rx.hover_card` component
+  - [ ] Consider adding links to documentation for complex metrics (F1, ROC AUC, etc.)
+
 ### Performance
 - [ ] Profile Reflex page load times
 - [ ] Optimize Kafka consumer batch sizes
@@ -487,6 +500,37 @@ Services Removed:
 - Static Python constants mirror Kafka producer values
 - Works on fresh start with no Delta Lake data
 - "Randomize All Fields" now instant (local generation, no network calls)
+
+### Redis Live Model Cache for Real-Time Predictions (December 2025)
+- **Problem:** Predictions used MLflow's saved model, not the live training model
+- **Solution:** Redis cache for live model during training
+- **Architecture:**
+  ```
+  Training Active:
+  ┌─────────────────┐     ┌─────────┐     ┌─────────────┐
+  │ Training Script │────►│  Redis  │◄────│  /predict   │
+  │ (subprocess)    │     │ (cache) │     │  endpoint   │
+  └─────────────────┘     └─────────┘     └─────────────┘
+          │                                      │
+          └──────► MLflow (periodic save) ◄──────┘
+                   (for persistence)
+  ```
+- **Implementation:**
+  - Training scripts save to Redis every 100 Kafka messages (`REDIS_CACHE_INTERVAL`)
+  - Training scripts save to MLflow every 1000 messages (persistence)
+  - `/predict` endpoint checks Redis first when training is active
+  - `/training_status/{project_name}` endpoint for UI to check training state
+  - `model_source` field in prediction response ("live" or "mlflow")
+- **Benefits:**
+  - Users see predictions improve in real-time during training
+  - Instant model updates (~1-2 seconds vs waiting for MLflow save)
+  - Automatic cleanup when training stops (TTL + explicit clear)
+- **Files Modified:**
+  - `apps/river/functions.py` - Redis helper functions
+  - `apps/river/app.py` - /predict and /training_status endpoints
+  - `apps/river/*_river.py` - All 4 training scripts
+  - `apps/river/pyproject.toml` - Added redis dependency
+  - `k3d/helm/templates/river/configmap.yaml` - Added REDIS_URL
 
 ### Service Architecture Simplification
 - Consolidated from 3 services to 2 (River + Sklearn)

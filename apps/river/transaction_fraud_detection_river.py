@@ -18,6 +18,10 @@ from functions import (
     MLFLOW_MODEL_NAMES,
     ENCODER_ARTIFACT_NAMES,
     KAFKA_OFFSET_ARTIFACT,
+    # Redis live model cache (real-time predictions during training)
+    save_live_model_to_redis,
+    clear_live_model_from_redis,
+    REDIS_CACHE_INTERVAL,
 )
 
 
@@ -151,6 +155,9 @@ def main():
                             for metric in binary_classification_metrics
                         }
                         mlflow.log_metrics(metrics_to_log, step=message.offset)
+                    # Save live model to Redis for real-time predictions
+                    if message.offset % REDIS_CACHE_INTERVAL == 0:
+                        save_live_model_to_redis(PROJECT_NAME, MODEL_NAME, model, encoders)
                     # Save artifacts to MLflow (using temp files)
                     if message.offset % ARTIFACT_SAVE_INTERVAL == 0 and message.offset > 0:
                         with tempfile.TemporaryDirectory() as tmpdir:
@@ -188,6 +195,8 @@ def main():
                 mlflow.log_artifact(encoder_path)
                 mlflow.log_artifact(offset_path)
             print(f"Final artifacts saved to MLflow (offset={current_offset})")
+            # Clear live model from Redis (training stopped)
+            clear_live_model_from_redis(PROJECT_NAME, MODEL_NAME)
             if consumer is not None:
                 consumer.close()
             mlflow.end_run()

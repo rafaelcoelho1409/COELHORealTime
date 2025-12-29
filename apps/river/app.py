@@ -36,6 +36,9 @@ from functions import (
     precompute_all_unique_values_polars,
     # Static dropdown options (instant access, mirrors Kafka producer constants)
     get_static_dropdown_options,
+    # Redis live model cache (real-time predictions during training)
+    load_live_model_from_redis,
+    is_training_active,
 )
 
 
@@ -561,11 +564,40 @@ async def get_current_model():
     return await get_status()
 
 
+@app.get("/training_status/{project_name}")
+async def get_training_status(project_name: str):
+    """Check if training is active for a project.
+
+    Returns:
+        - is_active: True if live model exists in Redis
+        - model_name: The model name being trained (if active)
+        - model_source: "live" if training active, "mlflow" otherwise
+    """
+    from functions import MLFLOW_MODEL_NAMES
+    model_name = MLFLOW_MODEL_NAMES.get(project_name)
+    if not model_name:
+        raise HTTPException(
+            status_code = 400,
+            detail = f"Unknown project: {project_name}"
+        )
+    is_active = is_training_active(project_name, model_name)
+    return {
+        "project_name": project_name,
+        "model_name": model_name,
+        "is_active": is_active,
+        "model_source": "live" if is_active else "mlflow",
+    }
+
+
 @app.post("/predict")
 async def predict(payload: dict):
     """
-    Make predictions using the latest model from MLflow artifacts.
-    Reloads model before each prediction to stay synchronized with training.
+    Make predictions using the best available model.
+
+    Priority order:
+    1. Live model from Redis (if training is active) - real-time updates
+    2. Best model from MLflow (if training is inactive) - production quality
+
     Payload format: {project_name, model_name, ...feature_data}
     """
     global encoders_dict, model_dict
@@ -576,41 +608,57 @@ async def predict(payload: dict):
             status_code = 400,
             detail = "Missing required fields: project_name and model_name"
         )
-    # Load model from MLflow artifacts
-    try:
-        model = load_or_create_model(project_name, model_name)
-        # Update in-memory cache
-        if project_name not in model_dict:
-            model_dict[project_name] = {}
-        model_dict[project_name][model_name] = model
-    except Exception as e:
-        print(f"Error loading model from MLflow: {e}", file = sys.stderr)
-        # Fall back to cached model if available
-        if project_name in model_dict and model_name in model_dict.get(project_name, {}):
-            model = model_dict[project_name][model_name]
-            print(f"Using cached model for {project_name}/{model_name}")
-        else:
-            raise HTTPException(
-                status_code = 503,
-                detail = f"Model '{model_name}' for project '{project_name}' not found in MLflow. Train a model first."
-            )
-    # Load encoders from MLflow artifacts
-    try:
-        for library in ENCODER_LIBRARIES:
-            encoders_dict[project_name][library] = load_or_create_encoders(project_name, library)
-    except Exception as e:
-        print(f"Error loading encoders from MLflow: {e}", file=sys.stderr)
-        if project_name not in encoders_dict:
-            raise HTTPException(
-                status_code = 503,
-                detail = f"Encoders for project '{project_name}' not found in MLflow. Train a model first."
-            )
+    # Track which model source is being used (for UI indicator)
+    model_source = "mlflow"  # default
+    encoders = None
+    model = None
+    # First, check if training is active and try to load live model from Redis
+    if is_training_active(project_name, model_name):
+        redis_result = load_live_model_from_redis(project_name, model_name)
+        if redis_result is not None:
+            model, encoders = redis_result
+            model_source = "live"
+            print(f"Using LIVE model from Redis for {project_name}/{model_name}")
+    # If no live model, load from MLflow (best historical model)
+    if model is None:
+        try:
+            model = load_or_create_model(project_name, model_name)
+            # Update in-memory cache
+            if project_name not in model_dict:
+                model_dict[project_name] = {}
+            model_dict[project_name][model_name] = model
+            model_source = "mlflow"
+        except Exception as e:
+            print(f"Error loading model from MLflow: {e}", file = sys.stderr)
+            # Fall back to cached model if available
+            if project_name in model_dict and model_name in model_dict.get(project_name, {}):
+                model = model_dict[project_name][model_name]
+                model_source = "cache"
+                print(f"Using cached model for {project_name}/{model_name}")
+            else:
+                raise HTTPException(
+                    status_code = 503,
+                    detail = f"Model '{model_name}' for project '{project_name}' not found in MLflow. Train a model first."
+                )
+    # Load encoders (from Redis if live, otherwise from MLflow)
+    if encoders is None:
+        try:
+            for library in ENCODER_LIBRARIES:
+                encoders_dict[project_name][library] = load_or_create_encoders(project_name, library)
+        except Exception as e:
+            print(f"Error loading encoders from MLflow: {e}", file=sys.stderr)
+            if project_name not in encoders_dict:
+                raise HTTPException(
+                    status_code = 503,
+                    detail = f"Encoders for project '{project_name}' not found in MLflow. Train a model first."
+                )
     # Extract feature data (remove metadata fields)
     x = {k: v for k, v in payload.items() if k not in ["project_name", "model_name"]}
     if model_name in ["ARFClassifier", "ARFRegressor", "DBSTREAM"]:
         try:
-            # Use pre-loaded encoders
-            encoders = encoders_dict[project_name].get("river", {})
+            # Use encoders (from Redis if live, otherwise from MLflow)
+            if encoders is None:
+                encoders = encoders_dict[project_name].get("river", {})
             processed_x, _ = process_sample(x, encoders, project_name)
             if project_name == "Transaction Fraud Detection":
                 y_pred_proba = model.predict_proba_one(processed_x)
@@ -619,13 +667,20 @@ async def predict(payload: dict):
                 return {
                     "fraud_probability": fraud_probability,
                     "prediction": binary_prediction,
+                    "model_source": model_source,  # "live" or "mlflow"
                 }
             elif project_name == "Estimated Time of Arrival":
                 y_pred = model.predict_one(processed_x)
-                return {"Estimated Time of Arrival": y_pred}
+                return {
+                    "Estimated Time of Arrival": y_pred,
+                    "model_source": model_source,
+                }
             elif project_name == "E-Commerce Customer Interactions":
                 y_pred = model.predict_one(processed_x)
-                return {"cluster": y_pred}
+                return {
+                    "cluster": y_pred,
+                    "model_source": model_source,
+                }
         except Exception as e:
             print(f"Error during prediction: {e}", file=sys.stderr)
             raise HTTPException(

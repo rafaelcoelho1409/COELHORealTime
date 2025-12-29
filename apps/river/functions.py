@@ -146,6 +146,179 @@ def get_static_dropdown_options(project_name: str) -> Dict[str, List[str]]:
 
 
 # =============================================================================
+# Redis Live Model Cache (for real-time predictions during training)
+# =============================================================================
+import redis
+
+# Redis connection (lazy initialization)
+_redis_client: Optional[redis.Redis] = None
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
+# Redis key prefixes
+REDIS_LIVE_MODEL_PREFIX = "live_model"
+REDIS_LIVE_ENCODER_PREFIX = "live_encoder"
+REDIS_TRAINING_STATUS_PREFIX = "training_status"
+# Live model cache interval (save to Redis every N messages)
+REDIS_CACHE_INTERVAL = 100
+
+
+def get_redis_client() -> Optional[redis.Redis]:
+    """Get Redis client (lazy initialization with connection pooling)."""
+    global _redis_client
+    if _redis_client is None:
+        try:
+            _redis_client = redis.from_url(
+                REDIS_URL,
+                decode_responses=False,  # Keep binary for pickle
+                socket_timeout=5.0,
+                socket_connect_timeout=5.0,
+            )
+            # Test connection
+            _redis_client.ping()
+            print(f"Connected to Redis at {REDIS_URL}")
+        except Exception as e:
+            print(f"Warning: Could not connect to Redis: {e}")
+            _redis_client = None
+    return _redis_client
+
+
+def save_live_model_to_redis(
+    project_name: str,
+    model_name: str,
+    model: Any,
+    encoders: Dict[str, Any],
+    ttl_seconds: int = 3600,
+) -> bool:
+    """Save live model and encoders to Redis for real-time predictions.
+
+    Called by training scripts every REDIS_CACHE_INTERVAL messages.
+    TTL ensures stale models are automatically cleaned up if training crashes.
+
+    Args:
+        project_name: Project name (e.g., "Transaction Fraud Detection")
+        model_name: Model name (e.g., "ARFClassifier")
+        model: The trained River model
+        encoders: Dict of encoders (ordinal_encoder, etc.)
+        ttl_seconds: Time-to-live for cache entries (default: 1 hour)
+
+    Returns:
+        True if saved successfully, False otherwise
+    """
+    client = get_redis_client()
+    if client is None:
+        return False
+    try:
+        # Create Redis keys
+        model_key = f"{REDIS_LIVE_MODEL_PREFIX}:{project_name}:{model_name}"
+        encoder_key = f"{REDIS_LIVE_ENCODER_PREFIX}:{project_name}:{model_name}"
+        status_key = f"{REDIS_TRAINING_STATUS_PREFIX}:{project_name}:{model_name}"
+        # Serialize and save model
+        model_bytes = pickle.dumps(model)
+        client.setex(model_key, ttl_seconds, model_bytes)
+        # Serialize and save encoders
+        encoder_bytes = pickle.dumps(encoders)
+        client.setex(encoder_key, ttl_seconds, encoder_bytes)
+        # Update training status with timestamp
+        status_data = json.dumps({
+            "active": True,
+            "last_update": dt.datetime.now().isoformat(),
+            "project_name": project_name,
+            "model_name": model_name,
+        })
+        client.setex(status_key, ttl_seconds, status_data.encode())
+        return True
+    except Exception as e:
+        print(f"Error saving live model to Redis: {e}")
+        return False
+
+
+def load_live_model_from_redis(
+    project_name: str,
+    model_name: str,
+) -> Optional[tuple[Any, Dict[str, Any]]]:
+    """Load live model and encoders from Redis.
+
+    Called by /predict endpoint when training is active.
+
+    Args:
+        project_name: Project name
+        model_name: Model name
+
+    Returns:
+        Tuple of (model, encoders) if found, None otherwise
+    """
+    client = get_redis_client()
+    if client is None:
+        return None
+    try:
+        model_key = f"{REDIS_LIVE_MODEL_PREFIX}:{project_name}:{model_name}"
+        encoder_key = f"{REDIS_LIVE_ENCODER_PREFIX}:{project_name}:{model_name}"
+        # Load model
+        model_bytes = client.get(model_key)
+        if model_bytes is None:
+            return None
+        model = pickle.loads(model_bytes)
+        # Load encoders
+        encoder_bytes = client.get(encoder_key)
+        encoders = pickle.loads(encoder_bytes) if encoder_bytes else {}
+        return model, encoders
+    except Exception as e:
+        print(f"Error loading live model from Redis: {e}")
+        return None
+
+
+def is_training_active(project_name: str, model_name: str) -> bool:
+    """Check if training is currently active for a project/model.
+
+    Args:
+        project_name: Project name
+        model_name: Model name
+
+    Returns:
+        True if training is active (live model exists in Redis)
+    """
+    client = get_redis_client()
+    if client is None:
+        return False
+    try:
+        status_key = f"{REDIS_TRAINING_STATUS_PREFIX}:{project_name}:{model_name}"
+        status_bytes = client.get(status_key)
+        if status_bytes is None:
+            return False
+        status = json.loads(status_bytes.decode())
+        return status.get("active", False)
+    except Exception as e:
+        print(f"Error checking training status: {e}")
+        return False
+
+
+def clear_live_model_from_redis(project_name: str, model_name: str) -> bool:
+    """Clear live model from Redis when training stops.
+
+    Called when training is stopped gracefully.
+
+    Args:
+        project_name: Project name
+        model_name: Model name
+
+    Returns:
+        True if cleared successfully
+    """
+    client = get_redis_client()
+    if client is None:
+        return False
+    try:
+        model_key = f"{REDIS_LIVE_MODEL_PREFIX}:{project_name}:{model_name}"
+        encoder_key = f"{REDIS_LIVE_ENCODER_PREFIX}:{project_name}:{model_name}"
+        status_key = f"{REDIS_TRAINING_STATUS_PREFIX}:{project_name}:{model_name}"
+        client.delete(model_key, encoder_key, status_key)
+        print(f"Cleared live model from Redis: {project_name}/{model_name}")
+        return True
+    except Exception as e:
+        print(f"Error clearing live model from Redis: {e}")
+        return False
+
+
+# =============================================================================
 # MLflow Artifact Loading Functions
 # =============================================================================
 def get_latest_mlflow_run(project_name: str, model_name: str) -> Optional[str]:

@@ -452,7 +452,7 @@ def page_tabs() -> rx.Component:
 
 ## TRANSACTION FRAUD DETECTION
 def transaction_fraud_detection_form(model_key: str = None, project_name: str = None) -> rx.Component:
-    # Build form card
+    # Build form card with 3-column layout for compact display
     form_card = rx.card(
         rx.vstack(
             # Form Legend
@@ -462,17 +462,20 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                 spacing = "2",
                 align_items = "center"
             ),
-            rx.text(
-                "Enter transaction data to predict fraud probability using the real-time ML model.",
+            # Predict button at TOP for visibility
+            rx.button(
+                "Predict",
+                on_click = State.predict_transaction_fraud_detection,
                 size = "2",
-                color = "gray"
+                width = "100%",
+                disabled = ~State.incremental_model_available["Transaction Fraud Detection"]
             ),
-            # Randomize button
+            # Randomize button below Predict
             rx.button(
                 rx.hstack(
                     rx.icon("shuffle", size = 14),
                     rx.text("Randomize All Fields", size = "2"),
-                    spacing = "2",
+                    spacing = "1",
                     align_items = "center"
                 ),
                 on_click = State.randomize_tfd_form,
@@ -482,8 +485,9 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                 width = "100%"
             ),
             rx.divider(),
-            # Row 1: Amount and Account Age
-            rx.hstack(
+            # Form fields in 3-column grid
+            rx.grid(
+                # Amount
                 rx.vstack(
                     rx.text("Amount", size = "1", color = "gray"),
                     rx.input(
@@ -497,8 +501,9 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                     align_items = "start",
                     width = "100%"
                 ),
+                # Account Age
                 rx.vstack(
-                    rx.text("Account Age (days)", size = "1", color = "gray"),
+                    rx.text("Account Age", size = "1", color = "gray"),
                     rx.input(
                         type = "number",
                         value = State.tfd_form_data.get("account_age_days", ""),
@@ -511,11 +516,20 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                     align_items = "start",
                     width = "100%"
                 ),
-                spacing = "3",
-                width = "100%"
-            ),
-            # Row 2: Date and Time
-            rx.hstack(
+                # Currency
+                rx.vstack(
+                    rx.text("Currency", size = "1", color = "gray"),
+                    rx.select(
+                        State.tfd_options["currency"],
+                        value = State.tfd_form_data.get("currency", ""),
+                        on_change = lambda v: State.update_tfd("currency", v),
+                        width = "100%"
+                    ),
+                    spacing = "1",
+                    align_items = "start",
+                    width = "100%"
+                ),
+                # Date
                 rx.vstack(
                     rx.text("Date", size = "1", color = "gray"),
                     rx.input(
@@ -528,6 +542,7 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                     align_items = "start",
                     width = "100%"
                 ),
+                # Time
                 rx.vstack(
                     rx.text("Time", size = "1", color = "gray"),
                     rx.input(
@@ -540,24 +555,7 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                     align_items = "start",
                     width = "100%"
                 ),
-                spacing = "3",
-                width = "100%"
-            ),
-            # Row 3: Currency
-            rx.vstack(
-                rx.text("Currency", size = "1", color = "gray"),
-                rx.select(
-                    State.tfd_options["currency"],
-                    value = State.tfd_form_data.get("currency", ""),
-                    on_change = lambda v: State.update_tfd("currency", v),
-                    width = "100%"
-                ),
-                spacing = "1",
-                align_items = "start",
-                width = "100%"
-            ),
-            # Row 4: Merchant ID and Product Category
-            rx.hstack(
+                # Merchant ID
                 rx.vstack(
                     rx.text("Merchant ID", size = "1", color = "gray"),
                     rx.select(
@@ -570,8 +568,9 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                     align_items = "start",
                     width = "100%"
                 ),
+                # Product Category
                 rx.vstack(
-                    rx.text("Product Category", size = "1", color = "gray"),
+                    rx.text("Category", size = "1", color = "gray"),
                     rx.select(
                         State.tfd_options["product_category"],
                         value = State.tfd_form_data.get("product_category", ""),
@@ -582,13 +581,9 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                     align_items = "start",
                     width = "100%"
                 ),
-                spacing = "3",
-                width = "100%"
-            ),
-            # Row 5: Transaction Type and Payment Method
-            rx.hstack(
+                # Transaction Type
                 rx.vstack(
-                    rx.text("Transaction Type", size = "1", color = "gray"),
+                    rx.text("Type", size = "1", color = "gray"),
                     rx.select(
                         State.tfd_options["transaction_type"],
                         value = State.tfd_form_data.get("transaction_type", ""),
@@ -599,8 +594,9 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                     align_items = "start",
                     width = "100%"
                 ),
+                # Payment Method
                 rx.vstack(
-                    rx.text("Payment Method", size = "1", color = "gray"),
+                    rx.text("Payment", size = "1", color = "gray"),
                     rx.select(
                         State.tfd_options["payment_method"],
                         value = State.tfd_form_data.get("payment_method", ""),
@@ -611,11 +607,7 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                     align_items = "start",
                     width = "100%"
                 ),
-                spacing = "3",
-                width = "100%"
-            ),
-            # Row 6: Latitude and Longitude
-            rx.hstack(
+                # Latitude
                 rx.vstack(
                     rx.text("Latitude", size = "1", color = "gray"),
                     rx.input(
@@ -631,6 +623,7 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                     align_items = "start",
                     width = "100%"
                 ),
+                # Longitude
                 rx.vstack(
                     rx.text("Longitude", size = "1", color = "gray"),
                     rx.input(
@@ -646,11 +639,7 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                     align_items = "start",
                     width = "100%"
                 ),
-                spacing = "3",
-                width = "100%"
-            ),
-            # Row 7: Browser and OS
-            rx.hstack(
+                # Browser
                 rx.vstack(
                     rx.text("Browser", size = "1", color = "gray"),
                     rx.select(
@@ -663,6 +652,7 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                     align_items = "start",
                     width = "100%"
                 ),
+                # OS
                 rx.vstack(
                     rx.text("OS", size = "1", color = "gray"),
                     rx.select(
@@ -675,27 +665,37 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                     align_items = "start",
                     width = "100%"
                 ),
-                spacing = "3",
+                # CVV Provided (with label for alignment)
+                rx.vstack(
+                    rx.text("CVV", size = "1", color = "gray"),
+                    rx.checkbox(
+                        "Provided",
+                        checked = State.tfd_form_data.get("cvv_provided", False),
+                        on_change = lambda v: State.update_tfd("cvv_provided", v),
+                        size = "1"
+                    ),
+                    spacing = "1",
+                    align_items = "start",
+                    width = "100%"
+                ),
+                # Billing Address Match (with label for alignment)
+                rx.vstack(
+                    rx.text("Billing", size = "1", color = "gray"),
+                    rx.checkbox(
+                        "Address Match",
+                        checked = State.tfd_form_data.get("billing_address_match", False),
+                        on_change = lambda v: State.update_tfd("billing_address_match", v),
+                        size = "1"
+                    ),
+                    spacing = "1",
+                    align_items = "start",
+                    width = "100%"
+                ),
+                columns = "3",
+                spacing = "2",
                 width = "100%"
             ),
-            # Row 8: CVV Provided and Billing Address Match
-            rx.hstack(
-                rx.checkbox(
-                    "CVV Provided",
-                    checked = State.tfd_form_data.get("cvv_provided", False),
-                    on_change = lambda v: State.update_tfd("cvv_provided", v),
-                    size = "1"
-                ),
-                rx.checkbox(
-                    "Billing Address Match",
-                    checked = State.tfd_form_data.get("billing_address_match", False),
-                    on_change = lambda v: State.update_tfd("billing_address_match", v),
-                    size = "1"
-                ),
-                spacing = "4",
-                width = "100%"
-            ),
-            # Display fields
+            # Display fields (read-only info stacked vertically)
             rx.vstack(
                 rx.text(
                     f"Transaction ID: {State.tfd_form_data.get('transaction_id', '')}",
@@ -712,24 +712,11 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                     size = "1",
                     color = "gray"
                 ),
-                rx.text(
-                    f"User Agent: {State.tfd_form_data.get('user_agent', '')}",
-                    size = "1",
-                    color = "gray"
-                ),
                 spacing = "1",
                 align_items = "start",
                 width = "100%"
             ),
-            # Predict button (disabled when no model available)
-            rx.button(
-                "Predict",
-                on_click = State.predict_transaction_fraud_detection,
-                size = "3",
-                width = "100%",
-                disabled = ~State.incremental_model_available["Transaction Fraud Detection"]
-            ),
-            spacing = "3",
+            spacing = "2",
             align_items = "start",
             width = "100%"
         ),
@@ -783,78 +770,78 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                 rx.vstack(
                     # Plotly Gauge Chart
                     rx.plotly(data = State.tfd_fraud_gauge, width = "100%"),
-                    # Prediction summary cards
+                    # Prediction summary cards (compact)
                     rx.hstack(
                         rx.card(
                             rx.vstack(
                                 rx.hstack(
-                                    rx.icon("triangle-alert", size = 16, color = State.tfd_prediction_color),
-                                    rx.text("Classification", size = "2", color = "gray"),
+                                    rx.icon("triangle-alert", size = 14, color = State.tfd_prediction_color),
+                                    rx.text("Classification", size = "1", color = "gray"),
                                     spacing = "1",
                                     align_items = "center"
                                 ),
                                 rx.text(
                                     State.tfd_prediction_text,
-                                    size = "7",
+                                    size = "5",
                                     weight = "bold",
                                     color = State.tfd_prediction_color,
                                     align = "center"
                                 ),
-                                spacing = "2",
+                                spacing = "1",
                                 align_items = "center",
                                 width = "100%"
                             ),
                             variant = "surface",
-                            size = "3",
+                            size = "1",
                             width = "100%"
                         ),
                         rx.card(
                             rx.vstack(
                                 rx.hstack(
-                                    rx.icon("percent", size = 16, color = "red"),
-                                    rx.text("Fraud", size = "2", color = "gray"),
+                                    rx.icon("percent", size = 14, color = "red"),
+                                    rx.text("Fraud", size = "1", color = "gray"),
                                     spacing = "1",
                                     align_items = "center"
                                 ),
                                 rx.text(
                                     f"{State.tfd_fraud_probability * 100:.2f}%",
-                                    size = "7",
+                                    size = "5",
                                     weight = "bold",
                                     align = "center",
                                     color = "red"
                                 ),
-                                spacing = "2",
+                                spacing = "1",
                                 align_items = "center",
                                 width = "100%"
                             ),
                             variant = "surface",
-                            size = "3",
+                            size = "1",
                             width = "100%"
                         ),
                         rx.card(
                             rx.vstack(
                                 rx.hstack(
-                                    rx.icon("circle-check", size = 16, color = "green"),
-                                    rx.text("Not Fraud", size = "2", color = "gray"),
+                                    rx.icon("circle-check", size = 14, color = "green"),
+                                    rx.text("Not Fraud", size = "1", color = "gray"),
                                     spacing = "1",
                                     align_items = "center"
                                 ),
                                 rx.text(
                                     f"{(1 - State.tfd_fraud_probability) * 100:.2f}%",
-                                    size = "7",
+                                    size = "5",
                                     weight = "bold",
                                     align = "center",
                                     color = "green"
                                 ),
-                                spacing = "2",
+                                spacing = "1",
                                 align_items = "center",
                                 width = "100%"
                             ),
                             variant = "surface",
-                            size = "3",
+                            size = "1",
                             width = "100%"
                         ),
-                        spacing = "3",
+                        spacing = "2",
                         width = "100%"
                     ),
                     spacing = "4",
@@ -895,28 +882,28 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
     )
 
 def metric_card(label: str, value_var) -> rx.Component:
-    """Create a styled metric card."""
+    """Create a compact styled metric card."""
     return rx.card(
         rx.vstack(
             rx.text(
                 label,
-                size = "2",
+                size = "1",
                 weight = "medium",
                 color = "gray"
             ),
             rx.text(
                 value_var,
-                size = "6",
+                size = "4",
                 weight = "bold",
                 align = "center"
             ),
-            spacing = "2",
+            spacing = "1",
             align_items = "center",
             justify = "center",
             height = "100%"
         ),
         variant = "surface",
-        size = "2"
+        size = "1"
     )
 
 
@@ -929,8 +916,8 @@ def transaction_fraud_detection_metrics() -> rx.Component:
         metric_card("Precision", State.tfd_metrics["precision"]),
         metric_card("ROC AUC", State.tfd_metrics["rocauc"]),
         metric_card("Geo Mean", State.tfd_metrics["geometric_mean"]),
-        columns = "3",
-        spacing = "3",
+        columns = "6",
+        spacing = "2",
         width = "100%"
     )
 
@@ -1598,7 +1585,7 @@ def transaction_fraud_detection_batch_metrics() -> rx.Component:
 
 ## ESTIMATED TIME OF ARRIVAL
 def estimated_time_of_arrival_form(model_key: str = None, project_name: str = None) -> rx.Component:
-    # Build form card
+    # Build form card with 3-column layout for compact display
     form_card = rx.card(
         rx.vstack(
             # Form Legend
@@ -1608,17 +1595,20 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
                 spacing = "2",
                 align_items = "center"
             ),
-            rx.text(
-                "Enter trip data to predict estimated time of arrival using the real-time ML model.",
+            # Predict button at TOP for visibility
+            rx.button(
+                "Predict",
+                on_click = State.predict_eta,
                 size = "2",
-                color = "gray"
+                width = "100%",
+                disabled = ~State.incremental_model_available["Estimated Time of Arrival"]
             ),
-            # Randomize button
+            # Randomize button below Predict
             rx.button(
                 rx.hstack(
                     rx.icon("shuffle", size = 14),
                     rx.text("Randomize All Fields", size = "2"),
-                    spacing = "2",
+                    spacing = "1",
                     align_items = "center"
                 ),
                 on_click = State.randomize_eta_form,
@@ -1628,8 +1618,9 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
                 width = "100%"
             ),
             rx.divider(),
-            # Row 1: Driver ID and Vehicle ID
-            rx.hstack(
+            # Form fields in 3-column grid
+            rx.grid(
+                # Driver ID
                 rx.vstack(
                     rx.text("Driver ID", size = "1", color = "gray"),
                     rx.select(
@@ -1642,6 +1633,7 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
                     align_items = "start",
                     width = "100%"
                 ),
+                # Vehicle ID
                 rx.vstack(
                     rx.text("Vehicle ID", size = "1", color = "gray"),
                     rx.select(
@@ -1654,11 +1646,20 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
                     align_items = "start",
                     width = "100%"
                 ),
-                spacing = "3",
-                width = "100%"
-            ),
-            # Row 2: Date and Time
-            rx.hstack(
+                # Weather
+                rx.vstack(
+                    rx.text("Weather", size = "1", color = "gray"),
+                    rx.select(
+                        State.eta_options["weather"],
+                        value = State.eta_form_data.get("weather", ""),
+                        on_change = lambda v: State.update_eta("weather", v),
+                        width = "100%"
+                    ),
+                    spacing = "1",
+                    align_items = "start",
+                    width = "100%"
+                ),
+                # Date
                 rx.vstack(
                     rx.text("Date", size = "1", color = "gray"),
                     rx.input(
@@ -1671,6 +1672,7 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
                     align_items = "start",
                     width = "100%"
                 ),
+                # Time
                 rx.vstack(
                     rx.text("Time", size = "1", color = "gray"),
                     rx.input(
@@ -1683,13 +1685,22 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
                     align_items = "start",
                     width = "100%"
                 ),
-                spacing = "3",
-                width = "100%"
-            ),
-            # Row 3: Origin Latitude and Longitude
-            rx.hstack(
+                # Vehicle Type
                 rx.vstack(
-                    rx.text("Origin Latitude", size = "1", color = "gray"),
+                    rx.text("Vehicle Type", size = "1", color = "gray"),
+                    rx.select(
+                        State.eta_options["vehicle_type"],
+                        value = State.eta_form_data.get("vehicle_type", ""),
+                        on_change = lambda v: State.update_eta("vehicle_type", v),
+                        width = "100%"
+                    ),
+                    spacing = "1",
+                    align_items = "start",
+                    width = "100%"
+                ),
+                # Origin Lat
+                rx.vstack(
+                    rx.text("Origin Lat", size = "1", color = "gray"),
                     rx.input(
                         type = "number",
                         value = State.eta_form_data.get("origin_lat", ""),
@@ -1703,8 +1714,9 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
                     align_items = "start",
                     width = "100%"
                 ),
+                # Origin Lon
                 rx.vstack(
-                    rx.text("Origin Longitude", size = "1", color = "gray"),
+                    rx.text("Origin Lon", size = "1", color = "gray"),
                     rx.input(
                         type = "number",
                         value = State.eta_form_data.get("origin_lon", ""),
@@ -1718,13 +1730,28 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
                     align_items = "start",
                     width = "100%"
                 ),
-                spacing = "3",
-                width = "100%"
-            ),
-            # Row 4: Destination Latitude and Longitude
-            rx.hstack(
+                # Random Coordinates button (with label for alignment)
                 rx.vstack(
-                    rx.text("Destination Latitude", size = "1", color = "gray"),
+                    rx.text("Coords", size = "1", color = "gray"),
+                    rx.button(
+                        rx.hstack(
+                            rx.icon("shuffle", size = 12),
+                            rx.text("Random", size = "1"),
+                            spacing = "1",
+                            align_items = "center"
+                        ),
+                        on_click = State.generate_random_eta_coordinates,
+                        variant = "outline",
+                        size = "1",
+                        width = "100%"
+                    ),
+                    spacing = "1",
+                    align_items = "start",
+                    width = "100%"
+                ),
+                # Dest Lat
+                rx.vstack(
+                    rx.text("Dest Lat", size = "1", color = "gray"),
                     rx.input(
                         type = "number",
                         value = State.eta_form_data.get("destination_lat", ""),
@@ -1738,8 +1765,9 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
                     align_items = "start",
                     width = "100%"
                 ),
+                # Dest Lon
                 rx.vstack(
-                    rx.text("Destination Longitude", size = "1", color = "gray"),
+                    rx.text("Dest Lon", size = "1", color = "gray"),
                     rx.input(
                         type = "number",
                         value = State.eta_form_data.get("destination_lon", ""),
@@ -1753,55 +1781,9 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
                     align_items = "start",
                     width = "100%"
                 ),
-                spacing = "3",
-                width = "100%"
-            ),
-            # Random coordinates button
-            rx.button(
-                rx.hstack(
-                    rx.icon("shuffle", size = 14),
-                    rx.text("Random Coordinates", size = "1"),
-                    spacing = "1",
-                    align_items = "center"
-                ),
-                on_click = State.generate_random_eta_coordinates,
-                variant = "outline",
-                size = "1",
-                width = "100%"
-            ),
-            # Row 5: Weather and Vehicle Type
-            rx.hstack(
+                # Hour of Day
                 rx.vstack(
-                    rx.text("Weather", size = "1", color = "gray"),
-                    rx.select(
-                        State.eta_options["weather"],
-                        value = State.eta_form_data.get("weather", ""),
-                        on_change = lambda v: State.update_eta("weather", v),
-                        width = "100%"
-                    ),
-                    spacing = "1",
-                    align_items = "start",
-                    width = "100%"
-                ),
-                rx.vstack(
-                    rx.text("Vehicle Type", size = "1", color = "gray"),
-                    rx.select(
-                        State.eta_options["vehicle_type"],
-                        value = State.eta_form_data.get("vehicle_type", ""),
-                        on_change = lambda v: State.update_eta("vehicle_type", v),
-                        width = "100%"
-                    ),
-                    spacing = "1",
-                    align_items = "start",
-                    width = "100%"
-                ),
-                spacing = "3",
-                width = "100%"
-            ),
-            # Row 6: Hour of Day and Driver Rating
-            rx.hstack(
-                rx.vstack(
-                    rx.text("Hour of Day", size = "1", color = "gray"),
+                    rx.text("Hour", size = "1", color = "gray"),
                     rx.input(
                         type = "number",
                         value = State.eta_form_data.get("hour_of_day", ""),
@@ -1815,8 +1797,9 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
                     align_items = "start",
                     width = "100%"
                 ),
+                # Driver Rating
                 rx.vstack(
-                    rx.text("Driver Rating", size = "1", color = "gray"),
+                    rx.text("Rating", size = "1", color = "gray"),
                     rx.input(
                         type = "number",
                         value = State.eta_form_data.get("driver_rating", ""),
@@ -1830,83 +1813,9 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
                     align_items = "start",
                     width = "100%"
                 ),
-                spacing = "3",
-                width = "100%"
-            ),
-            # Row 7: Debug Traffic Factor and Debug Weather Factor
-            rx.hstack(
+                # Temperature
                 rx.vstack(
-                    rx.text("Debug Traffic Factor", size = "1", color = "gray"),
-                    rx.input(
-                        type = "number",
-                        value = State.eta_form_data.get("debug_traffic_factor", ""),
-                        on_change = lambda v: State.update_eta("debug_traffic_factor", v),
-                        min = 0.3,
-                        max = 1.9,
-                        step = 0.1,
-                        width = "100%"
-                    ),
-                    spacing = "1",
-                    align_items = "start",
-                    width = "100%"
-                ),
-                rx.vstack(
-                    rx.text("Debug Weather Factor", size = "1", color = "gray"),
-                    rx.input(
-                        type = "number",
-                        value = State.eta_form_data.get("debug_weather_factor", ""),
-                        on_change = lambda v: State.update_eta("debug_weather_factor", v),
-                        min = 1.0,
-                        max = 2.0,
-                        step = 0.1,
-                        width = "100%"
-                    ),
-                    spacing = "1",
-                    align_items = "start",
-                    width = "100%"
-                ),
-                spacing = "3",
-                width = "100%"
-            ),
-            # Row 8: Debug Incident Delay and Debug Driver Factor
-            rx.hstack(
-                rx.vstack(
-                    rx.text("Debug Incident Delay (s)", size = "1", color = "gray"),
-                    rx.input(
-                        type = "number",
-                        value = State.eta_form_data.get("debug_incident_delay_seconds", ""),
-                        on_change = lambda v: State.update_eta("debug_incident_delay_seconds", v),
-                        min = 0,
-                        max = 1800,
-                        step = 1,
-                        width = "100%"
-                    ),
-                    spacing = "1",
-                    align_items = "start",
-                    width = "100%"
-                ),
-                rx.vstack(
-                    rx.text("Debug Driver Factor", size = "1", color = "gray"),
-                    rx.input(
-                        type = "number",
-                        value = State.eta_form_data.get("debug_driver_factor", ""),
-                        on_change = lambda v: State.update_eta("debug_driver_factor", v),
-                        min = 0.85,
-                        max = 1.15,
-                        step = 0.01,
-                        width = "100%"
-                    ),
-                    spacing = "1",
-                    align_items = "start",
-                    width = "100%"
-                ),
-                spacing = "3",
-                width = "100%"
-            ),
-            # Row 9: Temperature and Initial Estimated Travel Time
-            rx.hstack(
-                rx.vstack(
-                    rx.text("Temperature (°C)", size = "1", color = "gray"),
+                    rx.text("Temp °C", size = "1", color = "gray"),
                     rx.input(
                         type = "number",
                         value = State.eta_form_data.get("temperature_celsius", ""),
@@ -1920,22 +1829,75 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
                     align_items = "start",
                     width = "100%"
                 ),
+                # Debug Traffic Factor
                 rx.vstack(
-                    rx.text("Initial Est. Travel Time (s)", size = "1", color = "gray"),
+                    rx.text("Traffic Factor", size = "1", color = "gray"),
                     rx.input(
                         type = "number",
-                        value = State.eta_initial_estimated_travel_time_seconds,
-                        disabled = True,
+                        value = State.eta_form_data.get("debug_traffic_factor", ""),
+                        on_change = lambda v: State.update_eta("debug_traffic_factor", v),
+                        min = 0.3,
+                        max = 1.9,
+                        step = 0.1,
                         width = "100%"
                     ),
                     spacing = "1",
                     align_items = "start",
                     width = "100%"
                 ),
-                spacing = "3",
+                # Debug Weather Factor
+                rx.vstack(
+                    rx.text("Weather Factor", size = "1", color = "gray"),
+                    rx.input(
+                        type = "number",
+                        value = State.eta_form_data.get("debug_weather_factor", ""),
+                        on_change = lambda v: State.update_eta("debug_weather_factor", v),
+                        min = 1.0,
+                        max = 2.0,
+                        step = 0.1,
+                        width = "100%"
+                    ),
+                    spacing = "1",
+                    align_items = "start",
+                    width = "100%"
+                ),
+                # Debug Driver Factor
+                rx.vstack(
+                    rx.text("Driver Factor", size = "1", color = "gray"),
+                    rx.input(
+                        type = "number",
+                        value = State.eta_form_data.get("debug_driver_factor", ""),
+                        on_change = lambda v: State.update_eta("debug_driver_factor", v),
+                        min = 0.85,
+                        max = 1.15,
+                        step = 0.01,
+                        width = "100%"
+                    ),
+                    spacing = "1",
+                    align_items = "start",
+                    width = "100%"
+                ),
+                # Debug Incident Delay
+                rx.vstack(
+                    rx.text("Incident (s)", size = "1", color = "gray"),
+                    rx.input(
+                        type = "number",
+                        value = State.eta_form_data.get("debug_incident_delay_seconds", ""),
+                        on_change = lambda v: State.update_eta("debug_incident_delay_seconds", v),
+                        min = 0,
+                        max = 1800,
+                        step = 1,
+                        width = "100%"
+                    ),
+                    spacing = "1",
+                    align_items = "start",
+                    width = "100%"
+                ),
+                columns = "3",
+                spacing = "2",
                 width = "100%"
             ),
-            # Display fields
+            # Display fields (read-only info stacked vertically)
             rx.vstack(
                 rx.text(
                     f"Trip ID: {State.eta_form_data.get('trip_id', '')}",
@@ -1947,19 +1909,16 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
                     size = "1",
                     color = "gray"
                 ),
+                rx.text(
+                    f"Initial Estimated Travel Time: {State.eta_initial_estimated_travel_time_seconds} s",
+                    size = "1",
+                    color = "gray"
+                ),
                 spacing = "1",
                 align_items = "start",
                 width = "100%"
             ),
-            # Predict button (disabled when no model available)
-            rx.button(
-                "Predict",
-                on_click = State.predict_eta,
-                size = "3",
-                width = "100%",
-                disabled = ~State.incremental_model_available["Estimated Time of Arrival"]
-            ),
-            spacing = "3",
+            spacing = "2",
             align_items = "start",
             width = "100%"
         ),
@@ -2015,13 +1974,18 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
                     size = "2",
                     color = "gray"
                 ),
+                rx.text(
+                    f"Initial Estimated Travel Time: {State.eta_initial_estimated_travel_time_seconds} s",
+                    size = "2",
+                    color = "gray"
+                ),
                 spacing = "2",
                 width = "100%",
                 height = "100%"
             ),
             variant = "surface",
             width = "50%",
-            height = "380px"
+            height = "400px"
         ),
         # Right: ETA Prediction - shows info or results
         rx.card(
@@ -2104,15 +2068,15 @@ def estimated_time_of_arrival_metrics() -> rx.Component:
         metric_card("RMSE", State.eta_metrics["rmse"]),
         metric_card("RMSLE", State.eta_metrics["rmsle"]),
         metric_card("SMAPE", State.eta_metrics["smape"]),
-        columns = "4",
-        spacing = "3",
+        columns = "7",
+        spacing = "2",
         width = "100%"
     )
 
 
 ## E-COMMERCE CUSTOMER INTERACTIONS
 def e_commerce_customer_interactions_form(model_key: str = None, project_name: str = None) -> rx.Component:
-    # Build form card
+    # Build form card with 3-column layout for compact display
     form_card = rx.card(
         rx.vstack(
             # Form Legend
@@ -2122,17 +2086,20 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
                 spacing = "2",
                 align_items = "center"
             ),
-            rx.text(
-                "Enter customer interaction data to predict cluster assignment using the real-time ML model.",
+            # Predict button at TOP for visibility
+            rx.button(
+                "Predict",
+                on_click = State.predict_ecci,
                 size = "2",
-                color = "gray"
+                width = "100%",
+                disabled = ~State.incremental_model_available["E-Commerce Customer Interactions"]
             ),
-            # Randomize button
+            # Randomize button below Predict
             rx.button(
                 rx.hstack(
                     rx.icon("shuffle", size = 14),
                     rx.text("Randomize All Fields", size = "2"),
-                    spacing = "2",
+                    spacing = "1",
                     align_items = "center"
                 ),
                 on_click = State.randomize_ecci_form,
@@ -2142,8 +2109,9 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
                 width = "100%"
             ),
             rx.divider(),
-            # Row 1: Browser, Device Type, OS
-            rx.hstack(
+            # Form fields in 3-column grid
+            rx.grid(
+                # Browser
                 rx.vstack(
                     rx.text("Browser", size = "1", color = "gray"),
                     rx.select(
@@ -2156,8 +2124,9 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
                     align_items = "start",
                     width = "100%"
                 ),
+                # Device Type
                 rx.vstack(
-                    rx.text("Device Type", size = "1", color = "gray"),
+                    rx.text("Device", size = "1", color = "gray"),
                     rx.select(
                         State.ecci_options["device_type"],
                         value = State.ecci_form_data.get("device_type", ""),
@@ -2168,6 +2137,7 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
                     align_items = "start",
                     width = "100%"
                 ),
+                # OS
                 rx.vstack(
                     rx.text("OS", size = "1", color = "gray"),
                     rx.select(
@@ -2180,11 +2150,87 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
                     align_items = "start",
                     width = "100%"
                 ),
-                spacing = "3",
-                width = "100%"
-            ),
-            # Row 2: Latitude and Longitude
-            rx.hstack(
+                # Event Type
+                rx.vstack(
+                    rx.text("Event Type", size = "1", color = "gray"),
+                    rx.select(
+                        State.ecci_options["event_type"],
+                        value = State.ecci_form_data.get("event_type", ""),
+                        on_change = lambda v: State.update_ecci("event_type", v),
+                        width = "100%"
+                    ),
+                    spacing = "1",
+                    align_items = "start",
+                    width = "100%"
+                ),
+                # Product Category
+                rx.vstack(
+                    rx.text("Category", size = "1", color = "gray"),
+                    rx.select(
+                        State.ecci_options["product_category"],
+                        value = State.ecci_form_data.get("product_category", ""),
+                        on_change = lambda v: State.update_ecci("product_category", v),
+                        width = "100%"
+                    ),
+                    spacing = "1",
+                    align_items = "start",
+                    width = "100%"
+                ),
+                # Price
+                rx.vstack(
+                    rx.text("Price", size = "1", color = "gray"),
+                    rx.input(
+                        type = "number",
+                        value = State.ecci_form_data.get("price", ""),
+                        on_change = lambda v: State.update_ecci("price", v),
+                        min = 0.0,
+                        step = 0.01,
+                        width = "100%"
+                    ),
+                    spacing = "1",
+                    align_items = "start",
+                    width = "100%"
+                ),
+                # Date
+                rx.vstack(
+                    rx.text("Date", size = "1", color = "gray"),
+                    rx.input(
+                        type = "date",
+                        value = State.ecci_form_data.get("timestamp_date", ""),
+                        on_change = lambda v: State.update_ecci("timestamp_date", v),
+                        width = "100%"
+                    ),
+                    spacing = "1",
+                    align_items = "start",
+                    width = "100%"
+                ),
+                # Time
+                rx.vstack(
+                    rx.text("Time", size = "1", color = "gray"),
+                    rx.input(
+                        type = "time",
+                        value = State.ecci_form_data.get("timestamp_time", ""),
+                        on_change = lambda v: State.update_ecci("timestamp_time", v),
+                        width = "100%"
+                    ),
+                    spacing = "1",
+                    align_items = "start",
+                    width = "100%"
+                ),
+                # Product ID
+                rx.vstack(
+                    rx.text("Product ID", size = "1", color = "gray"),
+                    rx.input(
+                        value = State.ecci_form_data.get("product_id", ""),
+                        on_change = lambda v: State.update_ecci("product_id", v),
+                        placeholder = "prod_1050",
+                        width = "100%"
+                    ),
+                    spacing = "1",
+                    align_items = "start",
+                    width = "100%"
+                ),
+                # Latitude
                 rx.vstack(
                     rx.text("Latitude", size = "1", color = "gray"),
                     rx.input(
@@ -2200,6 +2246,7 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
                     align_items = "start",
                     width = "100%"
                 ),
+                # Longitude
                 rx.vstack(
                     rx.text("Longitude", size = "1", color = "gray"),
                     rx.input(
@@ -2215,115 +2262,26 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
                     align_items = "start",
                     width = "100%"
                 ),
-                spacing = "3",
-                width = "100%"
-            ),
-            # Random coordinates button
-            rx.button(
-                rx.hstack(
-                    rx.icon("shuffle", size = 14),
-                    rx.text("Random Coordinates", size = "1"),
-                    spacing = "1",
-                    align_items = "center"
-                ),
-                on_click = State.generate_random_ecci_coordinates,
-                variant = "outline",
-                size = "1",
-                width = "100%"
-            ),
-            # Row 3: Event Type and Price
-            rx.hstack(
+                # Random Coordinates button (with label for alignment)
                 rx.vstack(
-                    rx.text("Event Type", size = "1", color = "gray"),
-                    rx.select(
-                        State.ecci_options["event_type"],
-                        value = State.ecci_form_data.get("event_type", ""),
-                        on_change = lambda v: State.update_ecci("event_type", v),
+                    rx.text("Coords", size = "1", color = "gray"),
+                    rx.button(
+                        rx.hstack(
+                            rx.icon("shuffle", size = 12),
+                            rx.text("Random", size = "1"),
+                            spacing = "1",
+                            align_items = "center"
+                        ),
+                        on_click = State.generate_random_ecci_coordinates,
+                        variant = "outline",
+                        size = "1",
                         width = "100%"
                     ),
                     spacing = "1",
                     align_items = "start",
                     width = "100%"
                 ),
-                rx.vstack(
-                    rx.text("Price", size = "1", color = "gray"),
-                    rx.input(
-                        type = "number",
-                        value = State.ecci_form_data.get("price", ""),
-                        on_change = lambda v: State.update_ecci("price", v),
-                        min = 0.0,
-                        step = 0.01,
-                        width = "100%"
-                    ),
-                    spacing = "1",
-                    align_items = "start",
-                    width = "100%"
-                ),
-                spacing = "3",
-                width = "100%"
-            ),
-            # Row 4: Product Category and Product ID
-            rx.hstack(
-                rx.vstack(
-                    rx.text("Product Category", size = "1", color = "gray"),
-                    rx.select(
-                        State.ecci_options["product_category"],
-                        value = State.ecci_form_data.get("product_category", ""),
-                        on_change = lambda v: State.update_ecci("product_category", v),
-                        width = "100%"
-                    ),
-                    spacing = "1",
-                    align_items = "start",
-                    width = "100%"
-                ),
-                rx.vstack(
-                    rx.text("Product ID", size = "1", color = "gray"),
-                    rx.input(
-                        value = State.ecci_form_data.get("product_id", ""),
-                        on_change = lambda v: State.update_ecci("product_id", v),
-                        placeholder = "e.g., prod_1050",
-                        width = "100%"
-                    ),
-                    spacing = "1",
-                    align_items = "start",
-                    width = "100%"
-                ),
-                spacing = "3",
-                width = "100%"
-            ),
-            # Row 5: Referrer URL and Session Event Sequence
-            rx.hstack(
-                rx.vstack(
-                    rx.text("Referrer URL", size = "1", color = "gray"),
-                    rx.input(
-                        value = State.ecci_form_data.get("referrer_url", ""),
-                        on_change = lambda v: State.update_ecci("referrer_url", v),
-                        placeholder = "e.g., google.com, direct",
-                        width = "100%"
-                    ),
-                    spacing = "1",
-                    align_items = "start",
-                    width = "100%"
-                ),
-                rx.vstack(
-                    rx.text("Session Event Sequence", size = "1", color = "gray"),
-                    rx.input(
-                        type = "number",
-                        value = State.ecci_form_data.get("session_event_sequence", ""),
-                        on_change = lambda v: State.update_ecci("session_event_sequence", v),
-                        min = 1,
-                        step = 1,
-                        width = "100%"
-                    ),
-                    spacing = "1",
-                    align_items = "start",
-                    width = "100%"
-                ),
-                spacing = "3",
-                width = "100%"
-            ),
-            # Row 6: Quantity and Time on Page
-            rx.hstack(
+                # Quantity
                 rx.vstack(
                     rx.text("Quantity", size = "1", color = "gray"),
                     rx.input(
@@ -2338,8 +2296,9 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
                     align_items = "start",
                     width = "100%"
                 ),
+                # Time on Page
                 rx.vstack(
-                    rx.text("Time on Page (seconds)", size = "1", color = "gray"),
+                    rx.text("Time (s)", size = "1", color = "gray"),
                     rx.input(
                         type = "number",
                         value = State.ecci_form_data.get("time_on_page_seconds", ""),
@@ -2352,39 +2311,39 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
                     align_items = "start",
                     width = "100%"
                 ),
-                spacing = "3",
-                width = "100%"
-            ),
-            # Row 7: Date and Time
-            rx.hstack(
+                # Session Event Sequence
                 rx.vstack(
-                    rx.text("Date", size = "1", color = "gray"),
+                    rx.text("Sequence", size = "1", color = "gray"),
                     rx.input(
-                        type = "date",
-                        value = State.ecci_form_data.get("timestamp_date", ""),
-                        on_change = lambda v: State.update_ecci("timestamp_date", v),
+                        type = "number",
+                        value = State.ecci_form_data.get("session_event_sequence", ""),
+                        on_change = lambda v: State.update_ecci("session_event_sequence", v),
+                        min = 1,
+                        step = 1,
                         width = "100%"
                     ),
                     spacing = "1",
                     align_items = "start",
                     width = "100%"
                 ),
+                # Referrer URL
                 rx.vstack(
-                    rx.text("Time", size = "1", color = "gray"),
+                    rx.text("Referrer", size = "1", color = "gray"),
                     rx.input(
-                        type = "time",
-                        value = State.ecci_form_data.get("timestamp_time", ""),
-                        on_change = lambda v: State.update_ecci("timestamp_time", v),
+                        value = State.ecci_form_data.get("referrer_url", ""),
+                        on_change = lambda v: State.update_ecci("referrer_url", v),
+                        placeholder = "google.com",
                         width = "100%"
                     ),
                     spacing = "1",
                     align_items = "start",
                     width = "100%"
                 ),
-                spacing = "3",
+                columns = "3",
+                spacing = "2",
                 width = "100%"
             ),
-            # Display fields (read-only)
+            # Display fields (read-only info stacked vertically)
             rx.vstack(
                 rx.text(
                     f"Customer ID: {State.ecci_form_data.get('customer_id', '')}",
@@ -2415,15 +2374,7 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
                 align_items = "start",
                 width = "100%"
             ),
-            # Predict button (disabled when no model available)
-            rx.button(
-                "Predict",
-                on_click = State.predict_ecci,
-                size = "3",
-                width = "100%",
-                disabled = ~State.incremental_model_available["E-Commerce Customer Interactions"]
-            ),
-            spacing = "3",
+            spacing = "2",
             align_items = "start",
             width = "100%"
         ),

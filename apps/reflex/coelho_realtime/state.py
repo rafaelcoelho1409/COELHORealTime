@@ -1329,9 +1329,12 @@ class State(rx.State):
                     project_name: {
                         "prediction": result.get("prediction"),
                         "fraud_probability": result.get("fraud_probability"),
+                        "model_source": result.get("model_source", "mlflow"),
                         "show": True
                     }
                 }
+            # Refresh MLflow metrics after prediction (to show real-time updates during training)
+            await self._fetch_mlflow_metrics_internal(project_name)
         except Exception as e:
             print(f"Error making prediction: {e}")
             async with self:
@@ -1340,6 +1343,7 @@ class State(rx.State):
                     project_name: {
                         "prediction": None,
                         "fraud_probability": 0.0,
+                        "model_source": "mlflow",
                         "show": False
                     }
                 }
@@ -1349,6 +1353,27 @@ class State(rx.State):
         "Transaction Fraud Detection": "ARFClassifier",
         "Estimated Time of Arrival": "ARFRegressor",
     }
+
+    async def _fetch_mlflow_metrics_internal(self, project_name: str, force_refresh: bool = True):
+        """Internal helper to fetch MLflow metrics (called from other async methods)."""
+        model_name = self._mlflow_model_names.get(project_name, "ARFClassifier")
+        try:
+            response = await httpx_client_post(
+                url = f"{RIVER_BASE_URL}/mlflow_metrics",
+                json = {
+                    "project_name": project_name,
+                    "model_name": model_name,
+                    "force_refresh": force_refresh
+                },
+                timeout = 30.0
+            )
+            async with self:
+                self.mlflow_metrics = {
+                    **self.mlflow_metrics,
+                    project_name: response.json()
+                }
+        except Exception as e:
+            print(f"Error fetching MLflow metrics: {e}")
 
     @rx.event(background = True)
     async def get_mlflow_metrics(self, project_name: str):
@@ -1661,9 +1686,12 @@ class State(rx.State):
                     **self.prediction_results,
                     project_name: {
                         "eta_seconds": eta_seconds,
+                        "model_source": result.get("model_source", "mlflow"),
                         "show": True
                     }
                 }
+            # Refresh MLflow metrics after prediction (to show real-time updates during training)
+            await self._fetch_mlflow_metrics_internal(project_name)
         except Exception as e:
             print(f"Error making ETA prediction: {e}")
             async with self:
@@ -1671,6 +1699,7 @@ class State(rx.State):
                     **self.prediction_results,
                     project_name: {
                         "eta_seconds": 0.0,
+                        "model_source": "mlflow",
                         "show": False
                     }
                 }
@@ -1876,9 +1905,12 @@ class State(rx.State):
                     **self.prediction_results,
                     project_name: {
                         "cluster": cluster,
+                        "model_source": result.get("model_source", "mlflow"),
                         "show": True
                     }
                 }
+            # Refresh MLflow metrics after prediction
+            await self._fetch_mlflow_metrics_internal(project_name)
         except Exception as e:
             print(f"Error making ECCI prediction: {e}")
             async with self:
