@@ -117,8 +117,23 @@ def main():
     # Batch sizes for different operations (tuned for performance)
     PROGRESS_LOG_INTERVAL = 100     # Log progress every N messages
     ARTIFACT_SAVE_INTERVAL = 1000   # Save model/encoders/cluster data to S3 every N messages
+    # Get traceability info from best run (if continuing from existing model)
+    best_run_id = get_best_mlflow_run(PROJECT_NAME, MODEL_NAME)
+    if best_run_id:
+        print(f"Continuing from best run: {best_run_id}")
     print(f"Starting MLflow run with model: {model.__class__.__name__}")
     with mlflow.start_run(run_name = model.__class__.__name__):
+        # Log traceability tags for model lineage
+        if best_run_id:
+            mlflow.set_tag("continued_from_run", best_run_id)
+            # Clustering has no metrics, but log cluster count if available
+            if cluster_counts:
+                mlflow.set_tag("baseline_num_clusters", str(len(cluster_counts)))
+                mlflow.set_tag("baseline_total_samples", str(sum(cluster_counts.values())))
+            print(f"Traceability tags set: continued_from_run={best_run_id}")
+        else:
+            mlflow.set_tag("training_mode", "from_scratch")
+            print("Starting fresh training (no previous model)")
         print("MLflow run started, entering consumer loop...")
         try:
             # Use while loop to handle consumer timeout and check for shutdown

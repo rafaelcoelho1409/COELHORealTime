@@ -13,6 +13,7 @@ from functions import (
     create_consumer,
     load_or_create_encoders,
     load_kafka_offset_from_mlflow,
+    get_best_mlflow_run,
     MLFLOW_MODEL_NAMES,
     ENCODER_ARTIFACT_NAMES,
     KAFKA_OFFSET_ARTIFACT,
@@ -69,8 +70,29 @@ def main():
     # Batch sizes for different operations (tuned for performance)
     METRICS_LOG_INTERVAL = 100      # Log metrics to MLflow every N messages
     ARTIFACT_SAVE_INTERVAL = 1000   # Save model/encoders to S3 every N messages
+    # Get traceability info from best run (if continuing from existing model)
+    best_run_id = get_best_mlflow_run(PROJECT_NAME, MODEL_NAME)
+    baseline_metrics = {}
+    if best_run_id:
+        try:
+            best_run = mlflow.get_run(best_run_id)
+            baseline_metrics = best_run.data.metrics
+            print(f"Loaded baseline metrics from best run: {best_run_id}")
+        except Exception as e:
+            print(f"Could not get baseline metrics from best run: {e}")
     print(f"Starting MLflow run with model: {model.__class__.__name__}")
     with mlflow.start_run(run_name = model.__class__.__name__):
+        # Log traceability tags for model lineage
+        if best_run_id:
+            mlflow.set_tag("continued_from_run", best_run_id)
+            # Log all baseline metrics as tags
+            for metric_name in regression_metrics:
+                if metric_name in baseline_metrics:
+                    mlflow.set_tag(f"baseline_{metric_name}", f"{baseline_metrics[metric_name]:.4f}")
+            print(f"Traceability tags set: continued_from_run={best_run_id}")
+        else:
+            mlflow.set_tag("training_mode", "from_scratch")
+            print("Starting fresh training (no previous model)")
         print("MLflow run started, entering consumer loop...")
         try:
             # Use while loop to handle consumer timeout and check for shutdown
