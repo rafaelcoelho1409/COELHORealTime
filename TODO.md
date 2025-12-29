@@ -326,22 +326,29 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
 - [ ] Optimize Kafka consumer batch sizes
 - [ ] Add caching for expensive computations
 - [ ] Consider Redis for Reflex state (already configured)
-- [ ] **Optimize River/Sklearn Docker builds** (Priority: HIGH)
-  - Currently installing dependencies at runtime via `entrypoint.sh` (slow, OOM-prone)
-  - Move `uv pip install -r requirements.txt` to Dockerfile build stage
+- [x] **Optimize River/Sklearn Docker builds with UV** (COMPLETED)
+  - Migrated from pip to UV package manager (10-100x faster installs)
+  - Multi-stage Docker builds: builder stage installs deps, runtime copies venv
   - Benefits: Faster pod startup, no OOM during dependency installation
-- [ ] **Spark Metadata Job for Delta Lake** (Priority: HIGH)
-  - Problem: Polars queries to Delta Lake are slow (seconds per request)
-  - Affects: "Randomize All Fields" button, unique values dropdowns, sample data
-  - Solution: Spark Job to precompute and cache metadata
+  - Hot-reload works with Skaffold file sync
+- [x] **Static Dropdown Options for Instant Form Loading** (COMPLETED)
+  - Problem: Polars queries to Delta Lake were slow (5-10s per request)
+  - Solution: Static Python constants mirroring Kafka producer values
   - Implementation:
-    - [ ] Create Spark job that runs every 5-10 minutes
-    - [ ] Precompute unique values per column (for form dropdowns)
-    - [ ] Precompute sample pool (e.g., 1000 random rows)
-    - [ ] Precompute column statistics (min, max, distributions)
-    - [ ] Write to `s3://lakehouse/metadata/{project_name}/` as small JSON/Parquet
-    - [ ] Update River to read from metadata files instead of querying Delta Lake
-  - Benefits: Instant UI responses, reduced MinIO/Delta Lake load
+    - [x] Added `STATIC_DROPDOWN_OPTIONS` dict in `apps/river/functions.py`
+    - [x] Created `get_static_dropdown_options()` function
+    - [x] Updated River startup to use static options (instant, no I/O)
+    - [x] Updated `/unique_values` endpoint with static → Polars fallback
+    - [x] Updated `/initial_sample` to load on-demand from Delta Lake
+  - Benefits: Instant form loading, works on fresh start (no Delta Lake data needed)
+- [x] **Local Random Generation for "Randomize All Fields"** (COMPLETED)
+  - Problem: Randomize button called `/sample` → Polars → Delta Lake (5-10s)
+  - Solution: Generate random values locally in Reflex using loaded dropdown options
+  - Implementation:
+    - [x] Updated `randomize_tfd_form()` - local generation, no network call
+    - [x] Updated `randomize_eta_form()` - local generation, no network call
+    - [x] Updated `randomize_ecci_form()` - local generation, no network call
+  - Benefits: Instant randomization (< 50ms), no network calls
 - [x] **Polars instead of PySpark for Delta Lake queries** (COMPLETED)
   - River and Sklearn now use Polars for Delta Lake queries
   - Benefits achieved: No JVM overhead, faster startup, lower memory footprint
@@ -468,6 +475,18 @@ Services Removed:
 - Replaced PySpark for data queries with Polars (lighter, faster)
 - Lazy evaluation with `pl.scan_delta()` for optimized queries
 - River memory limits reduced from 4Gi to 2Gi
+
+### UV Package Manager + Multi-Stage Docker Builds (December 2025)
+- Migrated River, Sklearn, Reflex, Kafka-producers from pip to UV
+- Multi-stage builds: builder installs deps, runtime copies venv only
+- 10-100x faster dependency installation
+- Hot-reload preserved with Skaffold file sync
+
+### Instant Form Loading with Static Options (December 2025)
+- Form dropdowns now load instantly (was 5-10s with Polars/Delta Lake)
+- Static Python constants mirror Kafka producer values
+- Works on fresh start with no Delta Lake data
+- "Randomize All Fields" now instant (local generation, no network calls)
 
 ### Service Architecture Simplification
 - Consolidated from 3 services to 2 (River + Sklearn)

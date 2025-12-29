@@ -1954,70 +1954,147 @@ class State(rx.State):
         return State.fetch_ecci_cluster_feature_counts(feature)
 
     # =========================================================================
-    # Randomize Form Event Handlers
+    # Randomize Form Event Handlers (local generation - instant, no network call)
     # =========================================================================
-    @rx.event(background=True)
-    async def randomize_tfd_form(self):
-        """Fetch a random sample and populate the TFD form."""
+    @rx.event
+    def randomize_tfd_form(self):
+        """Generate random values locally using loaded dropdown options (instant)."""
+        import random
+        import uuid
         project_name = "Transaction Fraud Detection"
-        try:
-            response = await httpx_client_post(
-                url=f"{RIVER_BASE_URL}/sample",
-                json={"project_name": project_name},
-                timeout=30.0
-            )
-            sample_data = response.json()
-            await self._init_tfd_form_internal(sample_data)
-            # Reset prediction when form is randomized
-            async with self:
-                self.prediction_results = {
-                    **self.prediction_results,
-                    project_name: {"prediction": None, "probability": None, "show": False}
-                }
-        except Exception as e:
-            print(f"Error randomizing TFD form: {e}")
+        opts = self.dropdown_options.get(project_name, {})
+        now = dt.datetime.now()
+        # Generate random form data using loaded dropdown options
+        form_data = {
+            # Dropdown fields - pick random from loaded options
+            "currency": random.choice(opts.get("currency", ["USD"])),
+            "merchant_id": random.choice(opts.get("merchant_id", ["merchant_1"])),
+            "product_category": random.choice(opts.get("product_category", ["electronics"])),
+            "transaction_type": random.choice(opts.get("transaction_type", ["purchase"])),
+            "payment_method": random.choice(opts.get("payment_method", ["credit_card"])),
+            "browser": random.choice(opts.get("browser", ["Chrome"])),
+            "os": random.choice(opts.get("os", ["Windows"])),
+            # Numeric fields - random within realistic bounds
+            "amount": str(round(random.uniform(10.0, 5000.0), 2)),
+            "account_age_days": str(random.randint(1, 3650)),
+            # Coordinate fields (Houston metro area)
+            "lat": str(round(random.uniform(29.5, 30.1), 6)),
+            "lon": str(round(random.uniform(-95.8, -95.0), 6)),
+            # Timestamp fields
+            "timestamp_date": now.strftime("%Y-%m-%d"),
+            "timestamp_time": now.strftime("%H:%M"),
+            # Boolean fields
+            "cvv_provided": random.choice([True, False]),
+            "billing_address_match": random.choice([True, False]),
+            # Generated IDs
+            "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
+            "user_id": f"user_{random.randint(1000, 9999)}",
+            "ip_address": f"{random.randint(1,255)}.{random.randint(0,255)}.{random.randint(0,255)}.{random.randint(1,255)}",
+            "user_agent": random.choice([
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0",
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) Safari/605.1",
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) Firefox/120.0",
+            ]),
+        }
+        self.form_data = {**self.form_data, project_name: form_data}
+        self.prediction_results = {
+            **self.prediction_results,
+            project_name: {"prediction": None, "probability": None, "show": False}
+        }
 
-    @rx.event(background=True)
-    async def randomize_eta_form(self):
-        """Fetch a random sample and populate the ETA form."""
+    @rx.event
+    def randomize_eta_form(self):
+        """Generate random values locally using loaded dropdown options (instant)."""
+        import random
+        import uuid
         project_name = "Estimated Time of Arrival"
-        try:
-            response = await httpx_client_post(
-                url=f"{RIVER_BASE_URL}/sample",
-                json={"project_name": project_name},
-                timeout=30.0
-            )
-            sample_data = response.json()
-            await self._init_eta_form_internal(sample_data)
-            # Reset prediction when form is randomized
-            async with self:
-                self.prediction_results = {
-                    **self.prediction_results,
-                    project_name: {"eta_seconds": 0.0, "show": False}
-                }
-        except Exception as e:
-            print(f"Error randomizing ETA form: {e}")
+        opts = self.dropdown_options.get(project_name, {})
+        now = dt.datetime.now()
+        # Generate random coordinates (Houston metro area)
+        origin_lat = round(random.uniform(29.5, 30.1), 6)
+        origin_lon = round(random.uniform(-95.8, -95.0), 6)
+        dest_lat = round(random.uniform(29.5, 30.1), 6)
+        dest_lon = round(random.uniform(-95.8, -95.0), 6)
+        # Estimate distance based on coordinates
+        distance_km = round(abs(origin_lat - dest_lat) * 111 + abs(origin_lon - dest_lon) * 85, 2)
+        form_data = {
+            # Dropdown fields - pick random from loaded options
+            "driver_id": random.choice(opts.get("driver_id", ["driver_1000"])),
+            "vehicle_id": random.choice(opts.get("vehicle_id", ["vehicle_100"])),
+            "weather": random.choice(opts.get("weather", ["Clear"])),
+            "vehicle_type": random.choice(opts.get("vehicle_type", ["Sedan"])),
+            # Timestamp fields
+            "timestamp_date": now.strftime("%Y-%m-%d"),
+            "timestamp_time": now.strftime("%H:%M"),
+            # Coordinate fields
+            "origin_lat": str(origin_lat),
+            "origin_lon": str(origin_lon),
+            "destination_lat": str(dest_lat),
+            "destination_lon": str(dest_lon),
+            # Numeric fields
+            "hour_of_day": str(random.randint(0, 23)),
+            "day_of_week": str(random.randint(0, 6)),
+            "driver_rating": str(round(random.uniform(3.5, 5.0), 1)),
+            "temperature_celsius": str(round(random.uniform(15.0, 35.0), 1)),
+            "estimated_distance_km": str(distance_km),
+            "initial_estimated_travel_time_seconds": str(int(distance_km * 60)),
+            # Debug factors
+            "debug_traffic_factor": str(round(random.uniform(0.8, 1.5), 2)),
+            "debug_weather_factor": str(round(random.uniform(0.9, 1.3), 2)),
+            "debug_incident_delay_seconds": str(random.choice([0, 0, 0, 60, 120, 300])),
+            "debug_driver_factor": str(round(random.uniform(0.9, 1.1), 2)),
+            # Generated ID
+            "trip_id": f"trip_{uuid.uuid4().hex[:12]}",
+        }
+        self.form_data = {**self.form_data, project_name: form_data}
+        self.prediction_results = {
+            **self.prediction_results,
+            project_name: {"eta_seconds": 0.0, "show": False}
+        }
 
-    @rx.event(background=True)
-    async def randomize_ecci_form(self):
-        """Fetch a random sample and populate the ECCI form."""
+    @rx.event
+    def randomize_ecci_form(self):
+        """Generate random values locally using loaded dropdown options (instant)."""
+        import random
+        import uuid
         project_name = "E-Commerce Customer Interactions"
-        try:
-            response = await httpx_client_post(
-                url=f"{RIVER_BASE_URL}/sample",
-                json={"project_name": project_name},
-                timeout=30.0
-            )
-            sample_data = response.json()
-            await self._init_ecci_form_internal(sample_data)
-            # Reset prediction when form is randomized
-            async with self:
-                self.prediction_results = {
-                    **self.prediction_results,
-                    project_name: {"cluster": 0, "show": False}
-                }
-        except Exception as e:
-            print(f"Error randomizing ECCI form: {e}")
+        opts = self.dropdown_options.get(project_name, {})
+        now = dt.datetime.now()
+        form_data = {
+            # Dropdown fields - pick random from loaded options
+            "browser": random.choice(opts.get("browser", ["Chrome"])),
+            "device_type": random.choice(opts.get("device_type", ["Desktop"])),
+            "os": random.choice(opts.get("os", ["Windows"])),
+            "event_type": random.choice(opts.get("event_type", ["page_view"])),
+            "product_category": random.choice(opts.get("product_category", ["Electronics"])),
+            # Text fields with realistic values
+            "product_id": f"prod_{random.randint(1000, 1100)}",
+            "referrer_url": random.choice([
+                "direct", "google.com", "facebook.com", "instagram.com", "email_campaign"
+            ]),
+            # Coordinate fields (Houston metro area)
+            "lat": str(round(random.uniform(29.5, 30.1), 3)),
+            "lon": str(round(random.uniform(-95.8, -95.0), 3)),
+            # Numeric fields
+            "price": str(round(random.uniform(9.99, 999.99), 2)),
+            "quantity": str(random.randint(1, 5)),
+            "session_event_sequence": str(random.randint(1, 20)),
+            "time_on_page_seconds": str(random.randint(5, 300)),
+            # Timestamp fields
+            "timestamp_date": now.strftime("%Y-%m-%d"),
+            "timestamp_time": now.strftime("%H:%M"),
+            # Generated IDs
+            "customer_id": f"cust_{uuid.uuid4().hex[:8]}",
+            "event_id": f"evt_{uuid.uuid4().hex[:12]}",
+            "session_id": f"sess_{uuid.uuid4().hex[:10]}",
+            "page_url": f"https://shop.example.com/products/{random.randint(1000, 9999)}",
+            "search_query": random.choice(["", "", "laptop", "phone", "headphones", "shoes"]),
+        }
+        self.form_data = {**self.form_data, project_name: form_data}
+        self.prediction_results = {
+            **self.prediction_results,
+            project_name: {"cluster": 0, "show": False}
+        }
 
     # =========================================================================
     # Batch ML (Scikit-Learn) Event Handlers

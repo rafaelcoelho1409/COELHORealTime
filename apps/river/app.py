@@ -34,6 +34,8 @@ from functions import (
     get_sample_polars,
     get_initial_sample_polars,
     precompute_all_unique_values_polars,
+    # Static dropdown options (instant access, mirrors Kafka producer constants)
+    get_static_dropdown_options,
 )
 
 
@@ -387,7 +389,7 @@ async def lifespan(app: FastAPI):
         initial_sample_dict, \
         unique_values_cache, \
         healthcheck
-    # 1. Initialize and precompute unique values (deferred - non-blocking startup)
+    # 1. Initialize unique values from static options (instant - no I/O)
     print("Starting River ML service...", flush = True)
     data_load_status = {}
     data_message_dict = {}
@@ -398,56 +400,22 @@ async def lifespan(app: FastAPI):
         "Estimated Time of Arrival": EstimatedTimeOfArrival,
         "E-Commerce Customer Interactions": ECommerceCustomerInteractions,
     }
-    # Defer data preloading - don't block startup on Delta Lake connection
-    # Data will be loaded on-demand when endpoints are called
+    # Load static dropdown options first (instant - mirrors Kafka producer constants)
+    # This ensures forms work immediately, even on fresh start with no Delta Lake data
     for project_name in PROJECT_NAMES:
-        try:
-            print(f"Attempting to precompute unique values for {project_name}...", flush=True)
-            # Use asyncio.to_thread with timeout to prevent blocking
-            try:
-                unique_values_cache[project_name] = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        precompute_all_unique_values_polars, 
-                        project_name),
-                    timeout = 10.0  # 10 second timeout per project
-                )
-            except asyncio.TimeoutError:
-                print(f"Timeout precomputing unique values for {project_name}, skipping...", flush=True)
-                unique_values_cache[project_name] = {}
-            if unique_values_cache[project_name]:
-                data_load_status[project_name] = "success"
-                data_message_dict[project_name] = f"Unique values cached ({len(unique_values_cache[project_name])} columns)"
-            else:
-                data_load_status[project_name] = "deferred"
-                data_message_dict[project_name] = "Data loading deferred to on-demand"
-            # Get initial sample with timeout
-            print(f"Getting initial sample for {project_name}...", flush=True)
-            try:
-                sample_dict = await asyncio.wait_for(
-                    asyncio.to_thread(get_initial_sample_polars, project_name),
-                    timeout = 10.0
-                )
-            except asyncio.TimeoutError:
-                print(f"Timeout getting initial sample for {project_name}, skipping...", flush=True)
-                sample_dict = None
-            if sample_dict:
-                model_class = project_model_mapping.get(project_name)
-                if model_class:
-                    initial_sample_dict[project_name] = model_class(**sample_dict)
-                    initial_data_sample_loaded_status[project_name] = True
-                    initial_data_sample_message_dict[project_name] = "Initial sample loaded."
-                else:
-                    initial_data_sample_loaded_status[project_name] = False
-                    initial_data_sample_message_dict[project_name] = "No model class for project."
-            else:
-                initial_data_sample_loaded_status[project_name] = False
-                initial_data_sample_message_dict[project_name] = "Sample loading deferred."
-        except Exception as e:
-            data_load_status[project_name] = "failed"
-            data_message_dict[project_name] = f"Error: {e}"
-            initial_data_sample_loaded_status[project_name] = False
-            initial_data_sample_message_dict[project_name] = f"Error: {e}"
-            print(f"Error initializing data for {project_name}: {e}", file = sys.stderr, flush=True)
+        static_options = get_static_dropdown_options(project_name)
+        if static_options:
+            unique_values_cache[project_name] = static_options
+            data_load_status[project_name] = "success"
+            data_message_dict[project_name] = f"Static options loaded ({len(static_options)} fields)"
+            print(f"Loaded static dropdown options for {project_name} ({len(static_options)} fields)", flush=True)
+        else:
+            unique_values_cache[project_name] = {}
+            data_load_status[project_name] = "no_static_options"
+            data_message_dict[project_name] = "No static options defined"
+        # Initial sample loading deferred - forms work without it
+        initial_data_sample_loaded_status[project_name] = False
+        initial_data_sample_message_dict[project_name] = "Sample loading deferred to on-demand"
     healthcheck.data_load = data_load_status
     healthcheck.data_message = data_message_dict
     healthcheck.initial_data_sample_loaded = initial_data_sample_loaded_status
@@ -726,21 +694,30 @@ async def get_sample(request: SampleRequest):
 
 @app.post("/unique_values")
 async def get_unique_values(request: UniqueValuesRequest):
-    """Get unique values for a column (instant - uses precomputed cache)."""
+    """Get unique values for a column (instant from static options, Polars fallback)."""
     global unique_values_cache
     project_cache = unique_values_cache.get(request.project_name, {})
     column = request.column_name
-    # First try the precomputed cache (instant)
+    # First try the cache (populated from static options at startup - instant)
     if column in project_cache:
         unique_values = project_cache[column]
         if len(unique_values) > request.limit:
             unique_values = unique_values[:request.limit]
         return {"unique_values": unique_values}
-    # Fallback: query Spark directly if column not in cache
+    # Fallback: try static options directly (in case cache was cleared)
+    static_options = get_static_dropdown_options(request.project_name)
+    if column in static_options:
+        unique_values = static_options[column]
+        # Update cache for future requests
+        unique_values_cache[request.project_name][column] = unique_values
+        if len(unique_values) > request.limit:
+            unique_values = unique_values[:request.limit]
+        return {"unique_values": unique_values}
+    # Last resort: query Polars/Delta Lake for columns not in static options
     try:
         unique_values = get_unique_values_polars(
-            request.project_name, 
-            column, 
+            request.project_name,
+            column,
             request.limit)
         if unique_values:
             # Update cache for future requests
@@ -761,18 +738,48 @@ async def get_unique_values(request: UniqueValuesRequest):
 
 @app.post("/initial_sample")
 async def get_initial_sample(request: InitialSampleRequest):
-    """Get the initial sample created at startup.
+    """Get initial sample (on-demand from Delta Lake if not cached).
 
     Returns validated Pydantic models with JSON fields parsed from Delta Lake strings.
     """
     global initial_sample_dict
-    if initial_sample_dict.get(request.project_name) is None:
+    project_name = request.project_name
+    project_model_mapping = {
+        "Transaction Fraud Detection": TransactionFraudDetection,
+        "Estimated Time of Arrival": EstimatedTimeOfArrival,
+        "E-Commerce Customer Interactions": ECommerceCustomerInteractions,
+    }
+    # Return cached sample if available
+    if initial_sample_dict.get(project_name) is not None:
+        return initial_sample_dict[project_name]
+    # Load on-demand from Delta Lake via Polars
+    try:
+        sample_dict = await asyncio.wait_for(
+            asyncio.to_thread(get_initial_sample_polars, project_name),
+            timeout = 15.0
+        )
+        if sample_dict:
+            model_class = project_model_mapping.get(project_name)
+            if model_class:
+                validated_sample = model_class(**sample_dict)
+                initial_sample_dict[project_name] = validated_sample
+                return validated_sample
         raise HTTPException(
             status_code = 503,
-            detail = "Initial data sample is not loaded."
+            detail = f"No data available for {project_name} in Delta Lake."
         )
-    # Return the already-validated Pydantic model (validated at startup)
-    return initial_sample_dict[request.project_name]
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code = 504,
+            detail = f"Timeout loading sample for {project_name}. Delta Lake may be unavailable."
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code = 500,
+            detail = f"Error loading sample for {project_name}: {e}"
+        )
 
 
 @app.post("/get_ordinal_encoder")

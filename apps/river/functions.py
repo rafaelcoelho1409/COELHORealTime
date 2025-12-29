@@ -86,6 +86,64 @@ BEST_METRIC_CRITERIA = {
     "Sales Forecasting": {"metric_name": "MAE", "maximize": False},
 }
 
+# =============================================================================
+# Static Dropdown Options (mirrors Kafka producer constants for data validity)
+# These ensure form values are always valid for /predict endpoint
+# =============================================================================
+STATIC_DROPDOWN_OPTIONS = {
+    "Transaction Fraud Detection": {
+        # Categorical fields (exact values from transaction_fraud_detection.py producer)
+        "currency": ["USD", "EUR", "GBP", "JPY", "CAD", "AUD", "BRL"],
+        "transaction_type": ["purchase", "withdrawal", "transfer", "payment", "deposit"],
+        "payment_method": ["credit_card", "debit_card", "paypal", "bank_transfer", "crypto"],
+        "product_category": [
+            "electronics", "clothing", "groceries", "travel", "services",
+            "digital_goods", "luxury_items", "gambling", "other"
+        ],
+        "browser": ["Chrome", "Safari", "Firefox", "Edge", "Opera", "Other"],
+        "os": ["iOS", "Android", "Windows", "macOS", "Linux", "Other"],
+        # ID field - bounded range from producer: merchant_{1..200}
+        "merchant_id": [f"merchant_{i}" for i in range(1, 201)],
+    },
+    "Estimated Time of Arrival": {
+        # Categorical fields (exact values from estimated_time_of_arrival.py producer)
+        "weather": ["Clear", "Clouds", "Rain", "Heavy Rain", "Fog", "Thunderstorm"],
+        "vehicle_type": ["Sedan", "SUV", "Hatchback", "Motorcycle", "Van"],
+        # ID fields - bounded ranges from producer
+        "driver_id": [f"driver_{i}" for i in range(1000, 5001)],
+        "vehicle_id": [f"vehicle_{i}" for i in range(100, 1000)],
+    },
+    "E-Commerce Customer Interactions": {
+        # Categorical fields (exact values from e_commerce_customer_interactions.py producer)
+        "event_type": ["page_view", "add_to_cart", "purchase", "search", "leave_review"],
+        "product_category": [
+            "Electronics", "Fashion & Apparel", "Home & Garden", "Beauty & Personal Care",
+            "Sports & Outdoors", "Books", "Grocery & Gourmet Food", "Automotive",
+            "Toys & Games", "Computers", "Pet Supplies", "Health & Household"
+        ],
+        "browser": ["Chrome", "Safari", "Firefox", "Edge", "Opera", "Other"],
+        "device_type": ["Mobile", "Desktop", "Tablet"],
+        "os": ["Android", "iOS", "Windows", "macOS", "Linux", "Other"],
+        "referrer_url": [
+            "direct", "google.com", "facebook.com", "amazon.com", "instagram.com",
+            "twitter.com", "youtube.com", "tiktok.com", "pinterest.com", "reddit.com",
+            "linkedin.com", "bing.com", "yahoo.com", "email_campaign", "affiliate_link"
+        ],
+        # ID field - bounded range from producer: prod_{1000..1100}
+        "product_id": [f"prod_{i}" for i in range(1000, 1101)],
+    },
+}
+
+
+def get_static_dropdown_options(project_name: str) -> Dict[str, List[str]]:
+    """Get static dropdown options for a project.
+
+    These are pre-defined values that mirror the Kafka producer constants,
+    ensuring all form values are valid for the /predict endpoint.
+    Instant access - no I/O or database queries needed.
+    """
+    return STATIC_DROPDOWN_OPTIONS.get(project_name, {})
+
 
 # =============================================================================
 # MLflow Artifact Loading Functions
