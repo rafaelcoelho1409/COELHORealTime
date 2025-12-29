@@ -334,6 +334,35 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
   - [ ] Use Reflex `rx.tooltip` or `rx.hover_card` component
   - [ ] Consider adding links to documentation for complex metrics (F1, ROC AUC, etc.)
 
+### Kafka Producers Improvements
+- [ ] **Data Generation Quality** (Priority: MEDIUM)
+  - [ ] Add more realistic data patterns:
+    - Seasonal trends (daily, weekly, monthly patterns)
+    - Correlated features (e.g., high amount + specific merchant = higher fraud probability)
+    - Time-based patterns (rush hour traffic, weekend shopping behavior)
+  - [ ] Add configurable fraud rate / anomaly injection rate
+  - [ ] Add data validation before producing (schema validation, range checks)
+
+- [ ] **Concept Drift Simulation** (Priority: HIGH)
+  - [ ] Implement multiple drift types:
+    - Sudden drift (abrupt change in distribution)
+    - Gradual drift (slow transition between concepts)
+    - Incremental drift (continuous small changes)
+    - Recurring drift (seasonal/cyclical patterns)
+  - [ ] Add drift severity configuration (mild, moderate, severe)
+  - [ ] Log drift events to enable model performance analysis
+
+- [ ] **Producer Configuration & Control** (Priority: LOW)
+  - [ ] Add configurable generation rates per topic (messages/second)
+  - [ ] Add pause/resume capability via API or environment variable
+  - [ ] Add batch size configuration for burst scenarios
+  - [ ] Add Prometheus metrics for messages produced per topic
+
+- [ ] **New Data Scenarios** (Priority: LOW)
+  - [ ] Add "attack" scenarios for fraud detection (coordinated fraud patterns)
+  - [ ] Add special events for ETA (accidents, road closures, weather events)
+  - [ ] Add promotional events for E-Commerce (flash sales, holiday shopping)
+
 ### Performance
 - [ ] Profile Reflex page load times
 - [ ] Optimize Kafka consumer batch sizes
