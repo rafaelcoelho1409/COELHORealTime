@@ -1,0 +1,36 @@
+[project]
+name = "sklearn-service"
+version = "0.1.0"
+description = "Scikit-Learn Batch ML Service - Batch machine learning with XGBoost and YellowBrick visualizations"
+requires-python = ">=3.13"
+dependencies = [
+    # HTTP API
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "prometheus-fastapi-instrumentator",
+    "starlette",
+    # Data processing
+    "pandas",
+    "pyarrow",
+    # ML & Visualization
+    "mlflow",
+    "kafka-python",
+    "scikit-learn",
+    "xgboost-cpu",
+    "setuptools",
+    "yellowbrick",
+    "matplotlib",
+    "boto3",
+    "imbalanced-learn",
+    # Delta Lake / Polars (lightweight, lazy evaluation, no JVM)
+    "polars",
+    "deltalake",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = []

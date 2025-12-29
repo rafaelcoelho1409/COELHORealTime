@@ -122,16 +122,17 @@ mlflow:
     type: ClusterIP
     port: 5000
     containerPort: 5000
-  # Enable Prometheus metrics for MLflow tracking server
-  tracking:
-    metrics:
-      enabled: true
-      serviceMonitor:
-        enabled: true
-        namespace: "coelho-realtime"
-        labels:
-          release: "coelho-realtime"
-        interval: 30s
+  # Enable Prometheus ServiceMonitor for MLflow metrics scraping
+  # NOTE: community-charts/mlflow uses serviceMonitor at root level (not under tracking)
+  serviceMonitor:
+    enabled: true
+    useServicePort: true
+    namespace: "coelho-realtime"
+    interval: 30s
+    telemetryPath: /metrics
+    labels:
+      release: "coelho-realtime"
+    timeout: 10s
   # Gunicorn: multiple workers supported with PostgreSQL (no lock contention)
   extraArgs:
     workers: "2"

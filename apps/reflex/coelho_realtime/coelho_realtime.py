@@ -1,4 +1,5 @@
 import reflex as rx
+from fastapi import FastAPI
 from prometheus_fastapi_instrumentator import Instrumentator
 from .pages import (
     home,
@@ -7,11 +8,14 @@ from .pages import (
     e_commerce_customer_interactions,
 )
 
-app = rx.App()
+# Create a FastAPI app with Prometheus instrumentation
+# This will be passed to Reflex as the api_transformer
+api = FastAPI()
+Instrumentator().instrument(api).expose(api)
 
-# Add Prometheus metrics instrumentation to the underlying FastAPI backend
-# This exposes /metrics endpoint for Prometheus scraping
-Instrumentator().instrument(app.api).expose(app.api)
+# Pass the instrumented FastAPI as api_transformer
+# Reflex will mount its internal API to this app
+app = rx.App(api_transformer=api)
 
 # Register pages
 app.add_page(

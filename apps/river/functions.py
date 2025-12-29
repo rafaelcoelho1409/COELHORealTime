@@ -116,12 +116,24 @@ def get_latest_mlflow_run(project_name: str, model_name: str) -> Optional[str]:
         return None
 
 
+def _run_has_model_artifact(run_id: str, model_name: str) -> bool:
+    """Check if a run has the model artifact."""
+    try:
+        client = mlflow.MlflowClient()
+        artifacts = client.list_artifacts(run_id)
+        artifact_names = [a.path for a in artifacts]
+        return f"{model_name}.pkl" in artifact_names
+    except Exception:
+        return False
+
+
 def get_best_mlflow_run(project_name: str, model_name: str) -> Optional[str]:
     """Get the MLflow run ID with the best metrics for a project and model.
     Uses BEST_METRIC_CRITERIA to determine which metric to optimize:
     - For classification: maximize F1
     - For regression: minimize MAE
     - For clustering: use latest run (no metrics)
+    Only selects runs that have the model artifact saved.
     Returns None if no runs exist (new model will be created from scratch).
     """
     try:
@@ -146,32 +158,46 @@ def get_best_mlflow_run(project_name: str, model_name: str) -> Optional[str]:
         # Get metric criteria for this project
         criteria = BEST_METRIC_CRITERIA.get(project_name)
         if criteria is None:
-            # No metric criteria (e.g., clustering) - use latest run
-            print(f"No metric criteria for {project_name}, using latest run")
-            return filtered_runs.iloc[0]["run_id"]
+            # No metric criteria (e.g., clustering) - use latest run with artifacts
+            print(f"No metric criteria for {project_name}, using latest run with artifacts")
+            for _, row in filtered_runs.iterrows():
+                if _run_has_model_artifact(row["run_id"], model_name):
+                    return row["run_id"]
+            print(f"No runs with model artifact found for {project_name}")
+            return None
         metric_name = criteria["metric_name"]
         maximize = criteria["maximize"]
         metric_column = f"metrics.{metric_name}"
         # Check if metric column exists in the runs
         if metric_column not in filtered_runs.columns:
-            print(f"Metric {metric_name} not found in runs for {project_name}, using latest run")
-            return filtered_runs.iloc[0]["run_id"]
+            print(f"Metric {metric_name} not found in runs for {project_name}, using latest run with artifacts")
+            for _, row in filtered_runs.iterrows():
+                if _run_has_model_artifact(row["run_id"], model_name):
+                    return row["run_id"]
+            return None
         # Filter out runs without the metric
         runs_with_metric = filtered_runs[filtered_runs[metric_column].notna()]
         if runs_with_metric.empty:
-            print(f"No runs with metric {metric_name} for {project_name}, using latest run")
-            return filtered_runs.iloc[0]["run_id"]
-        # Find the best run based on metric
-        if maximize:
-            best_idx = runs_with_metric[metric_column].idxmax()
-        else:
-            best_idx = runs_with_metric[metric_column].idxmin()
-        best_run = runs_with_metric.loc[best_idx]
-        best_run_id = best_run["run_id"]
-        best_metric_value = best_run[metric_column]
-        print(f"Best run for {project_name}/{model_name}: {best_run_id} "
-              f"({metric_name} = {best_metric_value:.4f}, maximize = {maximize})")
-        return best_run_id
+            print(f"No runs with metric {metric_name} for {project_name}, using latest run with artifacts")
+            for _, row in filtered_runs.iterrows():
+                if _run_has_model_artifact(row["run_id"], model_name):
+                    return row["run_id"]
+            return None
+        # Sort runs by metric (best first)
+        ascending = not maximize
+        sorted_runs = runs_with_metric.sort_values(by=metric_column, ascending=ascending)
+        # Find the best run that has model artifacts
+        for _, row in sorted_runs.iterrows():
+            run_id = row["run_id"]
+            metric_value = row[metric_column]
+            if _run_has_model_artifact(run_id, model_name):
+                print(f"Best run for {project_name}/{model_name}: {run_id} "
+                      f"({metric_name} = {metric_value:.4f}, maximize = {maximize})")
+                return run_id
+            else:
+                print(f"Skipping run {run_id} ({metric_name} = {metric_value:.4f}) - no model artifact")
+        print(f"No runs with model artifact found for {project_name}/{model_name}")
+        return None
     except Exception as e:
         print(f"Error getting best MLflow run for {project_name}/{model_name}: {e}")
         return None

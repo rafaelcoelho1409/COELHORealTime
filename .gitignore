@@ -81,7 +81,6 @@ terraform.rc
 .venv
 *.pkl
 uv.lock
-pyproject.toml
 __pycache__/
 *.pyc
 .python-version

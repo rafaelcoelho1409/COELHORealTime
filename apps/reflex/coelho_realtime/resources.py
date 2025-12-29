@@ -788,7 +788,7 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                         rx.card(
                             rx.vstack(
                                 rx.hstack(
-                                    rx.icon("alert-triangle", size = 16, color = State.tfd_prediction_color),
+                                    rx.icon("triangle-alert", size = 16, color = State.tfd_prediction_color),
                                     rx.text("Classification", size = "2", color = "gray"),
                                     spacing = "1",
                                     align_items = "center"
@@ -834,7 +834,7 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                         rx.card(
                             rx.vstack(
                                 rx.hstack(
-                                    rx.icon("check-circle", size = 16, color = "green"),
+                                    rx.icon("circle-check", size = 16, color = "green"),
                                     rx.text("Not Fraud", size = "2", color = "gray"),
                                     spacing = "1",
                                     align_items = "center"
@@ -874,7 +874,7 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                 ),
                 rx.callout(
                     "No trained model available. Toggle **Real-time ML Training** to train first.",
-                    icon = "alert-triangle",
+                    icon = "triangle-alert",
                     color = "orange",
                     width = "100%"
                 )
@@ -1294,13 +1294,13 @@ def transaction_fraud_detection_batch_form() -> rx.Component:
                             rx.cond(
                                 State.tfd_batch_model_available,
                                 rx.hstack(
-                                    rx.icon("check-circle", size=16, color="green"),
+                                    rx.icon("circle-check", size=16, color="green"),
                                     rx.text("Model trained and ready", size="2", color="green"),
                                     spacing="2",
                                     align_items="center"
                                 ),
                                 rx.hstack(
-                                    rx.icon("alert-circle", size=16, color="orange"),
+                                    rx.icon("circle-alert", size=16, color="orange"),
                                     rx.text("No trained model available", size="2", color="orange"),
                                     spacing="2",
                                     align_items="center"
@@ -1326,7 +1326,7 @@ def transaction_fraud_detection_batch_form() -> rx.Component:
                                 State.batch_training_error != "",
                                 rx.callout(
                                     State.batch_training_error,
-                                    icon="alert-triangle",
+                                    icon="triangle-alert",
                                     color="red",
                                     size="1"
                                 ),
@@ -1387,7 +1387,7 @@ def transaction_fraud_detection_batch_form() -> rx.Component:
                                         rx.card(
                                             rx.vstack(
                                                 rx.hstack(
-                                                    rx.icon("alert-triangle", size = 16, color = State.tfd_batch_prediction_color),
+                                                    rx.icon("triangle-alert", size = 16, color = State.tfd_batch_prediction_color),
                                                     rx.text("Classification", size = "2", color = "gray"),
                                                     spacing = "1",
                                                     align_items = "center"
@@ -1433,7 +1433,7 @@ def transaction_fraud_detection_batch_form() -> rx.Component:
                                         rx.card(
                                             rx.vstack(
                                                 rx.hstack(
-                                                    rx.icon("check-circle", size = 16, color = "green"),
+                                                    rx.icon("circle-check", size = 16, color = "green"),
                                                     rx.text("Not Fraud", size = "2", color = "gray"),
                                                     spacing = "1",
                                                     align_items = "center"
@@ -1536,7 +1536,7 @@ def transaction_fraud_detection_batch_form() -> rx.Component:
                                 State.yellowbrick_error != "",
                                 rx.callout(
                                     State.yellowbrick_error,
-                                    icon = "alert-circle",
+                                    icon = "circle-alert",
                                     color = "red",
                                     width = "100%"
                                 ),
@@ -2055,7 +2055,7 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
                             ),
                             rx.callout(
                                 "No trained model available. Toggle **Real-time ML Training** to train first.",
-                                icon = "alert-triangle",
+                                icon = "triangle-alert",
                                 color = "orange",
                                 width = "100%"
                             )
@@ -2522,7 +2522,7 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
                                         ),
                                         rx.callout(
                                             "No trained model available. Toggle **Real-time ML Training** to train first.",
-                                            icon = "alert-triangle",
+                                            icon = "triangle-alert",
                                             color = "orange",
                                             width = "100%"
                                         )

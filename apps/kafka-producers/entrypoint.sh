@@ -1,15 +1,8 @@
 #!/bin/bash
-
 # Kafka Producers Entrypoint
-# Connects to Kafka broker (Bitnami Helm chart) running in the cluster
+# Dependencies are pre-installed in Docker image via multi-stage build
 
-# Create and activate virtual environment
-rm -rf .venv
-uv venv --python 3.13
-source .venv/bin/activate
-
-# Install dependencies
-uv pip install -r requirements.txt
+set -e
 
 # Get Kafka host from environment variable (set by Helm ConfigMap)
 KAFKA_BOOTSTRAP="${KAFKA_HOST:-coelho-realtime-kafka}:9092"

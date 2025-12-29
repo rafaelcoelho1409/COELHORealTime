@@ -1,5 +1,0 @@
-reflex
-websockets
-plotly
-folium
-prometheus-fastapi-instrumentator

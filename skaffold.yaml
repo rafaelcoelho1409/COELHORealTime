@@ -15,8 +15,6 @@ build:
         manual:
           - src: "**/*.py"
             dest: /app
-          - src: "requirements.txt"
-            dest: /app
     # Reflex service
     - image: coelho-realtime-reflex
       context: ./apps/reflex
@@ -25,8 +23,6 @@ build:
       sync:
         manual:
           - src: "**/*.py"
-            dest: /app
-          - src: "requirements.txt"
             dest: /app
           - src: "**/*.json"
             dest: /app
@@ -39,8 +35,6 @@ build:
         manual:
           - src: "**/*.py"
             dest: /app
-          - src: "requirements.txt"
-            dest: /app
     # Sklearn Batch ML service
     - image: coelho-realtime-sklearn
       context: ./apps/sklearn
@@ -50,12 +44,10 @@ build:
         manual:
           - src: "**/*.py"
             dest: /app
-          - src: "requirements.txt"
-            dest: /app
     # NOTE: Streamlit has been removed - fully replaced by Reflex
   local:
     push: true  # Push to localhost:5000, K3d registry mirrors handle the rest
-    useBuildkit: false
+    useBuildkit: true
     useDockerCLI: true
 
 # MANIFESTS at top level (v4beta13 structure)
@@ -181,7 +173,7 @@ profiles:
     build:
       artifacts:
         # NOTE: FastAPI service has been terminated and merged into river/sklearn services
-        # Kafka Producers - Use manual sync to /app directory
+        # Kafka Producers - Manual sync for hot-reload
         - image: coelho-realtime-kafka-producers
           context: ./apps/kafka-producers
           docker:
@@ -190,36 +182,35 @@ profiles:
             manual:
               - src: "**/*.py"
                 dest: /app
-              - src: "requirements.txt"
-                dest: /app
-        # Reflex - Use infer for automatic detection
+        # Reflex - Manual sync for hot-reload (infer doesn't work with multi-stage builds)
         - image: coelho-realtime-reflex
           context: ./apps/reflex
           docker:
             dockerfile: Dockerfile.reflex
           sync:
-            infer:
-              - "**/*.py"
-              - "requirements.txt"
-              - "**/*.json"
-        # River ML Training - Use infer for automatic detection
+            manual:
+              - src: "**/*.py"
+                dest: /app
+              - src: "**/*.json"
+                dest: /app
+        # River ML Training - Manual sync for hot-reload
         - image: coelho-realtime-river
           context: ./apps/river
           docker:
             dockerfile: Dockerfile.river
           sync:
-            infer:
-              - "**/*.py"
-              - "requirements.txt"
-        # Sklearn Batch ML - Use infer for automatic detection
+            manual:
+              - src: "**/*.py"
+                dest: /app
+        # Sklearn Batch ML - Manual sync for hot-reload
         - image: coelho-realtime-sklearn
           context: ./apps/sklearn
           docker:
             dockerfile: Dockerfile.sklearn
           sync:
-            infer:
-              - "**/*.py"
-              - "requirements.txt"
+            manual:
+              - src: "**/*.py"
+                dest: /app
         # NOTE: Streamlit has been removed - fully replaced by Reflex
     # Profile-specific manifests override (if needed)
     manifests:
@@ -237,3 +228,6 @@ profiles:
               sklearn.image: "{{.IMAGE_NAME_coelho_realtime_sklearn}}:{{.IMAGE_TAG_coelho_realtime_sklearn}}"
     deploy:
       helm: {}
+
+# NOTE: When useBuildkit is set to true (line 58), docker-buildx must be installed.
+# Install it via your package manager (e.g., `sudo pacman -S docker-buildx` on Arch Linux).

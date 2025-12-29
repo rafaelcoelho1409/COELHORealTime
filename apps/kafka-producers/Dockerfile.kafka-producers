@@ -1,14 +1,49 @@
-# Kafka Producers - Python data generators
-# Connects to Kafka broker (Bitnami Helm chart) as a client
-FROM python:3.13-slim
+# Stage 1: Builder (has uv, installs dependencies)
+FROM python:3.13-slim AS builder
 
-COPY . /app
+# Copy uv binary from official image (faster than pip install)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# UV optimization flags
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never
 
 WORKDIR /app
 
-# Install netcat for Kafka readiness check and UV for package management
-RUN apt-get update && apt-get install -y --no-install-recommends netcat-openbsd && \
-    rm -rf /var/lib/apt/lists/* && \
-    pip install uv --no-cache-dir
+# Copy dependency files first (for layer caching)
+COPY pyproject.toml ./
 
+# Layer 1: Generate lock file and install dependencies only
+# Cache mount accelerates rebuilds by reusing downloaded packages
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv lock && \
+    uv sync --frozen --no-install-project --no-dev
+
+# Layer 2: Copy source code (no project install needed for script apps)
+COPY . /app
+
+
+# ============================================
+# Stage 2: Runtime (minimal, no uv, no build tools)
+# ============================================
+FROM python:3.13-slim
+
+# Install netcat for Kafka readiness check
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends netcat-openbsd && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy virtual environment from builder (pre-compiled bytecode)
+COPY --from=builder /app/.venv /app/.venv
+
+# Copy application code
+COPY --from=builder /app /app
+
+# Use the venv's Python directly (no activation needed)
+ENV PATH="/app/.venv/bin:$PATH"
+
+# Run producers via entrypoint
 ENTRYPOINT ["/bin/bash", "/app/entrypoint.sh"]

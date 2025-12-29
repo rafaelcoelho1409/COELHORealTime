@@ -1,0 +1,17 @@
+[project]
+name = "kafka-producers"
+version = "0.1.0"
+description = "Kafka Producers - Python data generators for real-time streaming"
+requires-python = ">=3.13"
+dependencies = [
+    "kafka-python>=2.0.2",
+    "Faker",
+    "click",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = []

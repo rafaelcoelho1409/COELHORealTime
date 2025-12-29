@@ -1,4 +1,7 @@
 #!/bin/bash
+# Reflex Frontend Entrypoint
+# Dependencies are pre-installed in Docker image via multi-stage build
+
 set -e
 
 # Check if Redis is external (Kubernetes) or needs to be started locally (Docker standalone)
@@ -15,28 +18,19 @@ else
     echo "Using external Redis at: ${REFLEX_REDIS_URL}"
 fi
 
-# Determine environment mode from REFLEX_ENV (default to PROD if not set)
-ENV_MODE="${REFLEX_ENV:-PROD}"
+# Determine environment mode from REFLEX_ENV (default to DEV for hot-reload)
+ENV_MODE="${REFLEX_ENV:-DEV}"
+
+echo "Starting Reflex app in ${ENV_MODE} mode..."
+echo "  Frontend port: ${REFLEX_FRONTEND_PORT:-3000}"
+echo "  Backend port: ${REFLEX_BACKEND_PORT:-8000}"
+echo "  API URL: ${REFLEX_API_URL:-http://localhost:8000}"
+echo "  Redis URL: ${REFLEX_REDIS_URL:-redis://localhost}"
 
 if [ "$ENV_MODE" = "PROD" ]; then
-    echo "Starting Reflex app in PRODUCTION mode..."
-    echo "  Frontend port: ${REFLEX_FRONTEND_PORT:-3000}"
-    echo "  Backend port: ${REFLEX_BACKEND_PORT:-8000}"
-    echo "  API URL: ${REFLEX_API_URL:-http://localhost:8000}"
-    echo "  Redis URL: ${REFLEX_REDIS_URL:-redis://localhost}"
-    reflex run --env prod --loglevel info
+    # Production mode (no hot-reload, optimized)
+    exec reflex run --env prod --loglevel info
 else
-    echo "Starting Reflex app in DEVELOPMENT mode with hot-reload..."
-    # For development, create venv if needed
-    if [ ! -d ".venv" ]; then
-        echo "Creating virtual environment..."
-        uv venv --python 3.13
-    fi
-    source .venv/bin/activate
-    # Install/update dependencies
-    echo "Installing dependencies..."
-    uv pip install -r requirements.txt
-    # Initialize Reflex
-    reflex init --loglevel error || true
-    reflex run --env dev --loglevel debug
+    # Development mode with hot-reload
+    exec reflex run --env dev --loglevel debug
 fi
