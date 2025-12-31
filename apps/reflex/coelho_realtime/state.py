@@ -201,6 +201,92 @@ class State(rx.State):
         "E-Commerce Customer Interactions": ""
     }
 
+    # ==========================================================================
+    # DELTA LAKE SQL TAB STATE
+    # ==========================================================================
+    # SQL query input per project (default queries)
+    sql_query_input: dict = {
+        "Transaction Fraud Detection": "SELECT * FROM data ORDER BY timestamp DESC LIMIT 100",
+        "Estimated Time of Arrival": "SELECT * FROM data ORDER BY timestamp DESC LIMIT 100",
+        "E-Commerce Customer Interactions": "SELECT * FROM data ORDER BY timestamp DESC LIMIT 100"
+    }
+    # SQL query results per project
+    sql_query_results: dict = {
+        "Transaction Fraud Detection": {"columns": [], "data": [], "row_count": 0},
+        "Estimated Time of Arrival": {"columns": [], "data": [], "row_count": 0},
+        "E-Commerce Customer Interactions": {"columns": [], "data": [], "row_count": 0}
+    }
+    # SQL execution state
+    sql_loading: dict = {
+        "Transaction Fraud Detection": False,
+        "Estimated Time of Arrival": False,
+        "E-Commerce Customer Interactions": False
+    }
+    sql_error: dict = {
+        "Transaction Fraud Detection": "",
+        "Estimated Time of Arrival": "",
+        "E-Commerce Customer Interactions": ""
+    }
+    sql_execution_time: dict = {
+        "Transaction Fraud Detection": 0.0,
+        "Estimated Time of Arrival": 0.0,
+        "E-Commerce Customer Interactions": 0.0
+    }
+    # SQL engine selection per project ("polars" or "duckdb")
+    sql_engine: dict = {
+        "Transaction Fraud Detection": "polars",
+        "Estimated Time of Arrival": "polars",
+        "E-Commerce Customer Interactions": "polars"
+    }
+    # SQL results search filter per project
+    sql_search_filter: dict = {
+        "Transaction Fraud Detection": "",
+        "Estimated Time of Arrival": "",
+        "E-Commerce Customer Interactions": ""
+    }
+    # SQL results sort column per project
+    sql_sort_column: dict = {
+        "Transaction Fraud Detection": "",
+        "Estimated Time of Arrival": "",
+        "E-Commerce Customer Interactions": ""
+    }
+    # SQL results sort direction per project ("asc" or "desc")
+    sql_sort_direction: dict = {
+        "Transaction Fraud Detection": "asc",
+        "Estimated Time of Arrival": "asc",
+        "E-Commerce Customer Interactions": "asc"
+    }
+    # Table metadata cache (schema info)
+    sql_table_metadata: dict = {
+        "Transaction Fraud Detection": {},
+        "Estimated Time of Arrival": {},
+        "E-Commerce Customer Interactions": {}
+    }
+    # Query templates per project
+    sql_query_templates: dict = {
+        "Transaction Fraud Detection": [
+            {"name": "Recent Transactions", "query": "SELECT * FROM data ORDER BY timestamp DESC LIMIT 100"},
+            {"name": "Fraud Cases", "query": "SELECT * FROM data WHERE is_fraud = 1 LIMIT 100"},
+            {"name": "High Value Transactions", "query": "SELECT * FROM data WHERE amount > 1000 ORDER BY amount DESC LIMIT 100"},
+            {"name": "Fraud by Merchant", "query": "SELECT merchant_id, COUNT(*) as fraud_count FROM data WHERE is_fraud = 1 GROUP BY merchant_id ORDER BY fraud_count DESC LIMIT 20"},
+            {"name": "Transaction Types", "query": "SELECT transaction_type, COUNT(*) as count, AVG(amount) as avg_amount FROM data GROUP BY transaction_type ORDER BY count DESC"},
+        ],
+        "Estimated Time of Arrival": [
+            {"name": "Recent Trips", "query": "SELECT * FROM data ORDER BY timestamp DESC LIMIT 100"},
+            {"name": "Long Trips", "query": "SELECT * FROM data WHERE estimated_distance_km > 50 ORDER BY estimated_distance_km DESC LIMIT 100"},
+            {"name": "Weather Impact", "query": "SELECT weather, COUNT(*) as trips, AVG(simulated_actual_travel_time_seconds) as avg_time FROM data GROUP BY weather ORDER BY trips DESC"},
+            {"name": "Driver Performance", "query": "SELECT driver_id, COUNT(*) as trips, AVG(driver_rating) as avg_rating FROM data GROUP BY driver_id ORDER BY trips DESC LIMIT 20"},
+            {"name": "Vehicle Types", "query": "SELECT vehicle_type, COUNT(*) as count, AVG(estimated_distance_km) as avg_distance FROM data GROUP BY vehicle_type ORDER BY count DESC"},
+        ],
+        "E-Commerce Customer Interactions": [
+            {"name": "Recent Events", "query": "SELECT * FROM data ORDER BY timestamp DESC LIMIT 100"},
+            {"name": "Purchases", "query": "SELECT * FROM data WHERE event_type = 'purchase' LIMIT 100"},
+            {"name": "By Category", "query": "SELECT product_category, COUNT(*) as count FROM data GROUP BY product_category ORDER BY count DESC"},
+            {"name": "Event Types", "query": "SELECT event_type, COUNT(*) as count FROM data GROUP BY event_type ORDER BY count DESC"},
+            {"name": "Top Products", "query": "SELECT product_id, COUNT(*) as views, SUM(CASE WHEN event_type = 'purchase' THEN 1 ELSE 0 END) as purchases FROM data GROUP BY product_id ORDER BY views DESC LIMIT 20"},
+        ]
+    }
+
     ##==========================================================================
     ## VARS
     ##==========================================================================
@@ -347,6 +433,16 @@ class State(rx.State):
     def is_batch_ml_tab(self) -> bool:
         """Check if Batch ML tab is active."""
         return self.tab_name == "batch_ml"
+
+    @rx.var
+    def is_incremental_ml_tab(self) -> bool:
+        """Check if Incremental ML tab is active."""
+        return self.tab_name == "incremental_ml"
+
+    @rx.var
+    def is_delta_lake_sql_tab(self) -> bool:
+        """Check if Delta Lake SQL tab is active."""
+        return self.tab_name == "delta_lake_sql"
 
     @rx.var
     def tfd_batch_ml_enabled(self) -> bool:
@@ -978,6 +1074,145 @@ class State(rx.State):
         )
         return fig
 
+    # ==========================================================================
+    # DELTA LAKE SQL TAB COMPUTED VARS
+    # ==========================================================================
+    @rx.var
+    def current_sql_query(self) -> str:
+        """Get SQL query for current page."""
+        return self.sql_query_input.get(self.page_name, "SELECT * FROM data LIMIT 100")
+
+    @rx.var
+    def current_sql_results(self) -> dict:
+        """Get SQL results for current page."""
+        return self.sql_query_results.get(self.page_name, {"columns": [], "data": [], "row_count": 0})
+
+    @rx.var
+    def current_sql_loading(self) -> bool:
+        """Check if SQL query is loading for current page."""
+        return self.sql_loading.get(self.page_name, False)
+
+    @rx.var
+    def current_sql_error(self) -> str:
+        """Get SQL error for current page."""
+        return self.sql_error.get(self.page_name, "")
+
+    @rx.var
+    def current_sql_execution_time(self) -> float:
+        """Get SQL execution time for current page."""
+        return self.sql_execution_time.get(self.page_name, 0.0)
+
+    @rx.var
+    def current_sql_engine(self) -> str:
+        """Get selected SQL engine for current page."""
+        return self.sql_engine.get(self.page_name, "polars")
+
+    @rx.var
+    def current_sql_search_filter(self) -> str:
+        """Get search filter for current page."""
+        return self.sql_search_filter.get(self.page_name, "")
+
+    @rx.var
+    def current_sql_sort_column(self) -> str:
+        """Get sort column for current page."""
+        return self.sql_sort_column.get(self.page_name, "")
+
+    @rx.var
+    def current_sql_sort_direction(self) -> str:
+        """Get sort direction for current page."""
+        return self.sql_sort_direction.get(self.page_name, "asc")
+
+    @rx.var
+    def sql_results_filtered(self) -> list[dict]:
+        """Get filtered and sorted data rows from SQL results."""
+        results = self.current_sql_results
+        data = results.get("data", [])
+        search = self.current_sql_search_filter.lower().strip()
+        sort_col = self.current_sql_sort_column
+        sort_dir = self.current_sql_sort_direction
+
+        # Step 1: Filter
+        if search:
+            filtered = []
+            for row in data:
+                for value in row.values():
+                    if search in str(value).lower():
+                        filtered.append(row)
+                        break
+            data = filtered
+
+        # Step 2: Sort
+        if sort_col and data:
+            try:
+                # Try numeric sort first, fall back to string sort
+                def sort_key(row):
+                    val = row.get(sort_col, "")
+                    # Try to convert to float for numeric sorting
+                    try:
+                        return (0, float(val))
+                    except (ValueError, TypeError):
+                        return (1, str(val).lower())
+
+                data = sorted(data, key=sort_key, reverse=(sort_dir == "desc"))
+            except Exception:
+                pass
+
+        return data
+
+    @rx.var
+    def sql_filtered_row_count(self) -> int:
+        """Get count of filtered rows."""
+        return len(self.sql_results_filtered)
+
+    @rx.var
+    def sql_results_columns(self) -> list[str]:
+        """Get column names from SQL results."""
+        results = self.current_sql_results
+        return results.get("columns", [])
+
+    @rx.var
+    def sql_results_data(self) -> list[dict]:
+        """Get data rows from SQL results."""
+        results = self.current_sql_results
+        return results.get("data", [])
+
+    @rx.var
+    def sql_results_row_count(self) -> int:
+        """Get row count from SQL results."""
+        results = self.current_sql_results
+        return results.get("row_count", 0)
+
+    @rx.var
+    def sql_has_results(self) -> bool:
+        """Check if there are SQL results to display."""
+        return len(self.sql_results_data) > 0
+
+    @rx.var
+    def sql_has_error(self) -> bool:
+        """Check if there's an SQL error."""
+        return bool(self.current_sql_error)
+
+    @rx.var
+    def current_sql_templates(self) -> list[dict[str, str]]:
+        """Get SQL query templates for current page."""
+        return self.sql_query_templates.get(self.page_name, [])
+
+    @rx.var
+    def current_table_metadata(self) -> dict:
+        """Get table metadata for current page."""
+        return self.sql_table_metadata.get(self.page_name, {})
+
+    @rx.var
+    def current_table_columns(self) -> list[dict[str, str]]:
+        """Get table column definitions for current page."""
+        metadata = self.current_table_metadata
+        return metadata.get("columns", [])
+
+    @rx.var
+    def current_table_row_count(self) -> int:
+        """Get approximate row count for current table."""
+        metadata = self.current_table_metadata
+        return metadata.get("approximate_row_count", 0)
 
     ##==========================================================================
     ## EVENTS
@@ -2577,3 +2812,204 @@ class State(rx.State):
                 description=str(e),
                 duration=3000
             )
+
+    # ==========================================================================
+    # DELTA LAKE SQL TAB EVENTS
+    # ==========================================================================
+    @rx.event
+    def update_sql_query(self, query: str):
+        """Update SQL query input for current page."""
+        project_name = self.page_name
+        self.sql_query_input = {
+            **self.sql_query_input,
+            project_name: query
+        }
+
+    @rx.event
+    def set_sql_query_from_template(self, template_query: str):
+        """Set SQL query from a template."""
+        project_name = self.page_name
+        self.sql_query_input = {
+            **self.sql_query_input,
+            project_name: template_query
+        }
+
+    @rx.event
+    def clear_sql_query(self):
+        """Clear SQL query and results for current page."""
+        project_name = self.page_name
+        default_query = "SELECT * FROM data ORDER BY timestamp DESC LIMIT 100"
+        self.sql_query_input = {
+            **self.sql_query_input,
+            project_name: default_query
+        }
+        self.sql_query_results = {
+            **self.sql_query_results,
+            project_name: {"columns": [], "data": [], "row_count": 0}
+        }
+        self.sql_error = {
+            **self.sql_error,
+            project_name: ""
+        }
+        self.sql_execution_time = {
+            **self.sql_execution_time,
+            project_name: 0.0
+        }
+
+    @rx.event
+    def set_sql_engine(self, engine: str):
+        """Set the SQL engine for current page (polars or duckdb)."""
+        project_name = self.page_name
+        print(f"[DEBUG] set_sql_engine - project_name: {project_name}, engine: {engine}")
+        self.sql_engine = {
+            **self.sql_engine,
+            project_name: engine
+        }
+        print(f"[DEBUG] set_sql_engine - sql_engine dict after update: {self.sql_engine}")
+
+    @rx.event
+    def set_sql_search_filter(self, search: str):
+        """Set the search filter for SQL results."""
+        project_name = self.page_name
+        self.sql_search_filter = {
+            **self.sql_search_filter,
+            project_name: search
+        }
+
+    @rx.event
+    def toggle_sql_sort(self, column: str):
+        """Toggle sorting for a column. Click once for asc, again for desc, third time to clear."""
+        project_name = self.page_name
+        current_col = self.sql_sort_column.get(project_name, "")
+        current_dir = self.sql_sort_direction.get(project_name, "asc")
+
+        if current_col != column:
+            # New column - start with ascending
+            new_col = column
+            new_dir = "asc"
+        elif current_dir == "asc":
+            # Same column, was ascending - switch to descending
+            new_col = column
+            new_dir = "desc"
+        else:
+            # Same column, was descending - clear sort
+            new_col = ""
+            new_dir = "asc"
+
+        self.sql_sort_column = {
+            **self.sql_sort_column,
+            project_name: new_col
+        }
+        self.sql_sort_direction = {
+            **self.sql_sort_direction,
+            project_name: new_dir
+        }
+
+    @rx.event(background=True)
+    async def execute_sql_query(self):
+        """Execute SQL query against Delta Lake via River service."""
+        # Read state values inside async context to get latest values
+        async with self:
+            project_name = self.page_name
+            query = self.sql_query_input.get(project_name, "")
+            engine = self.sql_engine.get(project_name, "polars")
+            # Debug: log state values
+            print(f"[DEBUG] execute_sql_query - project_name: {project_name}")
+            print(f"[DEBUG] execute_sql_query - sql_engine dict: {self.sql_engine}")
+            print(f"[DEBUG] execute_sql_query - selected engine: {engine}")
+
+        if not query.strip():
+            yield rx.toast.warning(
+                "Empty query",
+                description="Please enter a SQL query to execute",
+                duration=3000
+            )
+            return
+
+        # Set loading state
+        async with self:
+            self.sql_loading = {**self.sql_loading, project_name: True}
+            self.sql_error = {**self.sql_error, project_name: ""}
+
+        try:
+            response = await httpx_client_post(
+                url=f"{RIVER_BASE_URL}/sql_query",
+                json={
+                    "project_name": project_name,
+                    "query": query,
+                    "limit": 100,
+                    "engine": engine
+                },
+                timeout=65.0  # Slightly more than server timeout
+            )
+            result = response.json()
+
+            async with self:
+                self.sql_query_results = {
+                    **self.sql_query_results,
+                    project_name: {
+                        "columns": result.get("columns", []),
+                        "data": result.get("data", []),
+                        "row_count": result.get("row_count", 0)
+                    }
+                }
+                self.sql_execution_time = {
+                    **self.sql_execution_time,
+                    project_name: result.get("execution_time_ms", 0.0)
+                }
+                self.sql_loading = {**self.sql_loading, project_name: False}
+
+            row_count = result.get("row_count", 0)
+            exec_time = result.get("execution_time_ms", 0.0)
+            engine_used = result.get("engine", engine).upper()
+            yield rx.toast.success(
+                f"Query executed ({engine_used})",
+                description=f"{row_count} rows in {exec_time:.0f}ms",
+                duration=3000
+            )
+
+        except Exception as e:
+            error_msg = str(e)
+            # Try to extract error from response if available
+            if hasattr(e, 'response'):
+                try:
+                    error_data = e.response.json()
+                    error_msg = error_data.get("detail", str(e))
+                except Exception:
+                    pass
+
+            async with self:
+                self.sql_loading = {**self.sql_loading, project_name: False}
+                self.sql_error = {**self.sql_error, project_name: error_msg}
+                self.sql_query_results = {
+                    **self.sql_query_results,
+                    project_name: {"columns": [], "data": [], "row_count": 0}
+                }
+
+            yield rx.toast.error(
+                "Query failed",
+                description=error_msg[:100] if len(error_msg) > 100 else error_msg,
+                duration=5000
+            )
+
+    @rx.event(background=True)
+    async def fetch_table_schema(self):
+        """Fetch table schema and metadata for current page."""
+        project_name = self.page_name
+
+        try:
+            response = await httpx_client_post(
+                url=f"{RIVER_BASE_URL}/table_schema",
+                json={"project_name": project_name},
+                timeout=30.0
+            )
+            result = response.json()
+
+            async with self:
+                self.sql_table_metadata = {
+                    **self.sql_table_metadata,
+                    project_name: result
+                }
+
+        except Exception as e:
+            print(f"Error fetching table schema for {project_name}: {e}")

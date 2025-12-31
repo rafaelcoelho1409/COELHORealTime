@@ -434,20 +434,410 @@ def page_tabs() -> rx.Component:
     return rx.tabs.root(
         rx.tabs.list(
             rx.tabs.trigger(
-                "Incremental ML",
-                value = "incremental_ml"
+                rx.hstack(
+                    rx.icon("activity", size=14),
+                    rx.text("Incremental ML"),
+                    spacing="1",
+                    align="center"
+                ),
+                value="incremental_ml"
             ),
             rx.tabs.trigger(
-                "Batch ML",
-                value = "batch_ml"
+                rx.hstack(
+                    rx.icon("layers", size=14),
+                    rx.text("Batch ML"),
+                    spacing="1",
+                    align="center"
+                ),
+                value="batch_ml"
+            ),
+            rx.tabs.trigger(
+                rx.hstack(
+                    rx.icon("database", size=14),
+                    rx.text("Delta Lake SQL"),
+                    spacing="1",
+                    align="center"
+                ),
+                value="delta_lake_sql"
             ),
         ),
-        value = State.tab_name,
-        on_change = State.set_tab,
-        default_value = "incremental_ml",
-        width = "100%",
+        value=State.tab_name,
+        on_change=State.set_tab,
+        default_value="incremental_ml",
+        width="100%",
     )
 
+
+## DELTA LAKE SQL TAB
+def delta_lake_sql_tab() -> rx.Component:
+    """
+    Delta Lake SQL query interface.
+    Allows users to execute SQL queries against Delta Lake tables via DuckDB.
+    """
+    return rx.hstack(
+        # Left column - Query editor and controls (35%)
+        rx.vstack(
+            # SQL Query Editor Card
+            rx.card(
+                rx.vstack(
+                    rx.hstack(
+                        rx.icon("terminal", size=16, color=rx.color("accent", 10)),
+                        rx.heading("SQL Editor", size="3", weight="bold"),
+                        rx.spacer(),
+                        # Engine selector - compact
+                        rx.select(
+                            ["polars", "duckdb"],
+                            value=State.current_sql_engine,
+                            on_change=State.set_sql_engine,
+                            size="1",
+                            variant="soft",
+                        ),
+                        spacing="2",
+                        align="center",
+                        width="100%",
+                    ),
+                    rx.divider(),
+                    # Query textarea - monospace, dark mode friendly
+                    rx.text_area(
+                        value=State.current_sql_query,
+                        on_change=State.update_sql_query,
+                        placeholder="SELECT * FROM data LIMIT 100",
+                        min_height="180px",
+                        width="100%",
+                        font_family="'SF Mono', 'Fira Code', 'Consolas', monospace",
+                        font_size="12px",
+                        style={
+                            "background": "var(--gray-a2)",
+                            "border": "1px solid var(--gray-a5)",
+                            "border_radius": "6px",
+                        },
+                    ),
+                    # Action buttons - compact
+                    rx.hstack(
+                        rx.button(
+                            rx.hstack(
+                                rx.cond(
+                                    State.current_sql_loading,
+                                    rx.spinner(size="1"),
+                                    rx.icon("play", size=14)
+                                ),
+                                rx.text("Run", size="2"),
+                                spacing="1",
+                                align="center"
+                            ),
+                            on_click=State.execute_sql_query,
+                            color_scheme="green",
+                            size="2",
+                            disabled=State.current_sql_loading,
+                        ),
+                        rx.button(
+                            rx.icon("eraser", size=14),
+                            on_click=State.clear_sql_query,
+                            variant="soft",
+                            size="2",
+                        ),
+                        spacing="2",
+                        width="100%",
+                    ),
+                    spacing="2",
+                    width="100%",
+                ),
+                width="100%",
+                style={"background": "var(--color-panel-solid)"},
+            ),
+            # Table Info Card - compact
+            rx.card(
+                rx.vstack(
+                    rx.hstack(
+                        rx.icon("table-2", size=14, color=rx.color("gray", 10)),
+                        rx.text("Table: ", size="1", color="gray", weight="medium"),
+                        rx.code("data", size="1"),
+                        rx.spacer(),
+                        rx.cond(
+                            State.current_table_row_count > 0,
+                            rx.text(f"~{State.current_table_row_count:,} rows", size="1", color="gray"),
+                            rx.button(
+                                rx.icon("refresh-cw", size=12),
+                                on_click=State.fetch_table_schema,
+                                variant="ghost",
+                                size="1",
+                            ),
+                        ),
+                        spacing="1",
+                        align="center",
+                        width="100%",
+                    ),
+                    # Column list (collapsible)
+                    rx.cond(
+                        State.current_table_columns.length() > 0,
+                        rx.accordion.root(
+                            rx.accordion.item(
+                                header=rx.text(f"Columns ({State.current_table_columns.length()})", size="1", color="gray"),
+                                content=rx.vstack(
+                                    rx.foreach(
+                                        State.current_table_columns,
+                                        lambda col: rx.hstack(
+                                            rx.code(col["name"], size="1"),
+                                            rx.text(col["type"], size="1", color="gray"),
+                                            spacing="2",
+                                        )
+                                    ),
+                                    spacing="0",
+                                    max_height="150px",
+                                    overflow_y="auto",
+                                    padding_y="1",
+                                ),
+                                value="columns"
+                            ),
+                            type="single",
+                            collapsible=True,
+                            width="100%",
+                            size="1",
+                        ),
+                        rx.fragment(),
+                    ),
+                    spacing="1",
+                    width="100%",
+                ),
+                width="100%",
+                padding="2",
+                style={"background": "var(--color-panel-solid)"},
+            ),
+            # Query Templates Card - compact
+            rx.card(
+                rx.vstack(
+                    rx.hstack(
+                        rx.icon("bookmark", size=14, color=rx.color("gray", 10)),
+                        rx.text("Templates", size="1", color="gray", weight="medium"),
+                        spacing="1",
+                        align="center",
+                    ),
+                    rx.vstack(
+                        rx.foreach(
+                            State.current_sql_templates,
+                            lambda template: rx.button(
+                                rx.text(template["name"], size="1"),
+                                on_click=State.set_sql_query_from_template(template["query"]),
+                                variant="ghost",
+                                size="1",
+                                width="100%",
+                                justify="start",
+                                style={"padding": "4px 8px"},
+                            )
+                        ),
+                        spacing="0",
+                        width="100%",
+                    ),
+                    spacing="1",
+                    width="100%",
+                ),
+                width="100%",
+                padding="2",
+                style={"background": "var(--color-panel-solid)"},
+            ),
+            spacing="3",
+            width="35%",
+            align="start",
+        ),
+        # Right column - Results (65%)
+        rx.vstack(
+            # Results Card
+            rx.card(
+                rx.vstack(
+                    # Header row with title, search, and badges
+                    rx.hstack(
+                        rx.hstack(
+                            rx.icon("table", size=18, color=rx.color("accent", 10)),
+                            rx.heading("Query Results", size="3", weight="bold"),
+                            spacing="2",
+                            align="center",
+                        ),
+                        rx.spacer(),
+                        # Search input in header
+                        rx.cond(
+                            State.sql_has_results,
+                            rx.hstack(
+                                rx.input(
+                                    value=State.current_sql_search_filter,
+                                    on_change=State.set_sql_search_filter,
+                                    placeholder="Filter results...",
+                                    size="1",
+                                    width="160px",
+                                    variant="soft",
+                                ),
+                                rx.badge(
+                                    f"{State.sql_filtered_row_count}/{State.sql_results_row_count}",
+                                    color_scheme="gray",
+                                    variant="soft",
+                                    size="1",
+                                ),
+                                rx.badge(
+                                    f"{State.current_sql_execution_time:.0f}ms",
+                                    color_scheme="green",
+                                    variant="soft",
+                                    size="1",
+                                ),
+                                spacing="2",
+                                align="center",
+                            ),
+                            rx.fragment(),
+                        ),
+                        spacing="2",
+                        align="center",
+                        width="100%",
+                    ),
+                    rx.divider(),
+                    # Error display
+                    rx.cond(
+                        State.sql_has_error,
+                        rx.callout(
+                            State.current_sql_error,
+                            icon="alert-triangle",
+                            color="red",
+                            size="1",
+                        ),
+                        rx.fragment(),
+                    ),
+                    # Loading state
+                    rx.cond(
+                        State.current_sql_loading,
+                        rx.center(
+                            rx.vstack(
+                                rx.spinner(size="3"),
+                                rx.text("Executing query...", size="2", color="gray"),
+                                spacing="2",
+                                align="center",
+                            ),
+                            height="300px",
+                            width="100%",
+                        ),
+                        # Results table or empty state
+                        rx.cond(
+                            State.sql_has_results,
+                            # Scrollable table container (both X and Y)
+                            rx.scroll_area(
+                                rx.table.root(
+                                    rx.table.header(
+                                        rx.table.row(
+                                            rx.foreach(
+                                                State.sql_results_columns,
+                                                lambda col: rx.table.column_header_cell(
+                                                    rx.hstack(
+                                                        rx.text(col, size="1", weight="bold"),
+                                                        rx.cond(
+                                                            State.current_sql_sort_column == col,
+                                                            rx.cond(
+                                                                State.current_sql_sort_direction == "asc",
+                                                                rx.icon("chevron-up", size=12, color=rx.color("accent", 10)),
+                                                                rx.icon("chevron-down", size=12, color=rx.color("accent", 10)),
+                                                            ),
+                                                            rx.icon("chevrons-up-down", size=12, color=rx.color("gray", 8)),
+                                                        ),
+                                                        spacing="1",
+                                                        align="center",
+                                                    ),
+                                                    on_click=State.toggle_sql_sort(col),
+                                                    style={
+                                                        "white_space": "nowrap",
+                                                        "background": "var(--color-background)",
+                                                        "position": "sticky",
+                                                        "top": "0",
+                                                        "z_index": "1",
+                                                        "padding": "10px 14px",
+                                                        "font_size": "11px",
+                                                        "text_transform": "uppercase",
+                                                        "letter_spacing": "0.5px",
+                                                        "border_bottom": "2px solid var(--gray-a6)",
+                                                        "border_right": "1px solid var(--gray-a4)",
+                                                        "cursor": "pointer",
+                                                        "_hover": {"background": "var(--gray-a3)"},
+                                                    },
+                                                )
+                                            )
+                                        )
+                                    ),
+                                    rx.table.body(
+                                        rx.foreach(
+                                            State.sql_results_filtered,
+                                            lambda row: rx.table.row(
+                                                rx.foreach(
+                                                    State.sql_results_columns,
+                                                    lambda col: rx.table.cell(
+                                                        rx.text(row[col], size="1"),
+                                                        style={
+                                                            "white_space": "nowrap",
+                                                            "padding": "8px 14px",
+                                                            "font_size": "12px",
+                                                            "font_family": "'SF Mono', 'Fira Code', monospace",
+                                                            "border_bottom": "1px solid var(--gray-a4)",
+                                                            "border_right": "1px solid var(--gray-a4)",
+                                                        },
+                                                    )
+                                                ),
+                                                style={
+                                                    "_hover": {"background": "var(--accent-a3)"},
+                                                },
+                                            )
+                                        )
+                                    ),
+                                    width="max-content",
+                                    min_width="100%",
+                                    size="1",
+                                    style={
+                                        "border_collapse": "separate",
+                                        "border_spacing": "0",
+                                    },
+                                ),
+                                type="auto",
+                                scrollbars="both",
+                                style={
+                                    "height": "400px",
+                                    "width": "100%",
+                                    "border": "1px solid var(--gray-a5)",
+                                    "border_radius": "8px",
+                                    "background": "var(--color-background)",
+                                },
+                            ),
+                            rx.center(
+                                rx.vstack(
+                                    rx.icon("database", size=40, color=rx.color("gray", 6)),
+                                    rx.text("No results yet", size="2", color="gray"),
+                                    rx.text("Run a query to see results", size="1", color="gray"),
+                                    spacing="2",
+                                    align="center",
+                                ),
+                                height="250px",
+                                width="100%",
+                            ),
+                        ),
+                    ),
+                    spacing="2",
+                    width="100%",
+                ),
+                width="100%",
+                height="100%",
+                style={"background": "var(--color-panel-solid)"},
+            ),
+            # Info callout - more compact
+            rx.callout(
+                rx.text(
+                    "Query 'data' table. SELECT only. Max 10K rows.",
+                    size="1"
+                ),
+                icon="info",
+                size="1",
+                width="100%",
+                variant="soft",
+            ),
+            spacing="3",
+            width="65%",
+            height="100%",
+        ),
+        spacing="4",
+        width="100%",
+        align="start",
+        padding="4",
+    )
 
 
 ## TRANSACTION FRAUD DETECTION

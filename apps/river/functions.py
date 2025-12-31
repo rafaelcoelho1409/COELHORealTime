@@ -3,6 +3,7 @@ River ML Training Helper Functions
 
 Functions for incremental machine learning training using River library.
 Reads data from Delta Lake on MinIO (S3-compatible storage) via Polars.
+SQL queries use native DuckDB delta extension for direct Delta Lake access.
 Models and encoders are loaded from MLflow artifacts (with local fallback).
 """
 import pickle
@@ -669,6 +670,452 @@ def get_initial_sample_polars(project_name: str) -> Optional[dict]:
     except Exception as e:
         print(f"Error getting initial sample via Polars: {e}")
         return None
+
+
+# =============================================================================
+# DuckDB SQL Query Execution (Delta Lake SQL Tab)
+# =============================================================================
+import duckdb
+import re
+
+# SQL query configuration
+SQL_MAX_ROWS = 10000
+SQL_DEFAULT_LIMIT = 100
+SQL_TIMEOUT_SECONDS = 30.0
+SQL_MAX_QUERY_LENGTH = 5000
+
+# Blocked SQL keywords (DDL, DML mutations - security)
+BLOCKED_SQL_KEYWORDS = {
+    "INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "TRUNCATE",
+    "GRANT", "REVOKE", "EXEC", "EXECUTE", "CALL", "MERGE", "REPLACE",
+    "COPY", "VACUUM", "ATTACH", "DETACH", "PRAGMA", "SET", "LOAD",
+    "INSTALL", "UNINSTALL"
+}
+
+def _sanitize_for_json(data: list[dict]) -> list[dict]:
+    """
+    Sanitize data for JSON serialization.
+    Replaces NaN, inf, -inf with None (null in JSON).
+    """
+    import math
+    for row in data:
+        for key, value in row.items():
+            if value is None:
+                continue
+            try:
+                if isinstance(value, float):
+                    if math.isnan(value) or math.isinf(value):
+                        row[key] = None
+            except (TypeError, ValueError):
+                pass
+    return data
+
+
+# Persistent DuckDB connection for Delta Lake queries
+# Configured once at module load, reused for all queries (fast)
+_duckdb_conn: Optional[duckdb.DuckDBPyConnection] = None
+
+
+def _get_duckdb_connection() -> duckdb.DuckDBPyConnection:
+    """Get or create a persistent DuckDB connection configured for MinIO."""
+    global _duckdb_conn
+
+    if _duckdb_conn is not None:
+        try:
+            # Test if connection is still valid
+            _duckdb_conn.execute("SELECT 1")
+            return _duckdb_conn
+        except Exception:
+            # Connection is stale, recreate it
+            _duckdb_conn = None
+
+    # Create new connection and configure it
+    print("Creating new DuckDB connection with Delta extension...")
+
+    # Set environment variables for delta-rs/object_store
+    os.environ["AWS_ACCESS_KEY_ID"] = MINIO_ACCESS_KEY
+    os.environ["AWS_SECRET_ACCESS_KEY"] = MINIO_SECRET_KEY
+    os.environ["AWS_ENDPOINT_URL"] = f"http://{MINIO_HOST}:9000"
+    os.environ["AWS_ALLOW_HTTP"] = "true"
+    os.environ["AWS_REGION"] = "us-east-1"
+    os.environ["AWS_EC2_METADATA_DISABLED"] = "true"
+
+    conn = duckdb.connect()
+
+    # Install and load delta extension (install is cached to disk)
+    conn.execute("INSTALL delta;")
+    conn.execute("LOAD delta;")
+
+    # Configure S3/MinIO credentials
+    minio_host_port = f"{MINIO_HOST}:9000"
+    conn.execute("DROP SECRET IF EXISTS minio_secret;")
+    conn.execute(f"""
+        CREATE SECRET minio_secret (
+            TYPE S3,
+            KEY_ID '{MINIO_ACCESS_KEY}',
+            SECRET '{MINIO_SECRET_KEY}',
+            ENDPOINT '{minio_host_port}',
+            URL_STYLE 'path',
+            USE_SSL false,
+            REGION 'us-east-1'
+        );
+    """)
+
+    _duckdb_conn = conn
+    print("DuckDB connection ready with Delta extension loaded")
+    return _duckdb_conn
+
+
+# Initialize connection at module load (optional - will be created on first query if not)
+try:
+    _get_duckdb_connection()
+except Exception as e:
+    print(f"Warning: Could not initialize DuckDB connection: {e}")
+
+
+def validate_sql_query(query: str) -> tuple[bool, str]:
+    """
+    Validate SQL query for security.
+    Returns (is_valid, error_message).
+
+    Security checks:
+    1. Must start with SELECT
+    2. No blocked keywords (DDL/DML mutations)
+    3. No multiple statements (semicolons)
+    4. No SQL comments
+    5. Query length limits
+    """
+    if not query or not query.strip():
+        return False, "Query cannot be empty"
+
+    query_stripped = query.strip()
+    query_upper = query_stripped.upper()
+
+    # 1. Must start with SELECT
+    if not query_upper.startswith("SELECT"):
+        return False, "Only SELECT queries are allowed"
+
+    # 2. Check for blocked keywords
+    # Split by non-word characters to get tokens
+    tokens = set(re.findall(r'\b[A-Z]+\b', query_upper))
+    blocked_found = tokens.intersection(BLOCKED_SQL_KEYWORDS)
+    if blocked_found:
+        return False, f"Forbidden keyword(s): {', '.join(sorted(blocked_found))}"
+
+    # 3. Check for multiple statements (semicolons followed by content)
+    # Allow trailing semicolon, but not multiple statements
+    if re.search(r';\s*\S', query_stripped):
+        return False, "Multiple statements are not allowed"
+
+    # 4. Check for SQL comments (could hide malicious code)
+    if '--' in query_stripped or '/*' in query_stripped:
+        return False, "SQL comments are not allowed"
+
+    # 5. Query length limit
+    if len(query_stripped) > SQL_MAX_QUERY_LENGTH:
+        return False, f"Query too long (max {SQL_MAX_QUERY_LENGTH} characters)"
+
+    # 6. Check for balanced parentheses
+    if query_stripped.count('(') != query_stripped.count(')'):
+        return False, "Unbalanced parentheses"
+
+    return True, ""
+
+
+def _enforce_limit(query: str, max_limit: int = SQL_MAX_ROWS) -> str:
+    """Ensure query has a LIMIT clause and it doesn't exceed max_limit."""
+    query_upper = query.upper()
+
+    # Remove trailing semicolon for processing
+    query_clean = query.rstrip().rstrip(';')
+
+    if "LIMIT" not in query_upper:
+        # No LIMIT clause, add one
+        return f"{query_clean} LIMIT {max_limit}"
+
+    # Has LIMIT, check if it exceeds max
+    # Match LIMIT followed by number
+    limit_match = re.search(r'LIMIT\s+(\d+)', query_upper)
+    if limit_match:
+        current_limit = int(limit_match.group(1))
+        if current_limit > max_limit:
+            # Replace with max_limit
+            return re.sub(
+                r'LIMIT\s+\d+',
+                f'LIMIT {max_limit}',
+                query_clean,
+                flags=re.IGNORECASE
+            )
+
+    return query_clean
+
+
+
+
+def execute_delta_sql(
+    project_name: str,
+    query: str,
+    limit: int = SQL_DEFAULT_LIMIT
+) -> dict:
+    """
+    Execute SQL query against Delta Lake using native DuckDB delta extension.
+
+    Uses DuckDB's native delta_scan() to directly read Delta Lake tables,
+    avoiding intermediate copies through Polars.
+    The table is available as 'data' via a CTE for query simplicity.
+
+    Args:
+        project_name: Project name (determines which Delta table to query)
+        query: SQL query string (must be SELECT only)
+        limit: Default row limit if not specified in query
+
+    Returns:
+        dict with: columns, data, row_count, execution_time_ms, truncated, error
+    """
+    start_time = time.time()
+
+    # 1. Validate query
+    is_valid, error = validate_sql_query(query)
+    if not is_valid:
+        return {
+            "columns": [],
+            "data": [],
+            "row_count": 0,
+            "execution_time_ms": (time.time() - start_time) * 1000,
+            "truncated": False,
+            "error": error
+        }
+
+    # 2. Get Delta table path
+    delta_path = DELTA_PATHS.get(project_name)
+    if not delta_path:
+        return {
+            "columns": [],
+            "data": [],
+            "row_count": 0,
+            "execution_time_ms": (time.time() - start_time) * 1000,
+            "truncated": False,
+            "error": f"Unknown project: {project_name}"
+        }
+
+    # 3. Enforce row limit
+    effective_limit = min(limit, SQL_MAX_ROWS)
+    query_with_limit = _enforce_limit(query, effective_limit)
+
+    # 4. Execute query with native DuckDB delta extension
+    try:
+        # Get persistent DuckDB connection (already configured for MinIO)
+        conn = _get_duckdb_connection()
+
+        # Create a CTE that makes the Delta table available as 'data'
+        # This allows users to write simple queries like: SELECT * FROM data
+        full_query = f"""
+        WITH data AS (
+            SELECT * FROM delta_scan('{delta_path}')
+        )
+        {query_with_limit}
+        """
+
+        print(f"Executing DuckDB query for {project_name}: {query_with_limit[:100]}...")
+
+        # Execute the query
+        result = conn.execute(full_query).fetchdf()
+
+        print(f"Query returned {len(result)} rows")
+
+        execution_time = (time.time() - start_time) * 1000
+
+        # Check if result was truncated
+        truncated = len(result) >= effective_limit
+
+        # Convert to list of dicts and sanitize for JSON
+        data = _sanitize_for_json(result.to_dict(orient="records"))
+
+        return {
+            "columns": list(result.columns),
+            "data": data,
+            "row_count": len(result),
+            "execution_time_ms": round(execution_time, 2),
+            "truncated": truncated,
+            "error": None,
+            "engine": "duckdb"
+        }
+    except Exception as e:
+        error_msg = f"Query execution error: {str(e)}"
+        print(f"DuckDB error for {project_name}: {error_msg}")
+        return {
+            "columns": [],
+            "data": [],
+            "row_count": 0,
+            "execution_time_ms": (time.time() - start_time) * 1000,
+            "truncated": False,
+            "error": error_msg,
+            "engine": "duckdb"
+        }
+
+
+def execute_delta_sql_polars(
+    project_name: str,
+    query: str,
+    limit: int = SQL_DEFAULT_LIMIT
+) -> dict:
+    """
+    Execute SQL query against Delta Lake using Polars SQLContext.
+
+    Polars loads the Delta Lake table lazily and executes SQL via its built-in SQL engine.
+    The table is available as 'data' in your SQL queries.
+
+    Args:
+        project_name: Project name (determines which Delta table to query)
+        query: SQL query string (must be SELECT only)
+        limit: Default row limit if not specified in query
+
+    Returns:
+        dict with: columns, data, row_count, execution_time_ms, truncated, error, engine
+    """
+    start_time = time.time()
+
+    # 1. Validate query
+    is_valid, error = validate_sql_query(query)
+    if not is_valid:
+        return {
+            "columns": [],
+            "data": [],
+            "row_count": 0,
+            "execution_time_ms": (time.time() - start_time) * 1000,
+            "truncated": False,
+            "error": error,
+            "engine": "polars"
+        }
+
+    # 2. Get Delta table path
+    delta_path = DELTA_PATHS.get(project_name)
+    if not delta_path:
+        return {
+            "columns": [],
+            "data": [],
+            "row_count": 0,
+            "execution_time_ms": (time.time() - start_time) * 1000,
+            "truncated": False,
+            "error": f"Unknown project: {project_name}",
+            "engine": "polars"
+        }
+
+    # 3. Enforce row limit
+    effective_limit = min(limit, SQL_MAX_ROWS)
+    query_with_limit = _enforce_limit(query, effective_limit)
+
+    # 4. Execute query with Polars SQLContext
+    try:
+        print(f"Executing Polars SQL query for {project_name}: {query_with_limit[:100]}...")
+
+        # Load Delta table as LazyFrame
+        lf = pl.scan_delta(delta_path, storage_options=DELTA_STORAGE_OPTIONS)
+
+        # Create SQLContext and register the table as 'data'
+        ctx = pl.SQLContext()
+        ctx.register("data", lf)
+
+        # Execute SQL query (returns LazyFrame)
+        result_lf = ctx.execute(query_with_limit)
+
+        # Collect results
+        result_df = result_lf.collect()
+
+        print(f"Polars query returned {len(result_df)} rows")
+
+        execution_time = (time.time() - start_time) * 1000
+
+        # Check if result was truncated
+        truncated = len(result_df) >= effective_limit
+
+        # Convert to list of dicts and sanitize for JSON
+        data = _sanitize_for_json(result_df.to_dicts())
+
+        return {
+            "columns": result_df.columns,
+            "data": data,
+            "row_count": len(result_df),
+            "execution_time_ms": round(execution_time, 2),
+            "truncated": truncated,
+            "error": None,
+            "engine": "polars"
+        }
+    except Exception as e:
+        error_msg = f"Query execution error: {str(e)}"
+        print(f"Polars error for {project_name}: {error_msg}")
+        return {
+            "columns": [],
+            "data": [],
+            "row_count": 0,
+            "execution_time_ms": (time.time() - start_time) * 1000,
+            "truncated": False,
+            "error": error_msg,
+            "engine": "polars"
+        }
+
+
+def get_delta_table_schema(project_name: str) -> dict:
+    """
+    Get schema and metadata for a Delta Lake table using native DuckDB.
+
+    Returns:
+        dict with: table_name, delta_path, columns (name, type, nullable),
+                   approximate_row_count, error
+    """
+    delta_path = DELTA_PATHS.get(project_name)
+    if not delta_path:
+        return {
+            "table_name": "",
+            "delta_path": "",
+            "columns": [],
+            "approximate_row_count": 0,
+            "error": f"Unknown project: {project_name}"
+        }
+
+    try:
+        # Get persistent DuckDB connection (already configured for MinIO)
+        conn = _get_duckdb_connection()
+
+        # Get schema using DESCRIBE
+        schema_query = f"DESCRIBE SELECT * FROM delta_scan('{delta_path}')"
+        schema_result = conn.execute(schema_query).fetchdf()
+
+        # Get column info from DESCRIBE result
+        columns = []
+        for _, row in schema_result.iterrows():
+            columns.append({
+                "name": row["column_name"],
+                "type": row["column_type"],
+                "nullable": row.get("null", "YES") == "YES"
+            })
+
+        # Get approximate row count
+        try:
+            count_query = f"SELECT COUNT(*) as cnt FROM delta_scan('{delta_path}')"
+            count_result = conn.execute(count_query).fetchone()
+            row_count = count_result[0] if count_result else 0
+        except Exception:
+            row_count = 0
+
+        # Extract table name from path
+        table_name = delta_path.split("/")[-1]
+
+        return {
+            "table_name": table_name,
+            "delta_path": delta_path,
+            "columns": columns,
+            "approximate_row_count": row_count,
+            "error": None
+        }
+    except Exception as e:
+        return {
+            "table_name": "",
+            "delta_path": delta_path,
+            "columns": [],
+            "approximate_row_count": 0,
+            "error": f"Failed to get schema: {str(e)}"
+        }
 
 ###---Functions----####
 #Data processing functions

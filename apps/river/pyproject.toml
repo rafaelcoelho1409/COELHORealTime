@@ -23,6 +23,8 @@ dependencies = [
     "deltalake",
     # Redis (live model caching for real-time predictions)
     "redis",
+    # DuckDB (SQL queries on Delta Lake)
+    "duckdb",
 ]
 
 [build-system]

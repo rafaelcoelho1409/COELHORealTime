@@ -240,6 +240,18 @@ apps/sklearn/
   - [ ] Kafka Producers Dashboard - messages produced per topic, producer lag, batch sizes
   - Consider using Grafana dashboard provisioning via ConfigMaps
 
+- [ ] **Add Resource Usage Overview to Grafana Dashboard** (Priority: MEDIUM)
+  - [ ] Add total CPU usage panel (sum of all coelho-realtime-* pods)
+  - [ ] Add total RAM usage panel (sum of all coelho-realtime-* pods)
+  - [ ] Add per-service breakdown table:
+    - Service name (coelho-realtime-river, coelho-realtime-sklearn, etc.)
+    - CPU usage (cores)
+    - RAM usage (MB/GB)
+    - Percentage of total
+  - [ ] Add time-series graph showing resource usage over time
+  - [ ] Add alerts for high resource consumption (>80% of limits)
+  - [ ] Place prominently in COELHORealTime Overview dashboard
+
 ### Phase 9: Data Lake & SQL Analytics (COMPLETED)
 **Goal:** Enable SQL queries on streaming data with Delta Lake
 
@@ -254,7 +266,21 @@ apps/sklearn/
 - [x] Add Spark Grafana dashboards (Performance Metrics + Structured Streaming)
 - [x] Update Sklearn to read from Delta Lake instead of parquet files
 - [x] Remove parquet saving from River service (freed from data persistence)
-- [ ] Add SQL query interface to Reflex (optional - future enhancement)
+- [x] **Add SQL query interface to Reflex** (COMPLETED)
+  - [x] Install DuckDB with Delta Lake extension
+  - [x] Install Polars with Delta Lake support (faster alternative engine)
+  - [x] Configure both engines to connect to MinIO (S3 endpoint, credentials)
+  - [x] Create new "Delta Lake SQL" tab in Reflex UI with:
+    - [x] SQL editor textarea with syntax highlighting
+    - [x] Run/Clear buttons with keyboard shortcuts
+    - [x] Results table with horizontal/vertical scrolling
+    - [x] Engine selector dropdown (Polars/DuckDB for benchmarking)
+    - [x] Query templates dropdown (per-project templates)
+    - [x] Column sorting (ascending/descending toggle)
+    - [x] Search filter for results
+    - [x] Execution time and row count display
+  - [x] Implement safety: read-only queries only (SELECT), query limits, blocked DDL/DML
+  - [x] Added SQL execution endpoints to River service (`/sql_query`, `/table_schema`)
 
 **Spark + Delta Lake Architecture:**
 ```
@@ -286,6 +312,30 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
   - [ ] Distributed training on Delta Lake data
   - [ ] Large-scale feature engineering
 
+### Phase 11: Analytics Tab (Priority: LOW - Future Enhancement)
+**Goal:** Add a fourth top-level tab for data analytics and EDA
+
+- [ ] Add "Analytics" as fourth top-level tab to all pages
+- [ ] Exploratory Data Analysis (EDA) features:
+  - [ ] Auto-generated statistics (mean, median, std, min, max, null counts)
+  - [ ] Distribution charts for numeric columns (histograms, box plots)
+  - [ ] Correlation heatmap for numeric features
+  - [ ] Missing values analysis and visualization
+  - [ ] Categorical column value counts
+- [ ] Visual Query Builder (no SQL required):
+  - [ ] Point-and-click interface to build filters
+  - [ ] Column selector with drag-and-drop
+  - [ ] Aggregation builder (GROUP BY, SUM, COUNT, AVG)
+- [ ] Custom Chart Builder:
+  - [ ] Select columns for X and Y axes
+  - [ ] Choose chart type (bar, line, scatter, pie, heatmap)
+  - [ ] Interactive Plotly visualizations
+  - [ ] Export charts as PNG/SVG
+- [ ] Data Profiling Report:
+  - [ ] One-click comprehensive data profile
+  - [ ] Data quality scores
+  - [ ] Anomaly detection in data
+
 ---
 
 ## Technical Debt & Improvements
@@ -304,6 +354,12 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
 - [ ] Add integration tests for Reflex pages
 - [ ] Add type hints throughout codebase
 - [ ] Set up pre-commit hooks (black, isort, mypy)
+- [ ] **Secure Environment Variables Handling** (Priority: HIGH)
+  - [ ] Transform all `os.environ.get(..., default)` to `os.environ[...]` (fail fast if missing)
+  - [ ] Centralize all environment variables in dedicated config modules per service
+  - [ ] Ensure no credentials are hardcoded in source code
+  - [ ] Validate required env vars at application startup
+  - [ ] Update Helm ConfigMaps/Secrets to provide all necessary env vars
 
 ### Cleanup Tasks
 - [ ] Update historical documentation in `docs/` folder:
@@ -485,7 +541,7 @@ Services Removed:
 | 7. Prometheus/Grafana | ~~HIGH~~ 95% DONE | Medium | High | None |
 | 7a. Alertmanager Notifications | ~~HIGH~~ DONE | Low | High | Phase 7 |
 | 7b. Custom App Dashboards | MEDIUM | Medium | Medium | Phase 7 |
-| 9. Delta Lake | ~~MEDIUM~~ DONE | High | Medium | MinIO |
+| 9. Delta Lake + SQL Tab | ~~MEDIUM~~ DONE | High | High | MinIO |
 | 10. Batch ML Studies | LOW | Medium | Low | Delta Lake |
 | Kafka Migration | ~~MEDIUM~~ DONE | Medium | High | None |
 
@@ -529,6 +585,19 @@ Services Removed:
 - Static Python constants mirror Kafka producer values
 - Works on fresh start with no Delta Lake data
 - "Randomize All Fields" now instant (local generation, no network calls)
+
+### Delta Lake SQL Tab (December 2025)
+- **New "Delta Lake SQL" tab** added to all pages (TFD, ETA, ECCI)
+- Dual-engine support: Polars (faster) and DuckDB for benchmarking
+- Features implemented:
+  - SQL editor with query templates per project
+  - Scrollable results table with cell borders/dividers
+  - Column sorting (ascending/descending)
+  - Search filter for results
+  - Engine selector dropdown
+  - Execution time and row count display
+- Security: Read-only queries only, DDL/DML blocked, row limits enforced
+- Tab icons added to all tabs (Incremental ML, Batch ML, Delta Lake SQL)
 
 ### Redis Live Model Cache for Real-Time Predictions (December 2025)
 - **Problem:** Predictions used MLflow's saved model, not the live training model
@@ -605,4 +674,4 @@ Services Removed:
 
 ---
 
-*Last updated: 2025-12-29 (Phase 8 removed - auto best-model approach preferred over A/B testing)*
+*Last updated: 2025-12-30 (Phase 9 completed - Delta Lake SQL Tab with Polars/DuckDB engines)*

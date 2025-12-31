@@ -4,6 +4,7 @@ from ..resources import (
     page_tabs,
     transaction_fraud_detection_form,
     transaction_fraud_detection_batch_form,
+    delta_lake_sql_tab,
     ml_training_switch
 )
 from ..state import State
@@ -23,15 +24,20 @@ def index() -> rx.Component:
         ),
         rx.box(
             rx.cond(
-                State.is_batch_ml_tab,
-                # Batch ML tab content
-                rx.vstack(
-                    transaction_fraud_detection_batch_form(),
-                    spacing = "4",
-                    width = "100%"
+                State.is_delta_lake_sql_tab,
+                # Delta Lake SQL tab content
+                delta_lake_sql_tab(),
+                rx.cond(
+                    State.is_batch_ml_tab,
+                    # Batch ML tab content
+                    rx.vstack(
+                        transaction_fraud_detection_batch_form(),
+                        spacing = "4",
+                        width = "100%"
+                    ),
+                    # Incremental ML tab content - form includes ML training switch
+                    transaction_fraud_detection_form(MODEL_KEY, PROJECT_NAME),
                 ),
-                # Incremental ML tab content - form includes ML training switch
-                transaction_fraud_detection_form(MODEL_KEY, PROJECT_NAME),
             ),
             padding = "2em",
             width = "100%"

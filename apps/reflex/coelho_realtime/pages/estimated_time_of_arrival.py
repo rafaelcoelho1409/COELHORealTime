@@ -3,7 +3,8 @@ from ..resources import (
     coelho_realtime_navbar,
     page_tabs,
     ml_training_switch,
-    estimated_time_of_arrival_form
+    estimated_time_of_arrival_form,
+    delta_lake_sql_tab
 )
 from ..state import State
 
@@ -21,8 +22,13 @@ def index() -> rx.Component:
             width = "100%"
         ),
         rx.box(
-            # Form includes ML training switch in left column
-            estimated_time_of_arrival_form(MODEL_KEY, PROJECT_NAME),
+            rx.cond(
+                State.is_delta_lake_sql_tab,
+                # Delta Lake SQL tab content
+                delta_lake_sql_tab(),
+                # Incremental ML tab content (ETA only has incremental ML)
+                estimated_time_of_arrival_form(MODEL_KEY, PROJECT_NAME),
+            ),
             padding = "2em",
             width = "100%"
         ),

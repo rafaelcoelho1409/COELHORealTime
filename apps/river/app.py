@@ -39,6 +39,11 @@ from functions import (
     # Redis live model cache (real-time predictions during training)
     load_live_model_from_redis,
     is_training_active,
+    # SQL query execution (Delta Lake SQL tab) - DuckDB and Polars engines
+    execute_delta_sql,
+    execute_delta_sql_polars,
+    get_delta_table_schema,
+    SQL_DEFAULT_LIMIT,
 )
 
 
@@ -285,6 +290,19 @@ class MLflowMetricsRequest(BaseModel):
 class ModelAvailabilityRequest(BaseModel):
     project_name: str
     model_name: str
+
+
+class SQLQueryRequest(BaseModel):
+    """Request model for SQL queries against Delta Lake."""
+    project_name: str
+    query: str
+    limit: int = SQL_DEFAULT_LIMIT
+    engine: str = "polars"  # "duckdb" or "polars" - default to polars for speed
+
+
+class TableSchemaRequest(BaseModel):
+    """Request model for table schema."""
+    project_name: str
 
 
 # =============================================================================
@@ -974,3 +992,116 @@ async def check_model_available(request: ModelAvailabilityRequest):
             "message": f"Error checking model: {str(e)}",
             "experiment_url": None
         }
+
+
+# =============================================================================
+# Delta Lake SQL Query Endpoints
+# =============================================================================
+@app.post("/sql_query")
+async def sql_query(request: SQLQueryRequest):
+    """
+    Execute a SQL query against Delta Lake via DuckDB or Polars.
+
+    The query runs against the Delta Lake table for the specified project.
+    The table is accessible as 'data' in your SQL queries.
+
+    Example queries:
+    - SELECT * FROM data LIMIT 100
+    - SELECT COUNT(*) FROM data WHERE amount > 1000
+    - SELECT merchant_id, AVG(amount) FROM data GROUP BY merchant_id
+
+    Engines:
+    - polars: Fast, uses Polars SQLContext (default)
+    - duckdb: Uses DuckDB with native Delta extension
+
+    Security:
+    - Only SELECT queries are allowed
+    - DDL/DML operations are blocked
+    - Row limits are enforced
+    """
+    try:
+        # Debug: log the received engine parameter
+        print(f"SQL Query received - project: {request.project_name}, engine: {request.engine}, query: {request.query[:50]}...")
+
+        # Select the appropriate execution function based on engine
+        if request.engine == "duckdb":
+            execute_fn = execute_delta_sql
+        else:
+            execute_fn = execute_delta_sql_polars
+
+        # Run the query in a thread pool to avoid blocking
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                execute_fn,
+                request.project_name,
+                request.query,
+                request.limit
+            ),
+            timeout=60.0  # 60 second timeout for complex queries
+        )
+
+        # Check for errors
+        if result.get("error"):
+            raise HTTPException(
+                status_code=400,
+                detail=result["error"]
+            )
+
+        return result
+
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail="Query timed out after 60 seconds. Try a simpler query or add LIMIT."
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error executing SQL query: {e}", file=sys.stderr)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Query execution failed: {str(e)}"
+        )
+
+
+@app.post("/table_schema")
+async def table_schema(request: TableSchemaRequest):
+    """
+    Get schema and metadata for a Delta Lake table.
+
+    Returns:
+    - table_name: Name of the Delta Lake table
+    - delta_path: S3 path to the Delta Lake table
+    - columns: List of column definitions (name, type, nullable)
+    - approximate_row_count: Approximate number of rows in the table
+    """
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                get_delta_table_schema,
+                request.project_name
+            ),
+            timeout=30.0
+        )
+
+        if result.get("error"):
+            raise HTTPException(
+                status_code=400,
+                detail=result["error"]
+            )
+
+        return result
+
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail="Schema query timed out after 30 seconds."
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error getting table schema: {e}", file=sys.stderr)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get table schema: {str(e)}"
+        )
