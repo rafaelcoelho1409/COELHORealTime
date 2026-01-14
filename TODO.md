@@ -424,6 +424,103 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
 - [ ] Optimize Kafka consumer batch sizes
 - [ ] Add caching for expensive computations
 - [ ] Consider Redis for Reflex state (already configured)
+
+#### Reflex Performance Optimization (Priority: HIGH)
+**Problem:** Large `resources.py` file (~3000 lines) causing slow page loads
+
+**1. Split resources.py by Project** (High Impact)
+- [ ] Create `coelho_realtime/components/` directory structure:
+  ```
+  components/
+  ├── __init__.py
+  ├── common.py          # Shared components (metric_card, badges, dialogs)
+  ├── tfd_components.py  # TFD-specific components
+  ├── eta_components.py  # ETA-specific components
+  ├── ecci_components.py # ECCI-specific components
+  └── sf_components.py   # Sales Forecasting components
+  ```
+- [ ] Move project-specific functions to respective files
+- [ ] Update imports in pages and main app
+
+**2. Memoize Plotly Figures** (High Impact)
+- [ ] Add caching to `tfd_dashboard_figures` computed var
+- [ ] Add caching to `eta_dashboard_figures` computed var
+- [ ] Only regenerate figures when underlying metrics change
+- [ ] Use hash of metric values as cache key
+
+**3. Use `@rx.cached_var` for Expensive Computations** (Medium Impact)
+- [ ] Convert `tfd_dashboard_figures` to `@rx.cached_var`
+- [ ] Convert `eta_dashboard_figures` to `@rx.cached_var`
+- [ ] Convert `tfd_metrics_raw` to `@rx.cached_var`
+- [ ] Convert `eta_metrics_raw` to `@rx.cached_var`
+
+**4. Lazy Page Loading** (Medium Impact)
+- [ ] Wrap heavy pages with `rx.lazy()`:
+  ```python
+  rx.lazy(lambda: estimated_time_of_arrival_page())
+  rx.lazy(lambda: transaction_fraud_detection_page())
+  ```
+- [ ] Only load page components when navigated to
+
+**5. Split State Class into Mixins** (Medium Impact)
+- [ ] Create separate state classes per project:
+  ```python
+  class TFDState(rx.State): ...
+  class ETAState(rx.State): ...
+  class ECCIState(rx.State): ...
+  class State(TFDState, ETAState, ECCIState): pass
+  ```
+- [ ] Reduces state recalculation scope
+
+**6. Defer Heavy Imports** (Low Impact)
+- [ ] Import plotly.graph_objects only when needed
+- [ ] Move `go.Figure()` creation inside functions
+
+**7. Migrate from stdlib json to orjson** (High Impact)
+- [ ] Replace `import json` with `import orjson` across all apps:
+  - [ ] `apps/river/app.py` and `apps/river/functions.py`
+  - [ ] `apps/sklearn/app.py` and `apps/sklearn/functions.py`
+  - [ ] `apps/reflex/coelho_realtime/state.py`
+  - [ ] `apps/kafka-producers/*.py`
+- [ ] Benefits: 3-10x faster JSON parsing/serialization
+- [ ] Note: orjson returns bytes, use `.decode()` or `orjson.loads()` appropriately
+
+**8. Split state.py into State Modules** (High Impact)
+- [ ] Create `coelho_realtime/state/` directory structure:
+  ```
+  state/
+  ├── __init__.py        # Exports combined State class
+  ├── base.py            # Base state vars and common methods
+  ├── tfd_state.py       # TFD-specific state (forms, metrics, predictions)
+  ├── eta_state.py       # ETA-specific state
+  ├── ecci_state.py      # ECCI-specific state
+  └── sql_state.py       # Delta Lake SQL tab state
+  ```
+- [ ] Use Reflex substates or mixins pattern
+- [ ] Reduces state recalculation scope per page
+
+**9. Optimize Form Field Loading** (High Impact)
+- [ ] Current issue: Form fields slow to display, sometimes not rendered
+- [ ] Potential solutions:
+  - [ ] Use orjson for faster JSON parsing of API responses
+  - [ ] Pre-serialize dropdown options at River startup
+  - [ ] Use Reflex `rx.memo` for form field components
+  - [ ] Implement client-side caching of dropdown options
+  - [ ] Consider WebSocket for real-time form data instead of HTTP
+- [ ] Investigate: Are computed vars blocking form rendering?
+
+**10. Combined Page Initialization Endpoint** (Implemented - Testing)
+- [x] Created `/page_init` endpoint in River (single HTTP call)
+- [x] Replaces 4-5 separate calls: model_available, mlflow_metrics, initial_sample, dropdown_options
+- [x] Added `init_page()` method in Reflex state
+- [x] Updated all pages to use combined init
+- [ ] Test and verify performance improvement
+
+**Quick Wins (No Architecture Change):**
+- [ ] Profile actual bottlenecks with timing measurements
+- [ ] Reduce Plotly figure complexity (simpler configs render faster)
+- [ ] Consider using `rx.memo` for pure components
+- [ ] Add HTTP connection pooling (implemented in utils.py - testing)
 - [x] **Optimize River/Sklearn Docker builds with UV** (COMPLETED)
   - Migrated from pip to UV package manager (10-100x faster installs)
   - Multi-stage Docker builds: builder stage installs deps, runtime copies venv

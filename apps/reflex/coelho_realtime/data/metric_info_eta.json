@@ -1,0 +1,87 @@
+{
+  "project": "Estimated Time of Arrival",
+  "model": "ARFRegressor (Adaptive Random Forest)",
+  "task": "Regression",
+  "metrics": {
+    "mae": {
+      "name": "Mean Absolute Error",
+      "formula": "$$\\text{MAE} = \\frac{1}{n}\\sum_{i=1}^{n}|y_i - \\hat{y}_i|$$",
+      "explanation": "Average of absolute differences between predicted and actual travel times. Same units as target (seconds).",
+      "context": "**Primary metric for ETA prediction** (used in 33% of academic studies). Most interpretable - a MAE of 60 means predictions are off by 60 seconds on average. Not sensitive to outliers. **Lower is better**.",
+      "range": "0 to infinity",
+      "optimal": "Lower is better"
+    },
+    "rmse": {
+      "name": "Root Mean Squared Error",
+      "formula": "$$\\text{RMSE} = \\sqrt{\\frac{1}{n}\\sum_{i=1}^{n}(y_i - \\hat{y}_i)^2}$$",
+      "explanation": "Square root of the average squared differences. Penalizes large errors more heavily than MAE.",
+      "context": "**Penalizes late arrivals more than early arrivals** if they're large errors. Useful when big delays are especially problematic (e.g., time-sensitive deliveries). RMSE > MAE indicates presence of outliers. **Lower is better**.",
+      "range": "0 to infinity",
+      "optimal": "Lower is better"
+    },
+    "mape": {
+      "name": "Mean Absolute Percentage Error",
+      "formula": "$$\\text{MAPE} = \\frac{100\\%}{n}\\sum_{i=1}^{n}\\left|\\frac{y_i - \\hat{y}_i}{y_i}\\right|$$",
+      "explanation": "Average percentage error relative to actual values. Scale-independent metric.",
+      "context": "**Allows comparison across different trip lengths**. A 10% MAPE means predictions are 10% off on average. Useful for comparing model performance across short (5 min) and long (2 hour) trips. Warning: undefined when y=0. **Lower is better**.",
+      "range": "0 to infinity (%)",
+      "optimal": "Lower is better"
+    },
+    "r2": {
+      "name": "R-Squared (Coefficient of Determination)",
+      "formula": "$$R^2 = 1 - \\frac{\\sum_{i=1}^{n}(y_i - \\hat{y}_i)^2}{\\sum_{i=1}^{n}(y_i - \\bar{y})^2} = 1 - \\frac{SS_{res}}{SS_{tot}}$$",
+      "explanation": "Proportion of variance in travel time explained by the model. Compares model to a baseline that always predicts the mean.",
+      "context": "**Goodness of fit measure**. R²=1 means perfect predictions, R²=0 means model is no better than predicting the mean, R²<0 means model is worse than the mean. For ETA, R²>0.8 is typically considered good. **Higher is better**.",
+      "range": "-infinity to 1",
+      "optimal": "Higher is better (closer to 1)"
+    },
+    "smape": {
+      "name": "Symmetric Mean Absolute Percentage Error",
+      "formula": "$$\\text{SMAPE} = \\frac{100\\%}{n}\\sum_{i=1}^{n}\\frac{|y_i - \\hat{y}_i|}{(|y_i| + |\\hat{y}_i|)/2}$$",
+      "explanation": "Symmetric version of MAPE that treats over-predictions and under-predictions equally.",
+      "context": "**More robust than MAPE** - bounded between 0-200% and handles cases where actual values are small. Less biased toward under-predictions. Preferred for forecasting applications. **Lower is better**.",
+      "range": "0 to 200%",
+      "optimal": "Lower is better"
+    },
+    "mse": {
+      "name": "Mean Squared Error",
+      "formula": "$$\\text{MSE} = \\frac{1}{n}\\sum_{i=1}^{n}(y_i - \\hat{y}_i)^2$$",
+      "explanation": "Average of squared differences between predicted and actual values. Units are squared (seconds²).",
+      "context": "**Used in optimization algorithms** as the loss function (differentiable). Heavily penalizes large errors. Less interpretable than MAE/RMSE since units are squared. RMSE = sqrt(MSE). **Lower is better**.",
+      "range": "0 to infinity",
+      "optimal": "Lower is better"
+    },
+    "rmsle": {
+      "name": "Root Mean Squared Logarithmic Error",
+      "formula": "$$\\text{RMSLE} = \\sqrt{\\frac{1}{n}\\sum_{i=1}^{n}(\\log(y_i + 1) - \\log(\\hat{y}_i + 1))^2}$$",
+      "explanation": "RMSE on log-transformed values. Penalizes under-predictions more than over-predictions.",
+      "context": "**Useful when relative errors matter more than absolute**. Less sensitive to large absolute errors on long trips. Penalizes predicting too short more than too long (under-estimation is worse). Cannot handle negative predictions. **Lower is better**.",
+      "range": "0 to infinity",
+      "optimal": "Lower is better"
+    },
+    "rolling_mae": {
+      "name": "Rolling MAE",
+      "formula": "$$\\text{Rolling MAE}_t = \\frac{1}{w}\\sum_{i=t-w}^{t}|y_i - \\hat{y}_i|$$",
+      "explanation": "MAE calculated over a sliding window of the most recent samples. Used to detect concept drift.",
+      "context": "With **window_size=1000**, monitors recent model accuracy. A **sudden increase** indicates **concept drift** - traffic patterns may have changed (rush hour, weather, events). Essential for **real-time ETA** where conditions constantly change. **Lower and stable is better**.",
+      "range": "0 to infinity",
+      "optimal": "Lower and stable is better"
+    },
+    "rolling_rmse": {
+      "name": "Rolling RMSE",
+      "formula": "$$\\text{Rolling RMSE}_t = \\sqrt{\\frac{1}{w}\\sum_{i=t-w}^{t}(y_i - \\hat{y}_i)^2}$$",
+      "explanation": "RMSE calculated over a sliding window. Detects drift in large prediction errors.",
+      "context": "Monitors for **sudden large errors** in recent predictions. If Rolling RMSE spikes while Rolling MAE is stable, it indicates **occasional large outliers** (accidents, unexpected delays). Helps identify when model needs retraining. **Lower and stable is better**.",
+      "range": "0 to infinity",
+      "optimal": "Lower and stable is better"
+    },
+    "time_rolling_mae": {
+      "name": "Time Rolling MAE",
+      "formula": "$$\\text{TimeRolling MAE}_t = \\frac{1}{|W_t|}\\sum_{i \\in W_t}|y_i - \\hat{y}_i|, \\quad W_t = \\{i : t_i \\in [t - \\Delta t, t]\\}$$",
+      "explanation": "MAE over a time-based window (last 5 minutes). Sample count varies based on traffic volume.",
+      "context": "With **period=5 minutes**, shows model accuracy for **recent real-world time**. Unlike sample-based rolling, adapts to varying traffic volumes. Sudden spike means conditions changed in the last 5 minutes. **Lower and stable is better**.",
+      "range": "0 to infinity",
+      "optimal": "Lower and stable is better"
+    }
+  }
+}

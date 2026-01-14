@@ -32,12 +32,8 @@ def index() -> rx.Component:
             padding = "2em",
             width = "100%"
         ),
-        # On mount: set page context, load sample data, and check model availability
-        on_mount = [
-            State.set_current_page_model(MODEL_KEY),
-            State.update_sample(PROJECT_NAME),
-            State.check_incremental_model_available(PROJECT_NAME),
-        ],
+        # On mount: combined page initialization (single HTTP call)
+        on_mount = State.init_page(MODEL_KEY, PROJECT_NAME),
         # On unmount: cleanup when leaving the page
         on_unmount = State.cleanup_on_page_leave(PROJECT_NAME),
         spacing = "0",

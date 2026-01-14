@@ -1,5 +1,6 @@
 from river import (
-    metrics
+    metrics,
+    utils,
 )
 import pickle
 import json
@@ -7,6 +8,7 @@ import os
 import signal
 import tempfile
 import mlflow
+import datetime as dt
 from functions import (
     process_sample,
     load_or_create_model,
@@ -56,34 +58,76 @@ def main():
     mlflow.set_tracking_uri(f"http://{MLFLOW_HOST}:5000")
     mlflow.set_experiment(PROJECT_NAME)
     print(f"MLflow experiment '{PROJECT_NAME}' set successfully")
-
     # Load or create model and encoders from MLflow
     print("Loading model from MLflow (best historical model)")
     encoders = load_or_create_encoders(PROJECT_NAME, "river")
     model = load_or_create_model(PROJECT_NAME, MODEL_NAME)
-
     print("Encoders loaded")
     print(f"Model loaded: {model.__class__.__name__}")
-
     # Load last processed Kafka offset from MLflow
     last_offset = load_kafka_offset_from_mlflow(PROJECT_NAME)
-
     # Create consumer with starting offset
-    consumer = create_consumer(PROJECT_NAME, start_offset=last_offset)
+    consumer = create_consumer(PROJECT_NAME, start_offset = last_offset)
     print("Consumer started. Waiting for transactions...")
     # Track current offset for persistence
     current_offset = last_offset if last_offset is not None else -1
-    regression_metrics = [
-        'MAE',
-        'MAPE',
-        'MSE',
-        'R2',
-        'RMSE',
-        'RMSLE',
-        'SMAPE',
-    ]
-    regression_metrics_dict = {
-        x: getattr(metrics, x)() for x in regression_metrics
+    # -----------------------------------------------------------------------------
+    # REGRESSION METRICS (use predict_one - continuous values)
+    # -----------------------------------------------------------------------------
+    regression_metric_classes = {
+        # PRIMARY METRICS (most important for ETA - used in 15-23% of studies)
+        "MAE": metrics.MAE,
+        "RMSE": metrics.RMSE,
+        "MAPE": metrics.MAPE,
+        # SECONDARY METRICS (additional insights)
+        "R2": metrics.R2,
+        "SMAPE": metrics.SMAPE,
+        "MSE": metrics.MSE,
+        "RMSLE": metrics.RMSLE,
+    }
+    regression_metric_args = {
+        "MAE": {},
+        "RMSE": {},
+        "MAPE": {},
+        "R2": {},
+        "SMAPE": {},
+        "MSE": {},
+        "RMSLE": {},
+    }
+    # -----------------------------------------------------------------------------
+    # ROLLING METRICS (for concept drift detection)
+    # -----------------------------------------------------------------------------
+    rolling_metric_classes = {
+        "RollingMAE": utils.Rolling,
+        "RollingRMSE": utils.Rolling,
+    }
+    rolling_metric_args = {
+        "RollingMAE": {"obj": metrics.MAE(), "window_size": 1000},
+        "RollingRMSE": {"obj": metrics.RMSE(), "window_size": 1000},
+    }
+    # -----------------------------------------------------------------------------
+    # TIME ROLLING METRICS 
+    # -----------------------------------------------------------------------------
+    time_rolling_metric_classes = {
+        "TimeRollingMAE": utils.TimeRolling,
+    }
+    time_rolling_metric_args = {
+        "TimeRollingMAE": {"obj": metrics.MAE(), "period": dt.timedelta(minutes=5)},
+    }
+    # =============================================================================
+    # INSTANTIATE ALL METRICS
+    # =============================================================================
+    regression_metrics = {
+        name: regression_metric_classes[name](**regression_metric_args[name])
+        for name in regression_metric_classes
+    }
+    rolling_metrics = {
+        name: rolling_metric_classes[name](**rolling_metric_args[name])
+        for name in rolling_metric_classes
+    }
+    time_rolling_metrics = {
+        name: time_rolling_metric_classes[name](**time_rolling_metric_args[name])
+        for name in time_rolling_metric_classes
     }
     # Batch sizes for different operations (tuned for performance)
     METRICS_LOG_INTERVAL = 100      # Log metrics to MLflow every N messages
@@ -98,14 +142,17 @@ def main():
             print(f"Loaded baseline metrics from best run: {best_run_id}")
         except Exception as e:
             print(f"Could not get baseline metrics from best run: {e}")
-    print(f"Starting MLflow run with model: {model.__class__.__name__}")
-    with mlflow.start_run(run_name = model.__class__.__name__):
+    # Use MODEL_NAME for run name (not model.__class__.__name__) to maintain
+    # compatibility with MLflow queries that filter by run name.
+    print(f"Starting MLflow run with model: {MODEL_NAME}")
+    with mlflow.start_run(run_name = MODEL_NAME):
         # Log traceability tags for model lineage
         if best_run_id:
             mlflow.set_tag("training_mode", "continued")
             mlflow.set_tag("continued_from_run", best_run_id)
-            # Log all baseline metrics as tags
-            for metric_name in regression_metrics:
+            # Log all baseline metrics as tags (regression, rolling, time_rolling)
+            all_metric_names = list(regression_metrics.keys()) + list(rolling_metrics.keys()) + list(time_rolling_metrics.keys())
+            for metric_name in all_metric_names:
                 if metric_name in baseline_metrics:
                     mlflow.set_tag(f"baseline_{metric_name}", f"{baseline_metrics[metric_name]:.4f}")
             print(f"Traceability tags set: continued_from_run={best_run_id}")
@@ -148,26 +195,41 @@ def main():
                         encoders,
                         PROJECT_NAME)
                     y = eta_event['simulated_actual_travel_time_seconds']
+                    timestamp = dt.datetime.strptime(eta_event['timestamp'], "%Y-%m-%dT%H:%M:%S.%f%z")
                     # Update the model
                     model.learn_one(x, y)
                     prediction = model.predict_one(x)
                     # Track current offset for persistence
                     current_offset = message.offset
-                    # Update metrics (once per message, not twice)
-                    for metric in regression_metrics:
-                        try:
-                            regression_metrics_dict[metric].update(y, prediction)
-                        except Exception as e:
-                            print(f"Error updating metric {metric}: {str(e)}")
+                    # Update metrics
+                    if prediction is not None:
+                        for metric in regression_metrics.values():
+                            try:
+                                metric.update(y, prediction)
+                            except Exception as e:
+                                print(f"Error updating metric {metric}: {str(e)}")
+                        for metric in rolling_metrics.values():
+                            try:
+                                metric.update(y, prediction)
+                            except Exception as e:
+                                print(f"Error updating metric {metric}: {str(e)}")
+                        for metric in time_rolling_metrics.values():
+                            try:
+                                metric.update(y, prediction, t = timestamp)
+                            except Exception as e:
+                                print(f"Error updating metric {metric}: {str(e)}")
                     # Log metrics to MLflow periodically (batched for efficiency)
                     if message.offset % METRICS_LOG_INTERVAL == 0:
                         print(f"Processed {message.offset} messages")
                         # Batch log all metrics in one call (reduces HTTP overhead)
-                        metrics_to_log = {
-                            metric: regression_metrics_dict[metric].get()
-                            for metric in regression_metrics
-                        }
-                        mlflow.log_metrics(metrics_to_log, step=message.offset)
+                        metrics_to_log = {}
+                        for name, metric in regression_metrics.items():
+                            metrics_to_log[name] = metric.get()
+                        for name, metric in rolling_metrics.items():
+                            metrics_to_log[name] = metric.get()
+                        for name, metric in time_rolling_metrics.items():
+                            metrics_to_log[name] = metric.get()
+                        mlflow.log_metrics(metrics_to_log, step = message.offset)
                     # Save live model to Redis for real-time predictions
                     if message.offset % REDIS_CACHE_INTERVAL == 0:
                         save_live_model_to_redis(PROJECT_NAME, MODEL_NAME, model, encoders)

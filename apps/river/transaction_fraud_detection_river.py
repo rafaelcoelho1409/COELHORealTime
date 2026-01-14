@@ -57,18 +57,14 @@ def main():
     mlflow.set_tracking_uri(f"http://{MLFLOW_HOST}:5000")
     mlflow.set_experiment(PROJECT_NAME)
     print(f"MLflow experiment '{PROJECT_NAME}' set successfully")
-
     # Load or create model and encoders from MLflow
     print("Loading model from MLflow (best historical model)")
     encoders = load_or_create_encoders(PROJECT_NAME, "river")
     model = load_or_create_model(PROJECT_NAME, MODEL_NAME)
-
     print("Encoders loaded")
     print(f"Model loaded: {model.__class__.__name__}")
-
     # Load last processed Kafka offset from MLflow
     last_offset = load_kafka_offset_from_mlflow(PROJECT_NAME)
-
     # Create consumer with starting offset
     consumer = create_consumer(PROJECT_NAME, start_offset=last_offset)
     print("Consumer started. Waiting for transactions...")
@@ -83,7 +79,6 @@ def main():
     #     evaluation-metrics-for-real-time-financial-fraud-detection-ml-models.html
     #   - F-Beta Score Guide: https://machinelearningmastery.com/fbeta-measure-for-ml
     # =========================================================================
-
     # Shared confusion matrix for efficiency (metrics share TP/TN/FP/FN counts)
     shared_cm = metrics.ConfusionMatrix()
     # -----------------------------------------------------------------------------

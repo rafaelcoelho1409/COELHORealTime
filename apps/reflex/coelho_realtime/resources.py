@@ -1483,6 +1483,17 @@ def mlflow_run_info_badge(project_name: str) -> rx.Component:
     """Display MLflow experiment run info (run_id, status, start_time) for a project."""
     run_info = State.mlflow_run_info[project_name]
     return rx.hstack(
+        # MLflow source badge
+        rx.badge(
+            rx.hstack(
+                rx.icon("flask-conical", size = 12),
+                rx.text("MLflow", size = "1", weight = "bold"),
+                spacing = "1",
+                align = "center"
+            ),
+            color_scheme = "purple",
+            variant = "soft"
+        ),
         # Status badge with conditional styling
         rx.cond(
             run_info["is_live"],
@@ -1593,6 +1604,64 @@ def heatmap_card_with_info(plotly_key: str, metric_key: str) -> rx.Component:
         ),
         size="1",
         width="50%"
+    )
+
+
+## ETA - CARD HELPER FUNCTIONS
+def eta_kpi_card_with_info(plotly_key: str, metric_key: str) -> rx.Component:
+    """Create a KPI card with Plotly chart and info button for ETA."""
+    return rx.card(
+        rx.vstack(
+            rx.hstack(
+                rx.spacer(),
+                metric_info_dialog(metric_key, "eta"),
+                width="100%",
+                justify="end"
+            ),
+            rx.plotly(data=State.eta_dashboard_figures[plotly_key], width="100%"),
+            spacing="0",
+            width="100%"
+        ),
+        size="1"
+    )
+
+
+def eta_gauge_card_with_info(plotly_key: str, metric_key: str) -> rx.Component:
+    """Create a gauge card with Plotly chart and info button for ETA."""
+    return rx.card(
+        rx.vstack(
+            rx.hstack(
+                rx.spacer(),
+                metric_info_dialog(metric_key, "eta"),
+                width="100%",
+                justify="end"
+            ),
+            rx.plotly(data=State.eta_dashboard_figures[plotly_key], width="100%"),
+            spacing="0",
+            width="100%"
+        ),
+        size="1",
+        width="50%"
+    )
+
+
+def eta_metric_card(label: str, value: str, metric_key: str) -> rx.Component:
+    """Create a metric card with info button for ETA."""
+    return rx.card(
+        rx.vstack(
+            rx.hstack(
+                rx.text(label, size="2", weight="bold", color="gray"),
+                rx.spacer(),
+                metric_info_dialog(metric_key, "eta"),
+                width="100%",
+                align="center"
+            ),
+            rx.text(value, size="5", weight="bold"),
+            spacing="1",
+            align="center",
+            width="100%"
+        ),
+        size="1"
     )
 
 
@@ -2726,6 +2795,8 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
                                     spacing = "2",
                                     align_items = "center"
                                 ),
+                                # MLflow run info (LIVE/FINISHED status)
+                                mlflow_run_info_badge("Estimated Time of Arrival"),
                                 rx.cond(
                                     State.eta_prediction_show,
                                     # Show prediction results when available
@@ -2821,25 +2892,48 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
 
 
 def estimated_time_of_arrival_metrics() -> rx.Component:
-    """Display MLflow regression metrics for Estimated Time of Arrival as individual cards."""
+    """Display MLflow regression metrics for ETA with Plotly dashboard layout."""
     return rx.vstack(
         # Run info badge
         mlflow_run_info_badge("Estimated Time of Arrival"),
-        # Metrics grid
+        # ROW 1: KPI Indicators (primary metrics with delta from baseline)
         rx.grid(
-            metric_card("MAE", State.eta_metrics["mae"]),
-            metric_card("MAPE", State.eta_metrics["mape"]),
-            metric_card("MSE", State.eta_metrics["mse"]),
-            metric_card("R²", State.eta_metrics["r2"]),
-            metric_card("RMSE", State.eta_metrics["rmse"]),
-            metric_card("RMSLE", State.eta_metrics["rmsle"]),
-            metric_card("SMAPE", State.eta_metrics["smape"]),
-            columns = "7",
-            spacing = "2",
-            width = "100%"
+            eta_kpi_card_with_info("kpi_mae", "mae"),
+            eta_kpi_card_with_info("kpi_rmse", "rmse"),
+            eta_kpi_card_with_info("kpi_r2", "r2"),
+            eta_kpi_card_with_info("kpi_rolling_mae", "rolling_mae"),
+            columns="4",
+            spacing="2",
+            width="100%"
         ),
-        spacing = "3",
-        width = "100%"
+        # ROW 2: Percentage & Secondary metrics (text cards with info buttons)
+        rx.grid(
+            eta_metric_card("MAPE", State.eta_metrics["mape"], "mape"),
+            eta_metric_card("SMAPE", State.eta_metrics["smape"], "smape"),
+            eta_metric_card("MSE", State.eta_metrics["mse"], "mse"),
+            eta_metric_card("RMSLE", State.eta_metrics["rmsle"], "rmsle"),
+            columns="4",
+            spacing="2",
+            width="100%"
+        ),
+        # ROW 3: Drift Detection (rolling metrics grouped)
+        rx.grid(
+            eta_metric_card("Rolling MAE", State.eta_metrics["rolling_mae"], "rolling_mae"),
+            eta_metric_card("Rolling RMSE", State.eta_metrics["rolling_rmse"], "rolling_rmse"),
+            eta_metric_card("Time Rolling MAE", State.eta_metrics["time_rolling_mae"], "time_rolling_mae"),
+            columns="3",
+            spacing="2",
+            width="100%"
+        ),
+        # ROW 4: Gauges
+        rx.hstack(
+            eta_gauge_card_with_info("gauge_r2", "r2"),
+            eta_gauge_card_with_info("gauge_mape", "mape"),
+            spacing="2",
+            width="100%"
+        ),
+        spacing="3",
+        width="100%"
     )
 
 

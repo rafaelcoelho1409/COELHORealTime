@@ -29,7 +29,7 @@ def load_metric_info(project_key: str) -> dict:
 # Load metric info at module startup
 METRIC_INFO = {
     "tfd": load_metric_info("tfd"),
-    # Future: "eta": load_metric_info("eta"),
+    "eta": load_metric_info("eta"),
     # Future: "ecci": load_metric_info("ecci"),
 }
 
@@ -942,7 +942,8 @@ class State(rx.State):
         if not isinstance(metrics, dict):
             return {
                 "mae": "0.00", "mape": "0.00", "mse": "0.00", "r2": "0.00",
-                "rmse": "0.00", "rmsle": "0.00", "smape": "0.00"
+                "rmse": "0.00", "rmsle": "0.00", "smape": "0.00",
+                "rolling_mae": "0.00", "rolling_rmse": "0.00", "time_rolling_mae": "0.00"
             }
         return {
             "mae": f"{metrics.get('metrics.MAE', 0):.2f}",
@@ -952,6 +953,160 @@ class State(rx.State):
             "rmse": f"{metrics.get('metrics.RMSE', 0):.2f}",
             "rmsle": f"{metrics.get('metrics.RMSLE', 0):.2f}",
             "smape": f"{metrics.get('metrics.SMAPE', 0):.2f}",
+            "rolling_mae": f"{metrics.get('metrics.RollingMAE', 0):.2f}",
+            "rolling_rmse": f"{metrics.get('metrics.RollingRMSE', 0):.2f}",
+            "time_rolling_mae": f"{metrics.get('metrics.TimeRollingMAE', 0):.2f}",
+        }
+
+    @rx.var
+    def eta_metrics_raw(self) -> dict[str, float]:
+        """Get raw ETA metrics as floats for dashboard calculations."""
+        metrics = self.mlflow_metrics.get("Estimated Time of Arrival", {})
+        if not isinstance(metrics, dict):
+            return {
+                "mae": 0, "mape": 0, "mse": 0, "r2": 0, "rmse": 0, "rmsle": 0, "smape": 0,
+                "rolling_mae": 0, "rolling_rmse": 0, "time_rolling_mae": 0
+            }
+        return {
+            "mae": metrics.get("metrics.MAE", 0),
+            "mape": metrics.get("metrics.MAPE", 0),
+            "mse": metrics.get("metrics.MSE", 0),
+            "r2": metrics.get("metrics.R2", 0),
+            "rmse": metrics.get("metrics.RMSE", 0),
+            "rmsle": metrics.get("metrics.RMSLE", 0),
+            "smape": metrics.get("metrics.SMAPE", 0),
+            "rolling_mae": metrics.get("metrics.RollingMAE", 0),
+            "rolling_rmse": metrics.get("metrics.RollingRMSE", 0),
+            "time_rolling_mae": metrics.get("metrics.TimeRollingMAE", 0),
+        }
+
+    @rx.var
+    def eta_dashboard_figures(self) -> dict:
+        """Generate all ETA dashboard Plotly figures (KPI indicators, gauges)."""
+        raw = self.eta_metrics_raw
+        mlflow_data = self.mlflow_metrics.get("Estimated Time of Arrival", {})
+
+        # Extract baseline metrics for delta calculation
+        baseline = {
+            "mae": float(mlflow_data.get("baseline_MAE", 0) or 0),
+            "rmse": float(mlflow_data.get("baseline_RMSE", 0) or 0),
+            "r2": float(mlflow_data.get("baseline_R2", 0) or 0),
+            "rolling_mae": float(mlflow_data.get("baseline_RollingMAE", 0) or 0),
+        }
+
+        def create_kpi_regression(value: float, title: str, unit: str = "s",
+                                   baseline_val: float = 0, lower_is_better: bool = True) -> go.Figure:
+            """Create KPI indicator for regression metrics with delta from baseline."""
+            # Color coding based on metric type
+            if lower_is_better:
+                # For MAE, RMSE, MAPE - lower is better
+                if value <= 30:
+                    color = "#3b82f6"  # blue - excellent
+                elif value <= 60:
+                    color = "#22c55e"  # green - good
+                elif value <= 120:
+                    color = "#eab308"  # yellow - fair
+                else:
+                    color = "#ef4444"  # red - poor
+            else:
+                # For R² - higher is better
+                if value >= 0.9:
+                    color = "#3b82f6"  # blue - excellent
+                elif value >= 0.7:
+                    color = "#22c55e"  # green - good
+                elif value >= 0.5:
+                    color = "#eab308"  # yellow - fair
+                else:
+                    color = "#ef4444"  # red - poor
+
+            # Configure delta if baseline exists
+            delta_config = None
+            if baseline_val > 0:
+                delta_config = {
+                    "reference": baseline_val,
+                    "relative": True,
+                    "valueformat": ".1%",
+                    # For lower_is_better metrics, decreasing (negative delta) is good
+                    "increasing": {"color": "#ef4444" if lower_is_better else "#22c55e"},
+                    "decreasing": {"color": "#22c55e" if lower_is_better else "#ef4444"}
+                }
+
+            fig = go.Figure(go.Indicator(
+                mode="number+delta" if delta_config else "number",
+                value=value,
+                delta=delta_config,
+                title={"text": f"<b>{title}</b>", "font": {"size": 14}},
+                number={"suffix": unit, "font": {"size": 28, "color": color}, "valueformat": ".1f"}
+            ))
+            fig.update_layout(
+                height=110, margin=dict(l=10, r=10, t=40, b=10),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)"
+            )
+            return fig
+
+        def create_gauge_r2(value: float) -> go.Figure:
+            """Create R² gauge (-1 to 1 scale, higher is better)."""
+            steps = [
+                {"range": [-1, 0], "color": "#ef4444"},    # red - negative R²
+                {"range": [0, 0.5], "color": "#eab308"},   # yellow - poor fit
+                {"range": [0.5, 0.7], "color": "#22c55e"}, # green - moderate fit
+                {"range": [0.7, 1], "color": "#3b82f6"}    # blue - good fit
+            ]
+            fig = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=value,
+                title={"text": "<b>R² (Goodness of Fit)</b>", "font": {"size": 14}},
+                number={"valueformat": ".3f", "font": {"size": 24}},
+                gauge={
+                    "axis": {"range": [-1, 1], "tickwidth": 1},
+                    "bar": {"color": "#1e40af"},
+                    "steps": steps,
+                    "threshold": {"value": 0.7, "line": {"color": "black", "width": 2}, "thickness": 0.75}
+                }
+            ))
+            fig.update_layout(
+                height=180, margin=dict(l=20, r=20, t=40, b=10),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)"
+            )
+            return fig
+
+        def create_gauge_mape(value: float) -> go.Figure:
+            """Create MAPE gauge (0 to 100% scale, lower is better)."""
+            # Cap at 100 for display purposes
+            display_value = min(value, 100)
+            steps = [
+                {"range": [0, 10], "color": "#3b82f6"},    # blue - excellent (<10%)
+                {"range": [10, 25], "color": "#22c55e"},   # green - good (10-25%)
+                {"range": [25, 50], "color": "#eab308"},   # yellow - fair (25-50%)
+                {"range": [50, 100], "color": "#ef4444"}   # red - poor (>50%)
+            ]
+            fig = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=display_value,
+                title={"text": "<b>MAPE (% Error)</b>", "font": {"size": 14}},
+                number={"suffix": "%", "valueformat": ".1f", "font": {"size": 24}},
+                gauge={
+                    "axis": {"range": [0, 100], "tickwidth": 1},
+                    "bar": {"color": "#1e40af"},
+                    "steps": steps,
+                    "threshold": {"value": 25, "line": {"color": "black", "width": 2}, "thickness": 0.75}
+                }
+            ))
+            fig.update_layout(
+                height=180, margin=dict(l=20, r=20, t=40, b=10),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)"
+            )
+            return fig
+
+        return {
+            # ROW 1: KPI Indicators (primary metrics)
+            "kpi_mae": create_kpi_regression(raw["mae"], "MAE", "s", baseline["mae"], lower_is_better=True),
+            "kpi_rmse": create_kpi_regression(raw["rmse"], "RMSE", "s", baseline["rmse"], lower_is_better=True),
+            "kpi_r2": create_kpi_regression(raw["r2"], "R²", "", baseline["r2"], lower_is_better=False),
+            "kpi_rolling_mae": create_kpi_regression(raw["rolling_mae"], "Rolling MAE", "s", baseline["rolling_mae"], lower_is_better=True),
+            # ROW 3: Gauges
+            "gauge_r2": create_gauge_r2(raw["r2"]),
+            "gauge_mape": create_gauge_mape(raw["mape"]),
         }
 
     @rx.var
@@ -3010,6 +3165,122 @@ class State(rx.State):
                     **self.incremental_model_available,
                     project_name: False
                 }
+
+    @rx.event(background=True)
+    async def init_page(self, model_key: str, project_name: str):
+        """Combined page initialization - replaces multiple HTTP calls with one.
+
+        This single endpoint replaces:
+        - set_current_page_model
+        - update_sample
+        - check_incremental_model_available
+        - get_mlflow_metrics (partial)
+        """
+        # Synchronous state update first
+        async with self:
+            self._current_page_model_key = model_key
+            self.ml_training_enabled = (self.activated_model == model_key)
+
+        model_name = self._incremental_model_names.get(project_name, "ARFClassifier")
+
+        try:
+            response = await httpx_client_post(
+                url=f"{RIVER_BASE_URL}/page_init",
+                json={
+                    "project_name": project_name,
+                    "model_name": model_name
+                },
+                timeout=10.0
+            )
+            data = response.json()
+
+            async with self:
+                # Model availability
+                model_avail = data.get("model_available", {})
+                self.incremental_model_available = {
+                    **self.incremental_model_available,
+                    project_name: model_avail.get("available", False)
+                }
+                if model_avail.get("available"):
+                    self.incremental_model_last_trained = {
+                        **self.incremental_model_last_trained,
+                        project_name: model_avail.get("trained_at", "")
+                    }
+                experiment_url = model_avail.get("experiment_url", "")
+                if experiment_url:
+                    self.mlflow_experiment_url = {
+                        **self.mlflow_experiment_url,
+                        project_name: experiment_url
+                    }
+
+                # MLflow metrics
+                metrics = data.get("mlflow_metrics", {})
+                if metrics:
+                    self.mlflow_metrics = {
+                        **self.mlflow_metrics,
+                        project_name: metrics
+                    }
+
+                # Initial sample for form fields
+                sample = data.get("initial_sample", {})
+                if sample:
+                    self.incremental_ml_sample = {
+                        **self.incremental_ml_sample,
+                        project_name: sample
+                    }
+                    # Update form data with sample values
+                    self._update_form_from_sample(project_name, sample)
+
+                # Dropdown options
+                options = data.get("dropdown_options", {})
+                if options:
+                    self.dropdown_options = {
+                        **self.dropdown_options,
+                        project_name: options
+                    }
+
+                # Training status
+                training = data.get("training_status", {})
+                if training.get("is_training"):
+                    self.activated_model = model_key
+                    self.ml_training_enabled = True
+
+        except Exception as e:
+            print(f"Error in init_page for {project_name}: {e}")
+            async with self:
+                self.incremental_model_available = {
+                    **self.incremental_model_available,
+                    project_name: False
+                }
+
+    def _update_form_from_sample(self, project_name: str, sample: dict):
+        """Update form_data from sample values (helper method)."""
+        if project_name == "Transaction Fraud Detection":
+            if "timestamp" in sample and sample["timestamp"]:
+                try:
+                    ts = dt.datetime.fromisoformat(str(sample["timestamp"]).replace("Z", "+00:00"))
+                    sample["timestamp_date"] = ts.strftime("%Y-%m-%d")
+                    sample["timestamp_time"] = ts.strftime("%H:%M")
+                except:
+                    pass
+            self.form_data = {
+                **self.form_data,
+                project_name: {
+                    "transaction_id": safe_str(sample.get("transaction_id")),
+                    "user_id": safe_str(sample.get("user_id")),
+                    "timestamp_date": sample.get("timestamp_date", ""),
+                    "timestamp_time": sample.get("timestamp_time", ""),
+                    "amount": safe_float_str(sample.get("amount")),
+                    "merchant_id": safe_str(sample.get("merchant_id")),
+                    "merchant_category": safe_str(sample.get("merchant_category")),
+                    "location": safe_str(sample.get("location")),
+                    "transaction_type": safe_str(sample.get("transaction_type")),
+                    "device_id": safe_str(sample.get("device_id")),
+                    "ip_address": safe_str(sample.get("ip_address")),
+                    "account_age_days": safe_int_str(sample.get("account_age_days")),
+                    "is_international": str(sample.get("is_international", False)).lower(),
+                }
+            }
 
     @rx.event(background=True)
     async def predict_batch_tfd(self):

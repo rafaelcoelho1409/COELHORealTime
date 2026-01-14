@@ -1150,6 +1150,92 @@ async def check_model_available(request: ModelAvailabilityRequest):
         }
 
 
+class PageInitRequest(BaseModel):
+    """Request model for combined page initialization."""
+    project_name: str
+    model_name: str = "ARFClassifier"
+
+
+@app.post("/page_init")
+async def page_init(request: PageInitRequest):
+    """Combined page initialization endpoint.
+
+    Returns all data needed for page load in a single call:
+    - model_available: Check if trained model exists in MLflow
+    - mlflow_metrics: Latest metrics from best model run
+    - initial_sample: Sample data for form fields
+    - dropdown_options: Static options for form dropdowns
+    - training_status: Whether training is currently active
+
+    This replaces 5-6 separate HTTP calls with a single request.
+    """
+    project_name = request.project_name
+    model_name = request.model_name
+    result = {
+        "model_available": {"available": False},
+        "mlflow_metrics": {},
+        "initial_sample": {},
+        "dropdown_options": {},
+        "training_status": {"is_training": False},
+    }
+
+    try:
+        # 1. Check model availability
+        experiment = mlflow.get_experiment_by_name(project_name)
+        if experiment:
+            experiment_url = f"http://localhost:5001/#/experiments/{experiment.experiment_id}"
+            best_run_id = get_best_mlflow_run(project_name, model_name)
+            if best_run_id:
+                run = mlflow.get_run(best_run_id)
+                metrics = {k: float(v) for k, v in run.data.metrics.items()}
+                # Add baseline metrics as tags
+                for key, value in run.data.tags.items():
+                    if key.startswith("baseline_"):
+                        try:
+                            metrics[key] = float(value)
+                        except (ValueError, TypeError):
+                            metrics[key] = value
+                result["model_available"] = {
+                    "available": True,
+                    "run_id": best_run_id,
+                    "trained_at": pd.Timestamp(run.info.start_time, unit='ms').isoformat() if run.info.start_time else None,
+                    "experiment_id": experiment.experiment_id,
+                    "experiment_url": experiment_url,
+                }
+                # 2. MLflow metrics (from same run)
+                result["mlflow_metrics"] = {f"metrics.{k}": v for k, v in metrics.items()}
+            else:
+                result["model_available"] = {
+                    "available": False,
+                    "message": f"No trained model found for {model_name}",
+                    "experiment_id": experiment.experiment_id,
+                    "experiment_url": experiment_url,
+                }
+
+        # 3. Initial sample from Delta Lake (with timeout)
+        try:
+            sample = await asyncio.wait_for(
+                asyncio.to_thread(get_initial_sample_polars, project_name),
+                timeout=5.0
+            )
+            result["initial_sample"] = sample if sample else {}
+        except asyncio.TimeoutError:
+            result["initial_sample"] = {}
+        except Exception:
+            result["initial_sample"] = {}
+
+        # 4. Static dropdown options (instant)
+        result["dropdown_options"] = get_static_dropdown_options(project_name)
+
+        # 5. Training status
+        result["training_status"] = {"is_training": is_training_active(project_name, model_name)}
+
+    except Exception as e:
+        print(f"Error in page_init for {project_name}: {e}", file=sys.stderr)
+
+    return result
+
+
 # =============================================================================
 # Delta Lake SQL Query Endpoints
 # =============================================================================
