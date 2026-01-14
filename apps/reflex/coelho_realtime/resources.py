@@ -1,5 +1,105 @@
 import reflex as rx
-from .state import State
+from .state import State, METRIC_INFO
+
+
+## METRIC INFO DIALOG COMPONENT
+def metric_info_dialog(metric_key: str, project_key: str = "tfd") -> rx.Component:
+    """Create an info dialog button showing metric formula and explanation."""
+    info = METRIC_INFO.get(project_key, {}).get("metrics", {}).get(metric_key, {})
+    if not info:
+        return rx.fragment()
+
+    return rx.dialog.root(
+        rx.dialog.trigger(
+            rx.icon_button(
+                rx.icon("info", size=12),
+                size="1",
+                variant="ghost",
+                color_scheme="gray",
+                cursor="pointer",
+                title=f"Learn about {info.get('name', metric_key)}"
+            )
+        ),
+        rx.dialog.content(
+            rx.hstack(
+                rx.dialog.title(
+                    rx.hstack(
+                        rx.icon("calculator", size=20),
+                        rx.text(info.get("name", metric_key)),
+                        spacing="2",
+                        align="center"
+                    ),
+                    margin="0"
+                ),
+                rx.spacer(),
+                rx.dialog.close(
+                    rx.icon_button(
+                        rx.icon("x", size=16),
+                        size="1",
+                        variant="ghost",
+                        color_scheme="gray",
+                        cursor="pointer"
+                    )
+                ),
+                width="100%",
+                align="center"
+            ),
+            rx.separator(size="4"),
+            rx.vstack(
+                # Formula section
+                rx.box(
+                    rx.vstack(
+                        rx.text("Formula", weight="bold", size="2", color="gray"),
+                        rx.markdown(info.get("formula", "")),
+                        spacing="1",
+                        align="start",
+                        width="100%"
+                    ),
+                    padding="3",
+                    background=rx.color("gray", 2),
+                    border_radius="8px",
+                    width="100%"
+                ),
+                # Explanation section
+                rx.vstack(
+                    rx.text("What it means", weight="bold", size="2", color="gray"),
+                    rx.text(info.get("explanation", ""), size="2"),
+                    spacing="1",
+                    align="start",
+                    width="100%"
+                ),
+                # Context section
+                rx.box(
+                    rx.vstack(
+                        rx.hstack(
+                            rx.icon("target", size=14),
+                            rx.text("In Fraud Detection", weight="bold", size="2"),
+                            spacing="1",
+                            align="center"
+                        ),
+                        rx.markdown(info.get("context", ""), component_map={"p": lambda text: rx.text(text, size="2")}),
+                        spacing="1",
+                        align="start",
+                        width="100%"
+                    ),
+                    padding="3",
+                    background=rx.color("accent", 2),
+                    border_radius="8px",
+                    width="100%"
+                ),
+                # Range info
+                rx.hstack(
+                    rx.badge(f"Range: {info.get('range', 'N/A')}", color_scheme="blue", variant="soft"),
+                    rx.badge(info.get("optimal", ""), color_scheme="green", variant="soft"),
+                    spacing="2"
+                ),
+                spacing="3",
+                width="100%",
+                align="start"
+            ),
+            max_width="500px"
+        )
+    )
 
 
 ## MAP COMPONENTS (using Folium embedded via rx.html)
@@ -37,6 +137,7 @@ def ml_training_switch(model_key: str, project_name: str) -> rx.Component:
     A switch component to control real-time ML training.
     When enabled, starts Kafka consumer to process live data.
     When disabled or on page leave, stops the consumer.
+    Training continues from best model in MLflow.
     """
     return rx.card(
         rx.vstack(
@@ -1128,134 +1229,175 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
             width = "30%"
         )
 
-    # Right column - Metrics and Results
+    # Right column - Tabs for Prediction and Metrics
     right_column = rx.vstack(
-        rx.hstack(
-            rx.heading("Classification Metrics", size = "6"),
-            rx.button(
-                rx.icon("refresh-cw", size = 16),
-                on_click = State.refresh_mlflow_metrics("Transaction Fraud Detection"),
-                size = "1",
-                variant = "ghost",
-                cursor = "pointer",
-                title = "Refresh metrics"
-            ),
-            align_items = "center",
-            spacing = "2"
-        ),
-        transaction_fraud_detection_metrics(),
-        rx.divider(),
-        # Prediction section - header always visible
-        rx.hstack(
-            rx.icon("shield-alert", size = 20, color = rx.color("accent", 10)),
-            rx.heading("Prediction Result", size = "5", weight = "bold"),
-            spacing = "2",
-            align_items = "center",
-            width = "100%"
-        ),
-        rx.cond(
-            State.tfd_prediction_show,
-            # Show prediction results when available
-            rx.card(
-                rx.vstack(
-                    # Plotly Gauge Chart
-                    rx.plotly(data = State.tfd_fraud_gauge, width = "100%"),
-                    # Prediction summary cards (compact)
+        rx.tabs.root(
+            rx.tabs.list(
+                rx.tabs.trigger(
                     rx.hstack(
-                        rx.card(
-                            rx.vstack(
-                                rx.hstack(
-                                    rx.icon("triangle-alert", size = 14, color = State.tfd_prediction_color),
-                                    rx.text("Classification", size = "1", color = "gray"),
-                                    spacing = "1",
-                                    align_items = "center"
-                                ),
-                                rx.text(
-                                    State.tfd_prediction_text,
-                                    size = "5",
-                                    weight = "bold",
-                                    color = State.tfd_prediction_color,
-                                    align = "center"
-                                ),
-                                spacing = "1",
-                                align_items = "center",
-                                width = "100%"
-                            ),
-                            variant = "surface",
-                            size = "1",
-                            width = "100%"
-                        ),
-                        rx.card(
-                            rx.vstack(
-                                rx.hstack(
-                                    rx.icon("percent", size = 14, color = "red"),
-                                    rx.text("Fraud", size = "1", color = "gray"),
-                                    spacing = "1",
-                                    align_items = "center"
-                                ),
-                                rx.text(
-                                    f"{State.tfd_fraud_probability * 100:.2f}%",
-                                    size = "5",
-                                    weight = "bold",
-                                    align = "center",
-                                    color = "red"
-                                ),
-                                spacing = "1",
-                                align_items = "center",
-                                width = "100%"
-                            ),
-                            variant = "surface",
-                            size = "1",
-                            width = "100%"
-                        ),
-                        rx.card(
-                            rx.vstack(
-                                rx.hstack(
-                                    rx.icon("circle-check", size = 14, color = "green"),
-                                    rx.text("Not Fraud", size = "1", color = "gray"),
-                                    spacing = "1",
-                                    align_items = "center"
-                                ),
-                                rx.text(
-                                    f"{(1 - State.tfd_fraud_probability) * 100:.2f}%",
-                                    size = "5",
-                                    weight = "bold",
-                                    align = "center",
-                                    color = "green"
-                                ),
-                                spacing = "1",
-                                align_items = "center",
-                                width = "100%"
-                            ),
-                            variant = "surface",
-                            size = "1",
-                            width = "100%"
-                        ),
+                        rx.icon("target", size = 14),
+                        rx.text("Prediction"),
                         spacing = "2",
+                        align_items = "center"
+                    ),
+                    value = "prediction"
+                ),
+                rx.tabs.trigger(
+                    rx.hstack(
+                        rx.icon("chart-bar", size = 14),
+                        rx.text("Metrics"),
+                        spacing = "2",
+                        align_items = "center"
+                    ),
+                    value = "metrics"
+                ),
+            ),
+            # Tab 1: Prediction
+            rx.tabs.content(
+                rx.vstack(
+                    # Prediction section - header always visible
+                    rx.hstack(
+                        rx.icon("shield-alert", size = 20, color = rx.color("accent", 10)),
+                        rx.heading("Prediction Result", size = "5", weight = "bold"),
+                        spacing = "2",
+                        align_items = "center",
                         width = "100%"
                     ),
+                    rx.cond(
+                        State.tfd_prediction_show,
+                        # Show prediction results when available
+                        rx.card(
+                            rx.vstack(
+                                # Plotly Gauge Chart
+                                rx.plotly(data = State.tfd_fraud_gauge, width = "100%"),
+                                # Prediction summary cards (compact)
+                                rx.hstack(
+                                    rx.card(
+                                        rx.vstack(
+                                            rx.hstack(
+                                                rx.icon("triangle-alert", size = 14, color = State.tfd_prediction_color),
+                                                rx.text("Classification", size = "1", color = "gray"),
+                                                spacing = "1",
+                                                align_items = "center"
+                                            ),
+                                            rx.text(
+                                                State.tfd_prediction_text,
+                                                size = "5",
+                                                weight = "bold",
+                                                color = State.tfd_prediction_color,
+                                                align = "center"
+                                            ),
+                                            spacing = "1",
+                                            align_items = "center",
+                                            width = "100%"
+                                        ),
+                                        variant = "surface",
+                                        size = "1",
+                                        width = "100%"
+                                    ),
+                                    rx.card(
+                                        rx.vstack(
+                                            rx.hstack(
+                                                rx.icon("percent", size = 14, color = "red"),
+                                                rx.text("Fraud", size = "1", color = "gray"),
+                                                spacing = "1",
+                                                align_items = "center"
+                                            ),
+                                            rx.text(
+                                                f"{State.tfd_fraud_probability * 100:.2f}%",
+                                                size = "5",
+                                                weight = "bold",
+                                                align = "center",
+                                                color = "red"
+                                            ),
+                                            spacing = "1",
+                                            align_items = "center",
+                                            width = "100%"
+                                        ),
+                                        variant = "surface",
+                                        size = "1",
+                                        width = "100%"
+                                    ),
+                                    rx.card(
+                                        rx.vstack(
+                                            rx.hstack(
+                                                rx.icon("circle-check", size = 14, color = "green"),
+                                                rx.text("Not Fraud", size = "1", color = "gray"),
+                                                spacing = "1",
+                                                align_items = "center"
+                                            ),
+                                            rx.text(
+                                                f"{(1 - State.tfd_fraud_probability) * 100:.2f}%",
+                                                size = "5",
+                                                weight = "bold",
+                                                align = "center",
+                                                color = "green"
+                                            ),
+                                            spacing = "1",
+                                            align_items = "center",
+                                            width = "100%"
+                                        ),
+                                        variant = "surface",
+                                        size = "1",
+                                        width = "100%"
+                                    ),
+                                    spacing = "2",
+                                    width = "100%"
+                                ),
+                                spacing = "4",
+                                width = "100%"
+                            ),
+                            variant = "classic",
+                            width = "100%"
+                        ),
+                        # Show info or warning message when no prediction yet
+                        rx.cond(
+                            State.incremental_model_available["Transaction Fraud Detection"],
+                            rx.callout(
+                                "Fill in the transaction details and click **Predict** to get the fraud probability.",
+                                icon = "info",
+                                color = "blue",
+                                width = "100%"
+                            ),
+                            rx.callout(
+                                "No trained model available. Toggle **Real-time ML Training** to train first.",
+                                icon = "triangle-alert",
+                                color = "orange",
+                                width = "100%"
+                            )
+                        )
+                    ),
                     spacing = "4",
-                    width = "100%"
+                    width = "100%",
+                    padding_top = "1em"
                 ),
-                variant = "classic",
-                width = "100%"
+                value = "prediction"
             ),
-            # Show info or warning message when no prediction yet
-            rx.cond(
-                State.incremental_model_available["Transaction Fraud Detection"],
-                rx.callout(
-                    "Fill in the transaction details and click **Predict** to get the fraud probability.",
-                    icon = "info",
-                    color = "blue",
-                    width = "100%"
+            # Tab 2: Metrics
+            rx.tabs.content(
+                rx.vstack(
+                    rx.hstack(
+                        rx.heading("Classification Metrics", size = "5"),
+                        rx.button(
+                            rx.icon("refresh-cw", size = 16),
+                            on_click = State.refresh_mlflow_metrics("Transaction Fraud Detection"),
+                            size = "1",
+                            variant = "ghost",
+                            cursor = "pointer",
+                            title = "Refresh metrics"
+                        ),
+                        align_items = "center",
+                        spacing = "2"
+                    ),
+                    transaction_fraud_detection_metrics(),
+                    spacing = "4",
+                    width = "100%",
+                    padding_top = "1em"
                 ),
-                rx.callout(
-                    "No trained model available. Toggle **Real-time ML Training** to train first.",
-                    icon = "triangle-alert",
-                    color = "orange",
-                    width = "100%"
-                )
-            )
+                value = "metrics"
+            ),
+            default_value = "prediction",
+            width = "100%"
         ),
         on_mount = State.get_mlflow_metrics("Transaction Fraud Detection"),
         align_items = "start",
@@ -1271,15 +1413,21 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
         width = "100%"
     )
 
-def metric_card(label: str, value_var) -> rx.Component:
-    """Create a compact styled metric card."""
+def metric_card(label: str, value_var, metric_key: str = None, project_key: str = "tfd") -> rx.Component:
+    """Create a compact styled metric card with optional info button."""
     return rx.card(
         rx.vstack(
-            rx.text(
-                label,
-                size = "1",
-                weight = "medium",
-                color = "gray"
+            rx.hstack(
+                rx.text(
+                    label,
+                    size = "1",
+                    weight = "medium",
+                    color = "gray"
+                ),
+                metric_info_dialog(metric_key, project_key) if metric_key else rx.fragment(),
+                spacing = "1",
+                align = "center",
+                justify = "center"
             ),
             rx.text(
                 value_var,
@@ -1297,18 +1445,167 @@ def metric_card(label: str, value_var) -> rx.Component:
     )
 
 
+def mlflow_run_info_badge(project_name: str) -> rx.Component:
+    """Display MLflow experiment run info (run_id, status, start_time) for a project."""
+    run_info = State.mlflow_run_info[project_name]
+    return rx.hstack(
+        # Status badge with conditional styling
+        rx.cond(
+            run_info["is_live"],
+            rx.badge(
+                rx.hstack(
+                    rx.box(
+                        width = "8px",
+                        height = "8px",
+                        border_radius = "50%",
+                        background_color = "green",
+                        class_name = "animate-pulse"
+                    ),
+                    rx.text("LIVE", size = "1"),
+                    spacing = "1",
+                    align = "center"
+                ),
+                color_scheme = "green",
+                variant = "surface"
+            ),
+            rx.badge(
+                run_info["status"],
+                color_scheme = rx.cond(
+                    run_info["status"] == "FINISHED",
+                    "blue",
+                    "gray"
+                ),
+                variant = "surface"
+            )
+        ),
+        # Run ID
+        rx.cond(
+            run_info["run_id"] != "",
+            rx.hstack(
+                rx.text("Run:", size = "1", color = "gray"),
+                rx.code(run_info["run_id"], size = "1"),
+                spacing = "1",
+                align = "center"
+            ),
+            rx.fragment()
+        ),
+        # Start time
+        rx.cond(
+            run_info["start_time"] != "",
+            rx.hstack(
+                rx.text("Started:", size = "1", color = "gray"),
+                rx.text(run_info["start_time"], size = "1"),
+                spacing = "1",
+                align = "center"
+            ),
+            rx.fragment()
+        ),
+        spacing = "3",
+        align = "center",
+        padding = "2"
+    )
+
+
+def kpi_card_with_info(plotly_key: str, metric_key: str) -> rx.Component:
+    """Create a KPI card with Plotly chart and info button."""
+    return rx.card(
+        rx.vstack(
+            rx.hstack(
+                rx.spacer(),
+                metric_info_dialog(metric_key, "tfd"),
+                width="100%",
+                justify="end"
+            ),
+            rx.plotly(data=State.tfd_dashboard_figures[plotly_key], width="100%"),
+            spacing="0",
+            width="100%"
+        ),
+        size="1"
+    )
+
+
+def gauge_card_with_info(plotly_key: str, metric_key: str) -> rx.Component:
+    """Create a gauge card with Plotly chart and info button."""
+    return rx.card(
+        rx.vstack(
+            rx.hstack(
+                rx.spacer(),
+                metric_info_dialog(metric_key, "tfd"),
+                width="100%",
+                justify="end"
+            ),
+            rx.plotly(data=State.tfd_dashboard_figures[plotly_key], width="100%"),
+            spacing="0",
+            width="100%"
+        ),
+        size="1",
+        width="50%"
+    )
+
+
+def heatmap_card_with_info(plotly_key: str, metric_key: str) -> rx.Component:
+    """Create a heatmap card with Plotly chart and info button."""
+    return rx.card(
+        rx.vstack(
+            rx.hstack(
+                rx.spacer(),
+                metric_info_dialog(metric_key, "tfd"),
+                width="100%",
+                justify="end"
+            ),
+            rx.plotly(data=State.tfd_dashboard_figures[plotly_key], width="100%"),
+            spacing="0",
+            width="100%"
+        ),
+        size="1",
+        width="50%"
+    )
+
+
 def transaction_fraud_detection_metrics() -> rx.Component:
-    """Display MLflow classification metrics for Transaction Fraud Detection as individual cards."""
-    return rx.grid(
-        metric_card("F1 Score", State.tfd_metrics["f1"]),
-        metric_card("Accuracy", State.tfd_metrics["accuracy"]),
-        metric_card("Recall", State.tfd_metrics["recall"]),
-        metric_card("Precision", State.tfd_metrics["precision"]),
-        metric_card("ROC AUC", State.tfd_metrics["rocauc"]),
-        metric_card("Geo Mean", State.tfd_metrics["geometric_mean"]),
-        columns = "6",
-        spacing = "2",
-        width = "100%"
+    """Display MLflow classification metrics for TFD with Plotly dashboard layout."""
+    return rx.vstack(
+        # Run info badge
+        mlflow_run_info_badge("Transaction Fraud Detection"),
+        # ROW 1: KPI Indicators (primary metrics with delta from baseline)
+        rx.grid(
+            kpi_card_with_info("kpi_fbeta", "fbeta"),
+            kpi_card_with_info("kpi_rocauc", "rocauc"),
+            kpi_card_with_info("kpi_precision", "precision"),
+            kpi_card_with_info("kpi_recall", "recall"),
+            kpi_card_with_info("kpi_rolling_rocauc", "rolling_rocauc"),
+            columns="5",
+            spacing="2",
+            width="100%"
+        ),
+        # ROW 2: Gauges (secondary metrics)
+        rx.hstack(
+            gauge_card_with_info("gauge_mcc", "mcc"),
+            gauge_card_with_info("gauge_balanced_accuracy", "balanced_accuracy"),
+            spacing="2",
+            width="100%"
+        ),
+        # ROW 3: Confusion Matrix + Classification Report (side by side)
+        rx.hstack(
+            heatmap_card_with_info("confusion_matrix", "confusion_matrix"),
+            heatmap_card_with_info("classification_report", "classification_report"),
+            spacing="2",
+            width="100%"
+        ),
+        # ROW 4: Additional metrics (text cards with info buttons)
+        rx.grid(
+            metric_card("F1", State.tfd_metrics["f1"], "f1"),
+            metric_card("Accuracy", State.tfd_metrics["accuracy"], "accuracy"),
+            metric_card("Geo Mean", State.tfd_metrics["geometric_mean"], "geometric_mean"),
+            metric_card("Cohen κ", State.tfd_metrics["cohen_kappa"], "cohen_kappa"),
+            metric_card("Jaccard", State.tfd_metrics["jaccard"], "jaccard"),
+            metric_card("LogLoss", State.tfd_metrics["logloss"], "logloss"),
+            columns="6",
+            spacing="2",
+            width="100%"
+        ),
+        spacing="3",
+        width="100%"
     )
 
 
@@ -2330,109 +2627,150 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
             width = "30%"
         )
 
-    # Right column - Metrics and Results
+    # Right column - Tabs for Prediction and Metrics
     right_column = rx.vstack(
-        rx.hstack(
-            rx.heading("Regression Metrics", size = "6"),
-            rx.button(
-                rx.icon("refresh-cw", size = 16),
-                on_click = State.refresh_mlflow_metrics("Estimated Time of Arrival"),
-                size = "1",
-                variant = "ghost",
-            cursor = "pointer",
-            title = "Refresh metrics"
-        ),
-        align_items = "center",
-        spacing = "2"
-            ),
-            estimated_time_of_arrival_metrics(),
-            rx.divider(),
-            # Prediction section - always show both cards
-            rx.hstack(
-        # Left: Map - always visible with current coordinates
-        rx.card(
-            rx.vstack(
-                rx.hstack(
-                    rx.icon("map-pin", size = 16, color = rx.color("accent", 10)),
-                    rx.text("Origin and Destination", size = "3", weight = "bold"),
-                    spacing = "2",
-                    align_items = "center"
-                ),
-                eta_map(),
-                rx.text(
-                    f"Estimated Distance: {State.eta_estimated_distance_km} km",
-                    size = "2",
-                    color = "gray"
-                ),
-                rx.text(
-                    f"Initial Estimated Travel Time: {State.eta_initial_estimated_travel_time_seconds} s",
-                    size = "2",
-                    color = "gray"
-                ),
-                spacing = "2",
-                width = "100%",
-                height = "100%"
-            ),
-            variant = "surface",
-            width = "50%",
-            height = "400px"
-        ),
-        # Right: ETA Prediction - shows info or results
-        rx.card(
-            rx.vstack(
-                rx.hstack(
-                    rx.icon("clock", size = 16, color = rx.color("accent", 10)),
-                    rx.text("ETA - Prediction", size = "3", weight = "bold"),
-                    spacing = "2",
-                    align_items = "center"
-                ),
-                rx.cond(
-                    State.eta_prediction_show,
-                    # Show prediction results when available
-                    rx.box(
-                        rx.plotly(data = State.eta_prediction_figure, width = "100%"),
-                        width = "100%",
-                        flex = "1",
-                        display = "flex",
-                        align_items = "center",
-                        justify_content = "center"
+        rx.tabs.root(
+            rx.tabs.list(
+                rx.tabs.trigger(
+                    rx.hstack(
+                        rx.icon("target", size = 14),
+                        rx.text("Prediction"),
+                        spacing = "2",
+                        align_items = "center"
                     ),
-                    # Show info or warning message when no prediction yet
-                    rx.box(
-                        rx.cond(
-                            State.incremental_model_available["Estimated Time of Arrival"],
-                            rx.callout(
-                                "Click **Predict** to get the estimated time of arrival.",
-                                icon = "info",
-                                color = "blue",
-                                width = "100%"
-                            ),
-                            rx.callout(
-                                "No trained model available. Toggle **Real-time ML Training** to train first.",
-                                icon = "triangle-alert",
-                                color = "orange",
-                                width = "100%"
-                            )
-                        ),
-                        width = "100%",
-                        flex = "1",
-                        display = "flex",
-                        align_items = "center",
-                        justify_content = "center"
-                    )
+                    value = "prediction"
                 ),
-                spacing = "2",
-                width = "100%",
-                height = "100%"
+                rx.tabs.trigger(
+                    rx.hstack(
+                        rx.icon("chart-bar", size = 14),
+                        rx.text("Metrics"),
+                        spacing = "2",
+                        align_items = "center"
+                    ),
+                    value = "metrics"
+                ),
             ),
-            variant = "surface",
-            width = "50%",
-            height = "380px"
+            # Tab 1: Prediction
+            rx.tabs.content(
+                rx.vstack(
+                    # Prediction section - always show both cards
+                    rx.hstack(
+                        # Left: Map - always visible with current coordinates
+                        rx.card(
+                            rx.vstack(
+                                rx.hstack(
+                                    rx.icon("map-pin", size = 16, color = rx.color("accent", 10)),
+                                    rx.text("Origin and Destination", size = "3", weight = "bold"),
+                                    spacing = "2",
+                                    align_items = "center"
+                                ),
+                                eta_map(),
+                                rx.text(
+                                    f"Estimated Distance: {State.eta_estimated_distance_km} km",
+                                    size = "2",
+                                    color = "gray"
+                                ),
+                                rx.text(
+                                    f"Initial Estimated Travel Time: {State.eta_initial_estimated_travel_time_seconds} s",
+                                    size = "2",
+                                    color = "gray"
+                                ),
+                                spacing = "2",
+                                width = "100%",
+                                height = "100%"
+                            ),
+                            variant = "surface",
+                            width = "50%",
+                            height = "400px"
+                        ),
+                        # Right: ETA Prediction - shows info or results
+                        rx.card(
+                            rx.vstack(
+                                rx.hstack(
+                                    rx.icon("clock", size = 16, color = rx.color("accent", 10)),
+                                    rx.text("ETA - Prediction", size = "3", weight = "bold"),
+                                    spacing = "2",
+                                    align_items = "center"
+                                ),
+                                rx.cond(
+                                    State.eta_prediction_show,
+                                    # Show prediction results when available
+                                    rx.box(
+                                        rx.plotly(data = State.eta_prediction_figure, width = "100%"),
+                                        width = "100%",
+                                        flex = "1",
+                                        display = "flex",
+                                        align_items = "center",
+                                        justify_content = "center"
+                                    ),
+                                    # Show info or warning message when no prediction yet
+                                    rx.box(
+                                        rx.cond(
+                                            State.incremental_model_available["Estimated Time of Arrival"],
+                                            rx.callout(
+                                                "Click **Predict** to get the estimated time of arrival.",
+                                                icon = "info",
+                                                color = "blue",
+                                                width = "100%"
+                                            ),
+                                            rx.callout(
+                                                "No trained model available. Toggle **Real-time ML Training** to train first.",
+                                                icon = "triangle-alert",
+                                                color = "orange",
+                                                width = "100%"
+                                            )
+                                        ),
+                                        width = "100%",
+                                        flex = "1",
+                                        display = "flex",
+                                        align_items = "center",
+                                        justify_content = "center"
+                                    )
+                                ),
+                                spacing = "2",
+                                width = "100%",
+                                height = "100%"
+                            ),
+                            variant = "surface",
+                            width = "50%",
+                            height = "380px"
+                        ),
+                        spacing = "3",
+                        width = "100%",
+                        align_items = "stretch"
+                    ),
+                    spacing = "4",
+                    width = "100%",
+                    padding_top = "1em"
+                ),
+                value = "prediction"
+            ),
+            # Tab 2: Metrics
+            rx.tabs.content(
+                rx.vstack(
+                    rx.hstack(
+                        rx.heading("Regression Metrics", size = "5"),
+                        rx.button(
+                            rx.icon("refresh-cw", size = 16),
+                            on_click = State.refresh_mlflow_metrics("Estimated Time of Arrival"),
+                            size = "1",
+                            variant = "ghost",
+                            cursor = "pointer",
+                            title = "Refresh metrics"
+                        ),
+                        align_items = "center",
+                        spacing = "2"
+                    ),
+                    estimated_time_of_arrival_metrics(),
+                    spacing = "4",
+                    width = "100%",
+                    padding_top = "1em"
+                ),
+                value = "metrics"
+            ),
+            default_value = "prediction",
+            width = "100%"
         ),
-        spacing = "3",
-        width = "100%",
-        align_items = "stretch"
-            ),
         on_mount = State.get_mlflow_metrics("Estimated Time of Arrival"),
         align_items = "start",
         spacing = "4",
@@ -2450,16 +2788,23 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
 
 def estimated_time_of_arrival_metrics() -> rx.Component:
     """Display MLflow regression metrics for Estimated Time of Arrival as individual cards."""
-    return rx.grid(
-        metric_card("MAE", State.eta_metrics["mae"]),
-        metric_card("MAPE", State.eta_metrics["mape"]),
-        metric_card("MSE", State.eta_metrics["mse"]),
-        metric_card("R²", State.eta_metrics["r2"]),
-        metric_card("RMSE", State.eta_metrics["rmse"]),
-        metric_card("RMSLE", State.eta_metrics["rmsle"]),
-        metric_card("SMAPE", State.eta_metrics["smape"]),
-        columns = "7",
-        spacing = "2",
+    return rx.vstack(
+        # Run info badge
+        mlflow_run_info_badge("Estimated Time of Arrival"),
+        # Metrics grid
+        rx.grid(
+            metric_card("MAE", State.eta_metrics["mae"]),
+            metric_card("MAPE", State.eta_metrics["mape"]),
+            metric_card("MSE", State.eta_metrics["mse"]),
+            metric_card("R²", State.eta_metrics["r2"]),
+            metric_card("RMSE", State.eta_metrics["rmse"]),
+            metric_card("RMSLE", State.eta_metrics["rmsle"]),
+            metric_card("SMAPE", State.eta_metrics["smape"]),
+            columns = "7",
+            spacing = "2",
+            width = "100%"
+        ),
+        spacing = "3",
         width = "100%"
     )
 
@@ -2790,9 +3135,25 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
     right_column = rx.vstack(
         rx.tabs.root(
             rx.tabs.list(
-            rx.tabs.trigger("Cluster Prediction", value = "prediction"),
-            rx.tabs.trigger("Cluster Analytics", value = "analytics"),
-        ),
+                rx.tabs.trigger(
+                    rx.hstack(
+                        rx.icon("target", size = 14),
+                        rx.text("Prediction"),
+                        spacing = "2",
+                        align_items = "center"
+                    ),
+                    value = "prediction"
+                ),
+                rx.tabs.trigger(
+                    rx.hstack(
+                        rx.icon("chart-bar", size = 14),
+                        rx.text("Analytics"),
+                        spacing = "2",
+                        align_items = "center"
+                    ),
+                    value = "analytics"
+                ),
+            ),
         # Tab 1: Cluster Prediction
         rx.tabs.content(
             rx.vstack(
@@ -2960,6 +3321,8 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
         # Tab 2: Cluster Analytics
         rx.tabs.content(
             rx.vstack(
+                # Run info badge
+                mlflow_run_info_badge("E-Commerce Customer Interactions"),
                 # Samples per cluster chart
                 rx.card(
                     rx.vstack(

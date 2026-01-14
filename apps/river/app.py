@@ -20,6 +20,8 @@ import json
 import math
 import time
 import asyncio
+import pickle
+import tempfile
 import numpy as np
 import pandas as pd
 import mlflow
@@ -44,6 +46,8 @@ from functions import (
     execute_delta_sql_polars,
     get_delta_table_schema,
     SQL_DEFAULT_LIMIT,
+    # Best model selection (by metrics)
+    get_best_mlflow_run,
 )
 
 
@@ -328,25 +332,77 @@ class MLflowMetricsCache:
         self._cache.clear()
 
 
-mlflow_cache = MLflowMetricsCache(ttl_seconds = 30)
+mlflow_cache = MLflowMetricsCache(ttl_seconds = 5)  # Short TTL for responsive live updates
 
 
 def _sync_get_mlflow_metrics(project_name: str, model_name: str) -> dict:
-    """Synchronous MLflow query - to be run in thread pool."""
+    """Synchronous MLflow query - hybrid approach for metrics.
+
+    Returns:
+    - If training is active (RUNNING status): real-time metrics from running experiment
+    - Otherwise: metrics from best FINISHED model (same as predictions)
+
+    This provides live updates during training while showing stable metrics when idle.
+    """
     experiment = mlflow.get_experiment_by_name(project_name)
     if experiment is None:
         raise ValueError(f"Experiment '{project_name}' not found in MLflow")
-    experiment_id = experiment.experiment_id
+
+    # First, check for RUNNING experiments (real-time training)
     runs_df = mlflow.search_runs(
-        experiment_ids = [experiment_id],
-        max_results = 100,
-        order_by = ["start_time DESC"]
+        experiment_ids=[experiment.experiment_id],
+        filter_string="attributes.status = 'RUNNING'",
+        max_results=10,
+        order_by=["start_time DESC"]
     )
-    runs_df = runs_df[runs_df["tags.mlflow.runName"] == model_name]
-    if runs_df.empty:
-        raise ValueError(f"No runs found for model '{model_name}'")
-    run_df = runs_df.iloc[0]
-    return run_df.replace({np.nan: None}).to_dict()
+    # Filter by model name
+    if not runs_df.empty:
+        running_runs = runs_df[runs_df["tags.mlflow.runName"] == model_name]
+        if not running_runs.empty:
+            # Return real-time metrics from running experiment
+            run_id = running_runs.iloc[0]["run_id"]
+            run = mlflow.get_run(run_id)
+            result = {
+                "run_id": run_id,
+                "status": "RUNNING",
+                "start_time": run.info.start_time,
+                "end_time": None,
+                "is_live": True,  # Flag for UI to show "live" indicator
+            }
+            for metric_name, metric_value in run.data.metrics.items():
+                result[f"metrics.{metric_name}"] = metric_value
+            # Include baseline tags for delta calculation
+            for tag_name, tag_value in run.data.tags.items():
+                if tag_name.startswith("baseline_"):
+                    try:
+                        result[tag_name] = float(tag_value)
+                    except ValueError:
+                        pass
+            return result
+
+    # No running experiment - fall back to best FINISHED model
+    best_run_id = get_best_mlflow_run(project_name, model_name)
+    if best_run_id is None:
+        raise ValueError(f"No trained model found for '{model_name}' in '{project_name}'")
+
+    run = mlflow.get_run(best_run_id)
+    result = {
+        "run_id": best_run_id,
+        "status": run.info.status,
+        "start_time": run.info.start_time,
+        "end_time": run.info.end_time,
+        "is_live": False,  # Flag for UI - showing historical best
+    }
+    for metric_name, metric_value in run.data.metrics.items():
+        result[f"metrics.{metric_name}"] = metric_value
+    # Include baseline tags for delta calculation
+    for tag_name, tag_value in run.data.tags.items():
+        if tag_name.startswith("baseline_"):
+            try:
+                result[tag_name] = float(tag_value)
+            except ValueError:
+                pass
+    return result
 
 
 # =============================================================================
@@ -532,6 +588,7 @@ async def switch_model(payload: dict):
         project_name: str - Project name for MLflow
     """
     model_key = payload.get("model_key")
+
     if model_key == state.current_model_name:
         return {"message": f"Model {model_key} is already running."}
     if state.current_process:
@@ -547,7 +604,9 @@ async def switch_model(payload: dict):
                 status_code = 404,
                 detail = f"Model key '{model_key}' not found. Available: {list(MODEL_SCRIPTS.keys())}"
             )
+
     command = ["/app/.venv/bin/python3", "-u", model_key]
+
     try:
         print(f"Starting model: {model_key}")
         log_dir = "/app/logs"
@@ -564,7 +623,10 @@ async def switch_model(payload: dict):
         state.current_model_name = model_key
         state.status = f"Running {model_key}"
         print(f"Model {model_key} started with PID: {process.pid}")
-        return {"message": f"Started model: {model_key}", "pid": process.pid}
+        return {
+            "message": f"Started model: {model_key}",
+            "pid": process.pid,
+        }
     except Exception as e:
         print(f"Failed to start model {model_key}: {e}")
         state.current_process = None
@@ -940,9 +1002,113 @@ async def get_mlflow_metrics(request: MLflowMetricsRequest):
         )
 
 
+def _sync_get_report_metrics(project_name: str, model_name: str) -> dict:
+    """Load report_metrics.pkl artifact from MLflow (ConfusionMatrix, ClassificationReport)."""
+    # First check for RUNNING experiment, then fall back to best FINISHED
+    experiment = mlflow.get_experiment_by_name(project_name)
+    if experiment is None:
+        return {"available": False, "error": f"Experiment '{project_name}' not found"}
+
+    run_id = None
+    # Check for RUNNING experiment first
+    runs_df = mlflow.search_runs(
+        experiment_ids=[experiment.experiment_id],
+        filter_string="attributes.status = 'RUNNING'",
+        max_results=10,
+        order_by=["start_time DESC"]
+    )
+    if not runs_df.empty:
+        running_runs = runs_df[runs_df["tags.mlflow.runName"] == model_name]
+        if not running_runs.empty:
+            run_id = running_runs.iloc[0]["run_id"]
+
+    # Fall back to best FINISHED model
+    if run_id is None:
+        run_id = get_best_mlflow_run(project_name, model_name)
+
+    if run_id is None:
+        return {"available": False, "error": "No trained model found"}
+
+    # Download and load report_metrics.pkl artifact
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            artifact_path = mlflow.artifacts.download_artifacts(
+                run_id=run_id,
+                artifact_path="report_metrics.pkl",
+                dst_path=tmpdir
+            )
+            with open(artifact_path, 'rb') as f:
+                report_metrics = pickle.load(f)
+
+            # Extract ConfusionMatrix data
+            cm = report_metrics.get("ConfusionMatrix")
+            cm_data = {"available": False}
+            if cm is not None:
+                # River's ConfusionMatrix stores data as nested dict: {actual: {predicted: count}}
+                try:
+                    # Get the raw confusion matrix data
+                    cm_dict = dict(cm.data)
+                    # For binary classification: classes are 0 and 1
+                    tn = cm_dict.get(0, {}).get(0, 0)
+                    fp = cm_dict.get(0, {}).get(1, 0)
+                    fn = cm_dict.get(1, {}).get(0, 0)
+                    tp = cm_dict.get(1, {}).get(1, 0)
+                    total = tn + fp + fn + tp
+                    cm_data = {
+                        "available": True,
+                        "tn": tn, "fp": fp, "fn": fn, "tp": tp,
+                        "total": total
+                    }
+                except Exception as e:
+                    cm_data = {"available": False, "error": str(e)}
+
+            # Extract ClassificationReport data
+            cr = report_metrics.get("ClassificationReport")
+            cr_data = {"available": False}
+            if cr is not None:
+                try:
+                    # ClassificationReport has a string representation
+                    cr_data = {
+                        "available": True,
+                        "report": str(cr)
+                    }
+                except Exception as e:
+                    cr_data = {"available": False, "error": str(e)}
+
+            return {
+                "available": True,
+                "run_id": run_id,
+                "confusion_matrix": cm_data,
+                "classification_report": cr_data
+            }
+    except Exception as e:
+        return {"available": False, "error": f"Artifact not found: {str(e)}"}
+
+
+@app.post("/report_metrics")
+async def get_report_metrics(request: MLflowMetricsRequest):
+    """Get report metrics (ConfusionMatrix, ClassificationReport) from MLflow artifacts."""
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                _sync_get_report_metrics,
+                request.project_name,
+                request.model_name
+            ),
+            timeout=30.0
+        )
+        return result
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="MLflow query timed out")
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
 @app.post("/model_available")
 async def check_model_available(request: ModelAvailabilityRequest):
-    """Check if a trained River model is available in MLflow."""
+    """Check if a trained River model is available in MLflow.
+    Uses get_best_mlflow_run to find the best model (same as predictions).
+    """
     project_name = request.project_name
     model_name = request.model_name
     try:
@@ -954,36 +1120,26 @@ async def check_model_available(request: ModelAvailabilityRequest):
                 "experiment_url": None
             }
         experiment_url = f"http://localhost:5001/#/experiments/{experiment.experiment_id}"
-        # Fetch runs and filter in Python (same approach as _sync_get_mlflow_metrics)
-        runs_df = mlflow.search_runs(
-            experiment_ids = [experiment.experiment_id],
-            max_results = 100,
-            order_by = ["start_time DESC"]
-        )
-        if runs_df.empty:
-            return {
-                "available": False,
-                "message": f"No runs found in experiment {project_name}",
-                "experiment_id": experiment.experiment_id,
-                "experiment_url": experiment_url
-            }
-        # Filter by model name tag
-        filtered_runs = runs_df[runs_df["tags.mlflow.runName"] == model_name]
-        if filtered_runs.empty:
+        # Get the best run (same logic as model loading for predictions)
+        best_run_id = get_best_mlflow_run(project_name, model_name)
+        if best_run_id is None:
             return {
                 "available": False,
                 "message": f"No trained model found for {model_name}",
                 "experiment_id": experiment.experiment_id,
                 "experiment_url": experiment_url
             }
-        run = filtered_runs.iloc[0]
+        # Get full run info
+        run = mlflow.get_run(best_run_id)
+        # Get metrics from the best run
+        metrics = {k: float(v) for k, v in run.data.metrics.items()}
         return {
             "available": True,
-            "run_id": run["run_id"],
-            "trained_at": run["start_time"].isoformat() if pd.notna(run["start_time"]) else None,
+            "run_id": best_run_id,
+            "trained_at": pd.Timestamp(run.info.start_time, unit='ms').isoformat() if run.info.start_time else None,
             "experiment_id": experiment.experiment_id,
             "experiment_url": experiment_url,
-            "metrics": {k.replace("metrics.", ""): v for k, v in run.items() if k.startswith("metrics.")}
+            "metrics": metrics
         }
     except Exception as e:
         print(f"Error checking model availability: {e}", file=sys.stderr)

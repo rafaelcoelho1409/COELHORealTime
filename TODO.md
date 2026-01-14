@@ -599,6 +599,40 @@ Services Removed:
 - Security: Read-only queries only, DDL/DML blocked, row limits enforced
 - Tab icons added to all tabs (Incremental ML, Batch ML, Delta Lake SQL)
 
+### Comprehensive River ML Metrics Configuration (January 2026)
+- **Deep research** on optimal metrics arguments for Transaction Fraud Detection
+- **New metrics structure** with three categories:
+  - `class_metrics` (10): Recall, Precision, F1, FBeta, Accuracy, BalancedAccuracy, MCC, GeometricMean, CohenKappa, Jaccard
+  - `proba_metrics` (3): ROCAUC, RollingROCAUC, LogLoss
+  - `report_metrics` (2): ConfusionMatrix, ClassificationReport (pickle serialized to MLflow)
+- **Optimal arguments based on research:**
+  - `pos_val=1` for all metrics (fraud = positive class)
+  - `FBeta.beta=2.0` - Industry standard for fraud detection (prioritize Recall)
+  - `ROCAUC.n_thresholds=50` - Better accuracy than default 10
+  - `RollingROCAUC.window_size=5000` - Stable AUC for rare fraud events
+  - `ClassificationReport.decimals=4` - Precision for monitoring
+- **Shared ConfusionMatrix** for efficiency (metrics share TP/TN/FP/FN counts)
+- **predict_proba_one()** added for probability-based metrics (was using class labels)
+- **MLflow experiments cleanup** - Deleted old TFD/ETA experiments for fresh start
+- **Best model selection** updated to use FBeta instead of F1 for TFD
+- **Research sources documented** in code comments:
+  - River ML Documentation: https://riverml.xyz/dev/api/metrics/
+  - Fraud Detection Best Practices: https://www.cesarsotovalero.net/blog/
+  - F-Beta Score Guide: https://machinelearningmastery.com/fbeta-measure-for-ml
+
+### TFD Metrics Dashboard Complete (January 2026)
+- **All 15 metrics displayed** on Reflex TFD Incremental ML page
+- **Dashboard layout:**
+  - ROW 1: KPI Indicators with delta (FBeta, ROC AUC, Precision, Recall, Rolling AUC)
+  - ROW 2: Gauge charts (MCC, Balanced Accuracy)
+  - ROW 3: Confusion Matrix heatmap + YellowBrick-style Classification Report heatmap
+  - ROW 4: Additional metric cards (F1, Accuracy, Geo Mean, Cohen κ, Jaccard, LogLoss)
+- **Delta indicators** show change from baseline (previous best model)
+- **Real-time updates** via refresh button during ML training
+- **LIVE/FINISHED status** indicator shows training state
+- **Report metrics endpoint** (`/report_metrics`) loads ConfusionMatrix and ClassificationReport from MLflow artifacts
+- **Graceful handling** of fresh starts (shows "No data available yet" when no artifacts exist)
+
 ### Redis Live Model Cache for Real-Time Predictions (December 2025)
 - **Problem:** Predictions used MLflow's saved model, not the live training model
 - **Solution:** Redis cache for live model during training
@@ -674,4 +708,4 @@ Services Removed:
 
 ---
 
-*Last updated: 2025-12-30 (Phase 9 completed - Delta Lake SQL Tab with Polars/DuckDB engines)*
+*Last updated: 2026-01-14 (TFD Metrics Dashboard Complete - All 15 metrics with Plotly visualizations, delta indicators, and real-time updates)*

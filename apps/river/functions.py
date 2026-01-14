@@ -12,7 +12,10 @@ import sys
 import time
 import tempfile
 from typing import Any, Dict, Hashable, Optional, List
-from kafka import KafkaConsumer
+from kafka import (
+    KafkaConsumer,
+    TopicPartition
+)
 from kafka.errors import NoBrokersAvailable
 import json
 import datetime as dt
@@ -78,10 +81,15 @@ ENCODER_ARTIFACT_NAMES = {
 KAFKA_OFFSET_ARTIFACT = "kafka_offset.json"
 # Best metric selection criteria per project
 # Format: {"metric_name": str, "maximize": bool}
-# - maximize = True: higher is better (e.g., F1, R2, Accuracy)
-# - maximize = False: lower is better (e.g., MAE, RMSE, MSE)
+# - maximize = True: higher is better (e.g., FBeta, F1, MCC, ROCAUC)
+# - maximize = False: lower is better (e.g., MAE, RMSE, LogLoss)
+#
+# TFD uses FBeta (beta=2.0) as primary metric:
+#   - Prioritizes Recall over Precision (catching fraud is more important)
+#   - Industry standard for fraud detection
+#   - Alternative: MCC (best for imbalanced data) or ROCAUC (probability-based)
 BEST_METRIC_CRITERIA = {
-    "Transaction Fraud Detection": {"metric_name": "F1", "maximize": True},
+    "Transaction Fraud Detection": {"metric_name": "FBeta", "maximize": True},
     "Estimated Time of Arrival": {"metric_name": "MAE", "maximize": False},
     "E-Commerce Customer Interactions": None,  # Clustering - no metrics, use latest
     "Sales Forecasting": {"metric_name": "MAE", "maximize": False},
@@ -361,10 +369,12 @@ def _run_has_model_artifact(run_id: str, model_name: str) -> bool:
 
 def get_best_mlflow_run(project_name: str, model_name: str) -> Optional[str]:
     """Get the MLflow run ID with the best metrics for a project and model.
+
     Uses BEST_METRIC_CRITERIA to determine which metric to optimize:
-    - For classification: maximize F1
-    - For regression: minimize MAE
-    - For clustering: use latest run (no metrics)
+    - For fraud detection (TFD): maximize FBeta (beta=2.0, prioritizes recall)
+    - For regression (ETA, Sales): minimize MAE
+    - For clustering (ECCI): use latest run (no metrics yet)
+
     Only selects runs that have the model artifact saved.
     Returns None if no runs exist (new model will be created from scratch).
     """
@@ -1517,58 +1527,243 @@ def process_sample(x, encoders, project_name):
         }
 
 
-def load_or_create_model(project_name, model_name, folder_path = None):
-    """Load model from MLflow artifacts or create a new one."""
-    # Load from MLflow
+def load_or_create_model(project_name, model_name, folder_path=None):
+    """Load model from MLflow artifacts or create a new one.
+
+    Args:
+        project_name: Name of the project (e.g., "Transaction Fraud Detection")
+        model_name: Name of the model (e.g., "ARFClassifier")
+        folder_path: Optional path to load model from (legacy, unused)
+
+    Returns:
+        The loaded or newly created model.
+    """
+    # Load from MLflow (best historical model)
     model = load_model_from_mlflow(project_name, model_name)
     if model is not None:
         return model
+
     # No model in MLflow, create new one
     print(f"No model in MLflow for {project_name}/{model_name}, creating new one.")
     return _create_default_model(project_name)
 
 
 def _create_default_model(project_name):
-    """Create default model based on project type."""
+    """Create default model based on project type.
+
+    Models are configured based on River ML documentation and best practices.
+    All parameters are documented with their River ML defaults and rationale.
+
+    See: https://riverml.xyz/latest/
+    """
     if project_name == "Transaction Fraud Detection":
+        # =================================================================
+        # ARFClassifier - Adaptive Random Forest Classifier
+        # For fraud detection with concept drift handling
+        # =================================================================
+        # OLD CONFIGURATION:
+        # return forest.ARFClassifier(
+        #     n_models = 10,
+        #     drift_detector = drift.ADWIN(),
+        #     warning_detector = drift.ADWIN(),
+        #     metric = metrics.ROCAUC(),
+        #     max_features = "sqrt",
+        #     lambda_value = 6,
+        #     seed = 42
+        # )
+
+        # CONFIGURATION based on River ML documentation:
+        # Reference: https://riverml.xyz/latest/api/forest/ARFClassifier/
+        # Reference: https://riverml.xyz/latest/examples/imbalanced-learning/
+        #
+        # - n_models=10: Default number of trees in ensemble
+        # - max_features="sqrt": Default, sqrt of features per split
+        # - lambda_value=6: Default Leveraging Bagging parameter
+        # - metric=ROCAUC(): RECOMMENDED by River for imbalanced fraud detection
+        #   (River's imbalanced-learning guide uses ROCAUC for fraud detection)
+        # - disable_weighted_vote=False: Enable weighted voting for better accuracy
+        # - drift_detector ADWIN(delta=0.002): Default sensitivity (0.002)
+        # - warning_detector ADWIN(delta=0.01): Default warning sensitivity
+        # - grace_period=50: Default observations between split attempts
+        # - max_depth=None: Default, unlimited tree depth
+        # - split_criterion="info_gain": Default, information gain criterion
+        # - delta=0.01: Default allowed error in split decision
+        # - tau=0.05: Default tie-breaking threshold
+        # - leaf_prediction="nba": Default, Naive Bayes Adaptive
+        # - nb_threshold=0: Default, enable NB immediately
+        # - binary_split=False: Default, allow multi-way splits
+        # - min_branch_fraction=0.01: Default minimum data per branch
+        # - max_share_to_split=0.99: Default majority class proportion
+        # - max_size=100.0: Default max memory in MiB
+        # - memory_estimate_period=2000000: Default instances between memory checks
+        # - merit_preprune=True: Default merit-based pre-pruning
         return forest.ARFClassifier(
             n_models = 10,
-            drift_detector = drift.ADWIN(),
-            warning_detector = drift.ADWIN(),
-            metric = metrics.ROCAUC(),
             max_features = "sqrt",
             lambda_value = 6,
-            seed = 42
+            metric = metrics.ROCAUC(),
+            disable_weighted_vote = False,
+            drift_detector = drift.ADWIN(delta = 0.002),
+            warning_detector = drift.ADWIN(delta = 0.01),
+            grace_period = 50,
+            max_depth = None,
+            split_criterion = "info_gain",
+            delta = 0.01,
+            tau = 0.05,
+            leaf_prediction = "nba",
+            nb_threshold = 0,
+            nominal_attributes = None,
+            binary_split = False,
+            min_branch_fraction = 0.01,
+            max_share_to_split = 0.99,
+            max_size = 100.0,
+            memory_estimate_period = 2000000,
+            stop_mem_management = False,
+            remove_poor_attrs = False,
+            merit_preprune = True,
+            seed = 42,
         )
     elif project_name == "Estimated Time of Arrival":
+        # =================================================================
+        # ARFRegressor - Adaptive Random Forest Regressor
+        # For ETA prediction with continuous drift handling
+        # =================================================================
+        # OLD CONFIGURATION:
+        # return forest.ARFRegressor(
+        #     n_models = 10,
+        #     drift_detector = drift.ADWIN(),
+        #     warning_detector = drift.ADWIN(),
+        #     metric = metrics.RMSE(),
+        #     max_features = "sqrt",
+        #     lambda_value = 6,
+        #     seed = 42
+        # )
+
+        # CONFIGURATION based on River ML documentation:
+        # Reference: https://riverml.xyz/latest/api/forest/ARFRegressor/
+        #
+        # - n_models=10: Default number of trees
+        # - max_features="sqrt": Default feature selection
+        # - aggregation_method="median": Default, robust to outliers
+        # - lambda_value=6: Default Leveraging Bagging parameter
+        # - metric=MAE(): Using MAE as it's common for ETA prediction
+        # - disable_weighted_vote=True: Default for regressor
+        # - drift_detector ADWIN(delta=0.002): Default sensitivity
+        # - warning_detector ADWIN(delta=0.01): Default warning sensitivity
+        # - grace_period=50: Default observations between split attempts
+        # - max_depth=None: Default unlimited depth
+        # - delta=0.01: Default allowed error
+        # - tau=0.05: Default tie-breaking threshold
+        # - leaf_prediction="adaptive": Default, dynamically chooses mean/model
+        # - model_selector_decay=0.95: Default decay for leaf model selection
+        # - min_samples_split=5: Default minimum samples for split
+        # - binary_split=False: Default multi-way splits
+        # - max_size=500.0: Default max memory in MiB
         return forest.ARFRegressor(
-            n_models = 10,
-            drift_detector = drift.ADWIN(),
-            warning_detector = drift.ADWIN(),
-            metric = metrics.RMSE(),
-            max_features = "sqrt",
-            lambda_value = 6,
-            seed = 42
+            n_models=10,
+            max_features="sqrt",
+            aggregation_method="median",
+            lambda_value=6,
+            metric=metrics.MAE(),
+            disable_weighted_vote=True,
+            drift_detector=drift.ADWIN(delta=0.002),
+            warning_detector=drift.ADWIN(delta=0.01),
+            grace_period=50,
+            max_depth=None,
+            delta=0.01,
+            tau=0.05,
+            leaf_prediction="adaptive",
+            leaf_model=None,
+            model_selector_decay=0.95,
+            min_samples_split=5,
+            binary_split=False,
+            max_size=500.0,
+            memory_estimate_period=2000000,
+            nominal_attributes=None,
+            seed=42,
         )
     elif project_name == "E-Commerce Customer Interactions":
+        # =================================================================
+        # DBSTREAM - Density-Based Stream Clustering
+        # For customer behavior clustering with arbitrary shapes
+        # =================================================================
+        # OLD CONFIGURATION:
+        # return cluster.DBSTREAM(
+        #     clustering_threshold = 1.0,
+        #     fading_factor = 0.01,
+        #     cleanup_interval = 2,
+        # )
+
+        # CONFIGURATION based on River ML documentation example:
+        # Reference: https://riverml.xyz/latest/api/cluster/DBSTREAM/
+        #
+        # The River documentation provides this exact example configuration:
+        # - clustering_threshold=1.5: Micro-cluster radius
+        # - fading_factor=0.05: Historical data importance (must be > 0)
+        # - cleanup_interval=4: Time between cleanup processes
+        # - intersection_factor=0.5: Cluster overlap ratio for connectivity
+        # - minimum_weight=1.0: Threshold for non-noisy cluster classification
         return cluster.DBSTREAM(
-            clustering_threshold = 1.0,
-            fading_factor = 0.01,
-            cleanup_interval = 2,
+            clustering_threshold=1.5,
+            fading_factor=0.05,
+            cleanup_interval=4,
+            intersection_factor=0.5,
+            minimum_weight=1.0,
         )
     elif project_name == "Sales Forecasting":
+        # =================================================================
+        # SNARIMAX - Seasonal Non-linear Auto-Regressive Integrated
+        # Moving Average with eXogenous inputs
+        # For sales forecasting with weekly seasonality
+        # =================================================================
+        # OLD CONFIGURATION:
+        # regressor_snarimax = linear_model.PARegressor(
+        #     C = 0.01,
+        #     mode = 1)
+        # return time_series.SNARIMAX(
+        #     p = 2,
+        #     d = 1,
+        #     q = 1,
+        #     m = 7,
+        #     sp = 1,
+        #     sd = 0,
+        #     sq = 1,
+        #     regressor = regressor_snarimax
+        # )
+
+        # CONFIGURATION based on River ML documentation:
+        # Reference: https://riverml.xyz/latest/api/time-series/SNARIMAX/
+        # Reference: https://riverml.xyz/latest/api/linear-model/PARegressor/
+        #
+        # SNARIMAX parameters for weekly sales data:
+        # - p=7: Past 7 days of target values (full week)
+        # - d=1: First-order differencing for trend removal
+        # - q=2: Past error terms for noise handling
+        # - m=7: Weekly seasonality period
+        # - sp=1: Seasonal autoregressive order
+        # - sd=1: Seasonal differencing (recommended for seasonal data)
+        # - sq=1: Seasonal moving average order
+        #
+        # PARegressor parameters (defaults from River docs):
+        # - C=1.0: Default regularization strength
+        # - mode=1: Default algorithm mode
+        # - eps=0.1: Default tolerance parameter
+        # - learn_intercept=True: Default bias learning
         regressor_snarimax = linear_model.PARegressor(
-            C = 0.01, 
-            mode = 1)
+            C=1.0,
+            mode=1,
+            eps=0.1,
+            learn_intercept=True,
+        )
         return time_series.SNARIMAX(
-            p = 2,
-            d = 1,
-            q = 1,
-            m = 7,
-            sp = 1,
-            sd = 0,
-            sq = 1,
-            regressor = regressor_snarimax
+            p=7,
+            d=1,
+            q=2,
+            m=7,
+            sp=1,
+            sd=1,
+            sq=1,
+            regressor=regressor_snarimax,
         )
     else:
         raise ValueError(f"Unknown project: {project_name}")
@@ -1585,7 +1780,6 @@ def create_consumer(project_name, max_retries: int = 5, retry_delay: float = 5.0
     Note: Uses manual partition assignment instead of group-based subscription
     due to Kafka 4.0 compatibility issues with kafka-python's consumer group protocol.
     """
-    from kafka import TopicPartition
     consumer_name_dict = {
         "Transaction Fraud Detection": "transaction_fraud_detection",
         "Estimated Time of Arrival": "estimated_time_of_arrival",

@@ -47,13 +47,27 @@ signal.signal(signal.SIGINT, signal_handler)
 
 
 def main():
+    """River ML Training for Estimated Time of Arrival.
+
+    Continues training from the best model in MLflow.
+    """
     # Initialize model and metrics
+    print(f"Connecting to MLflow at http://{MLFLOW_HOST}:5000")
     mlflow.set_tracking_uri(f"http://{MLFLOW_HOST}:5000")
     mlflow.set_experiment(PROJECT_NAME)
+    print(f"MLflow experiment '{PROJECT_NAME}' set successfully")
+
+    # Load or create model and encoders from MLflow
+    print("Loading model from MLflow (best historical model)")
     encoders = load_or_create_encoders(PROJECT_NAME, "river")
     model = load_or_create_model(PROJECT_NAME, MODEL_NAME)
+
+    print("Encoders loaded")
+    print(f"Model loaded: {model.__class__.__name__}")
+
     # Load last processed Kafka offset from MLflow
     last_offset = load_kafka_offset_from_mlflow(PROJECT_NAME)
+
     # Create consumer with starting offset
     consumer = create_consumer(PROJECT_NAME, start_offset=last_offset)
     print("Consumer started. Waiting for transactions...")
@@ -88,6 +102,7 @@ def main():
     with mlflow.start_run(run_name = model.__class__.__name__):
         # Log traceability tags for model lineage
         if best_run_id:
+            mlflow.set_tag("training_mode", "continued")
             mlflow.set_tag("continued_from_run", best_run_id)
             # Log all baseline metrics as tags
             for metric_name in regression_metrics:
@@ -96,7 +111,7 @@ def main():
             print(f"Traceability tags set: continued_from_run={best_run_id}")
         else:
             mlflow.set_tag("training_mode", "from_scratch")
-            print("Starting fresh training (no previous model)")
+            print("Starting training from scratch (no previous model in MLflow)")
         print("MLflow run started, entering consumer loop...")
         try:
             # Use while loop to handle consumer timeout and check for shutdown

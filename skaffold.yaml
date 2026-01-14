@@ -106,6 +106,13 @@ portForward:
     port: 9001
     localPort: 9001
     address: 0.0.0.0
+  # Kafka
+  - resourceType: service
+    resourceName: coelho-realtime-kafka
+    namespace: coelho-realtime
+    port: 9092
+    localPort: 9092
+    address: 0.0.0.0
   # River ML Training
   - resourceType: service
     resourceName: coelho-realtime-river
@@ -140,13 +147,6 @@ portForward:
     namespace: coelho-realtime
     port: 9094
     localPort: 9094
-    address: 0.0.0.0
-  # Kafka client (for external access/testing)
-  - resourceType: service
-    resourceName: coelho-realtime-kafka
-    namespace: coelho-realtime
-    port: 9092
-    localPort: 9092
     address: 0.0.0.0
   # Spark Master Web UI (shows running applications, workers, streaming jobs)
   - resourceType: service
@@ -231,3 +231,5 @@ profiles:
 
 # NOTE: When useBuildkit is set to true (line 58), docker-buildx must be installed.
 # Install it via your package manager (e.g., `sudo pacman -S docker-buildx` on Arch Linux).
+
+# sh mirror_localhost_tailscale.sh 5001 3000 8000 9000 9001 8002 8003 9090 3001 9094 9092 4040

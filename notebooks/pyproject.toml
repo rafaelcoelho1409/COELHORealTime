@@ -1,0 +1,20 @@
+[project]
+name = "notebooks"
+version = "0.1.0"
+description = "Jupyter Notebooks - COELHO RealTime"
+requires-python = ">=3.13"
+dependencies = [
+    "river",
+    "kafka-python>=2.0.2",
+    "typing-extensions",
+    "polars",
+    "deltalake",
+    "python-dotenv",
+    "pandas",
+    "pyarrow",
+    "orjson",
+    "tqdm",
+]
+
+[dependency-groups]
+dev = []

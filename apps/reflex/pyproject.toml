@@ -10,6 +10,7 @@ dependencies = [
     "plotly",
     "folium",
     "prometheus-fastapi-instrumentator",
+    "orjson",
 ]
 
 [build-system]

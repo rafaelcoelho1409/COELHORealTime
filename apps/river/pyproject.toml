@@ -1,5 +1,5 @@
 [project]
-name = "river-service"
+name = "coelho-realtime-river"
 version = "0.1.0"
 description = "River ML Training Service - Incremental machine learning with real-time Kafka streaming"
 requires-python = ">=3.13"

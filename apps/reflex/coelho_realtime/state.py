@@ -5,12 +5,33 @@ import datetime as dt
 import json
 import plotly.graph_objects as go
 import folium
+import orjson
+from pathlib import Path
 from .utils import httpx_client_post, httpx_client_get
 
 RIVER_HOST = os.getenv("RIVER_HOST", "localhost")
 RIVER_BASE_URL = f"http://{RIVER_HOST}:8002"
 SKLEARN_HOST = os.getenv("SKLEARN_HOST", "localhost")
 SKLEARN_BASE_URL = f"http://{SKLEARN_HOST}:8003"
+
+# =============================================================================
+# Metric Info Loader (LaTeX formulas and contextual explanations)
+# =============================================================================
+def load_metric_info(project_key: str) -> dict:
+    """Load metric info JSON for a project using orjson."""
+    data_dir = Path(__file__).parent / "data"
+    file_path = data_dir / f"metric_info_{project_key}.json"
+    if file_path.exists():
+        with open(file_path, "rb") as f:
+            return orjson.loads(f.read())
+    return {"metrics": {}}
+
+# Load metric info at module startup
+METRIC_INFO = {
+    "tfd": load_metric_info("tfd"),
+    # Future: "eta": load_metric_info("eta"),
+    # Future: "ecci": load_metric_info("ecci"),
+}
 
 
 # =============================================================================
@@ -182,6 +203,10 @@ class State(rx.State):
         "Transaction Fraud Detection": {},
         "Estimated Time of Arrival": {},
         "E-Commerce Customer Interactions": {}
+    }
+    # Report metrics from MLflow artifacts (ConfusionMatrix, ClassificationReport)
+    report_metrics: dict = {
+        "Transaction Fraud Detection": {},
     }
     # Incremental ML model availability (checked from MLflow)
     incremental_model_available: dict = {
@@ -402,23 +427,297 @@ class State(rx.State):
 
         return fig
 
+    # =========================================================================
+    # MLflow Run Info (shared across all pages)
+    # =========================================================================
+    @rx.var
+    def mlflow_run_info(self) -> dict[str, dict]:
+        """Get MLflow run info for all projects (run_id, status, is_live, start_time)."""
+        result = {}
+        for project_name in ["Transaction Fraud Detection", "Estimated Time of Arrival", "E-Commerce Customer Interactions"]:
+            metrics = self.mlflow_metrics.get(project_name, {})
+            if not isinstance(metrics, dict):
+                result[project_name] = {"run_id": "", "run_id_full": "", "status": "", "is_live": False, "start_time": ""}
+                continue
+            run_id = metrics.get("run_id", "")
+            status = metrics.get("status", "")
+            is_live = metrics.get("is_live", False)
+            start_time = metrics.get("start_time")
+            # Format start_time if available
+            start_time_str = ""
+            if start_time:
+                try:
+                    start_time_str = dt.datetime.fromtimestamp(start_time / 1000).strftime("%Y-%m-%d %H:%M:%S")
+                except:
+                    start_time_str = str(start_time)
+            result[project_name] = {
+                "run_id": run_id[:8] if run_id else "",  # Short ID for display
+                "run_id_full": run_id,
+                "status": status,
+                "is_live": is_live,
+                "start_time": start_time_str,
+            }
+        return result
+
     # Transaction Fraud Detection metrics (consolidated)
+    # All 13 metrics from River ML training:
+    # Class-based (10): Recall, Precision, F1, FBeta, Accuracy, BalancedAccuracy, MCC, GeometricMean, CohenKappa, Jaccard
+    # Proba-based (3): ROCAUC, RollingROCAUC, LogLoss
     @rx.var
     def tfd_metrics(self) -> dict[str, str]:
         """Get all TFD metrics as formatted percentage strings."""
         metrics = self.mlflow_metrics.get("Transaction Fraud Detection", {})
         if not isinstance(metrics, dict):
             return {
-                "f1": "0.00%", "accuracy": "0.00%", "recall": "0.00%",
-                "precision": "0.00%", "rocauc": "0.00%", "geometric_mean": "0.00%"
+                # Primary metrics
+                "fbeta": "0.00%", "rocauc": "0.00%", "precision": "0.00%", "recall": "0.00%",
+                # Secondary metrics
+                "mcc": "0.00", "balanced_accuracy": "0.00%",
+                # Additional metrics
+                "f1": "0.00%", "accuracy": "0.00%", "geometric_mean": "0.00%",
+                "cohen_kappa": "0.00", "jaccard": "0.00%",
+                "rolling_rocauc": "0.00%", "logloss": "0.000"
             }
         return {
+            # Primary metrics (KPI indicators)
+            "fbeta": f"{(metrics.get('metrics.FBeta') or 0) * 100:.2f}%",
+            "rocauc": f"{(metrics.get('metrics.ROCAUC') or 0) * 100:.2f}%",
+            "precision": f"{(metrics.get('metrics.Precision') or 0) * 100:.2f}%",
+            "recall": f"{(metrics.get('metrics.Recall') or 0) * 100:.2f}%",
+            # Secondary metrics (gauges) - MCC/CohenKappa range is -1 to 1, not percentage
+            "mcc": f"{(metrics.get('metrics.MCC') or 0):.3f}",
+            "balanced_accuracy": f"{(metrics.get('metrics.BalancedAccuracy') or 0) * 100:.2f}%",
+            # Additional metrics (grid)
             "f1": f"{(metrics.get('metrics.F1') or 0) * 100:.2f}%",
             "accuracy": f"{(metrics.get('metrics.Accuracy') or 0) * 100:.2f}%",
-            "recall": f"{(metrics.get('metrics.Recall') or 0) * 100:.2f}%",
-            "precision": f"{(metrics.get('metrics.Precision') or 0) * 100:.2f}%",
-            "rocauc": f"{(metrics.get('metrics.ROCAUC') or 0) * 100:.2f}%",
             "geometric_mean": f"{(metrics.get('metrics.GeometricMean') or 0) * 100:.2f}%",
+            "cohen_kappa": f"{(metrics.get('metrics.CohenKappa') or 0):.3f}",
+            "jaccard": f"{(metrics.get('metrics.Jaccard') or 0) * 100:.2f}%",
+            "rolling_rocauc": f"{(metrics.get('metrics.RollingROCAUC') or 0) * 100:.2f}%",
+            "logloss": f"{(metrics.get('metrics.LogLoss') or 0):.4f}",
+        }
+
+    @rx.var
+    def tfd_metrics_raw(self) -> dict[str, float]:
+        """Get all TFD metrics as raw float values for Plotly charts."""
+        metrics = self.mlflow_metrics.get("Transaction Fraud Detection", {})
+        if not isinstance(metrics, dict):
+            return {
+                "fbeta": 0.0, "rocauc": 0.0, "precision": 0.0, "recall": 0.0,
+                "mcc": 0.0, "balanced_accuracy": 0.0, "f1": 0.0, "accuracy": 0.0,
+                "geometric_mean": 0.0, "cohen_kappa": 0.0, "jaccard": 0.0,
+                "rolling_rocauc": 0.0, "logloss": 0.0
+            }
+        return {
+            "fbeta": float(metrics.get('metrics.FBeta') or 0),
+            "rocauc": float(metrics.get('metrics.ROCAUC') or 0),
+            "precision": float(metrics.get('metrics.Precision') or 0),
+            "recall": float(metrics.get('metrics.Recall') or 0),
+            "mcc": float(metrics.get('metrics.MCC') or 0),
+            "balanced_accuracy": float(metrics.get('metrics.BalancedAccuracy') or 0),
+            "f1": float(metrics.get('metrics.F1') or 0),
+            "accuracy": float(metrics.get('metrics.Accuracy') or 0),
+            "geometric_mean": float(metrics.get('metrics.GeometricMean') or 0),
+            "cohen_kappa": float(metrics.get('metrics.CohenKappa') or 0),
+            "jaccard": float(metrics.get('metrics.Jaccard') or 0),
+            "rolling_rocauc": float(metrics.get('metrics.RollingROCAUC') or 0),
+            "logloss": float(metrics.get('metrics.LogLoss') or 0),
+        }
+
+    @rx.var
+    def tfd_dashboard_figures(self) -> dict:
+        """Generate all TFD dashboard Plotly figures (KPI indicators, gauges, confusion matrix)."""
+        raw = self.tfd_metrics_raw
+        report_data = self.report_metrics.get("Transaction Fraud Detection", {})
+        mlflow_data = self.mlflow_metrics.get("Transaction Fraud Detection", {})
+
+        # Extract baseline metrics for delta calculation
+        baseline = {
+            "fbeta": mlflow_data.get("baseline_FBeta", 0),
+            "rocauc": mlflow_data.get("baseline_ROCAUC", 0),
+            "precision": mlflow_data.get("baseline_Precision", 0),
+            "recall": mlflow_data.get("baseline_Recall", 0),
+            "rolling_rocauc": mlflow_data.get("baseline_RollingROCAUC", 0),
+        }
+
+        def create_kpi(value: float, title: str, baseline_val: float = 0) -> go.Figure:
+            """Create KPI indicator with percentage display and delta from baseline."""
+            display_value = value * 100
+            if value >= 0.85:
+                color = "#3b82f6"  # blue - excellent
+            elif value >= 0.70:
+                color = "#22c55e"  # green - good
+            elif value >= 0.50:
+                color = "#eab308"  # yellow - fair
+            else:
+                color = "#ef4444"  # red - poor
+
+            # Configure delta if baseline exists
+            delta_config = None
+            if baseline_val > 0:
+                delta_config = {
+                    "reference": baseline_val * 100,
+                    "relative": True,
+                    "valueformat": ".1%",
+                    "increasing": {"color": "#22c55e"},
+                    "decreasing": {"color": "#ef4444"}
+                }
+
+            fig = go.Figure(go.Indicator(
+                mode="number+delta" if delta_config else "number",
+                value=display_value,
+                delta=delta_config,
+                title={"text": f"<b>{title}</b>", "font": {"size": 14}},
+                number={"suffix": "%", "font": {"size": 28, "color": color}, "valueformat": ".1f"}
+            ))
+            fig.update_layout(
+                height=110, margin=dict(l=10, r=10, t=40, b=10),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)"
+            )
+            return fig
+
+        def create_gauge(value: float, title: str, min_val: float = 0, max_val: float = 1) -> go.Figure:
+            """Create gauge with colored ranges."""
+            if min_val == -1:  # MCC/CohenKappa range
+                steps = [
+                    {"range": [-1, 0], "color": "#ef4444"},
+                    {"range": [0, 0.4], "color": "#eab308"},
+                    {"range": [0.4, 0.6], "color": "#22c55e"},
+                    {"range": [0.6, 1], "color": "#3b82f6"}
+                ]
+                threshold_val = 0.5
+            else:  # 0-1 range
+                steps = [
+                    {"range": [0, 0.5], "color": "#ef4444"},
+                    {"range": [0.5, 0.7], "color": "#eab308"},
+                    {"range": [0.7, 0.85], "color": "#22c55e"},
+                    {"range": [0.85, 1], "color": "#3b82f6"}
+                ]
+                threshold_val = 0.8
+
+            fig = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=value,
+                title={"text": f"<b>{title}</b>", "font": {"size": 14}},
+                number={"valueformat": ".3f", "font": {"size": 24}},
+                gauge={
+                    "axis": {"range": [min_val, max_val], "tickwidth": 1},
+                    "bar": {"color": "#1e40af"},
+                    "steps": steps,
+                    "threshold": {"value": threshold_val, "line": {"color": "black", "width": 2}, "thickness": 0.75}
+                }
+            ))
+            fig.update_layout(
+                height=180, margin=dict(l=20, r=20, t=40, b=10),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)"
+            )
+            return fig
+
+        def create_confusion_matrix() -> go.Figure:
+            """Create confusion matrix heatmap."""
+            cm = report_data.get("confusion_matrix", {})
+            if not cm.get("available", False):
+                fig = go.Figure()
+                fig.add_annotation(
+                    text="No data available yet",
+                    xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False,
+                    font=dict(size=14, color="gray")
+                )
+                fig.update_layout(
+                    title={"text": "<b>Confusion Matrix</b>", "font": {"size": 14}},
+                    height=250, margin=dict(l=20, r=20, t=50, b=20),
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    xaxis=dict(visible=False), yaxis=dict(visible=False)
+                )
+                return fig
+
+            tn, fp, fn, tp = cm["tn"], cm["fp"], cm["fn"], cm["tp"]
+            z = [[tn, fp], [fn, tp]]
+            text = [[f"TN<br>{tn:,}", f"FP<br>{fp:,}"], [f"FN<br>{fn:,}", f"TP<br>{tp:,}"]]
+
+            fig = go.Figure(go.Heatmap(
+                z=z, x=["Pred: 0", "Pred: 1"], y=["Actual: 0", "Actual: 1"],
+                colorscale="Blues", text=text, texttemplate="%{text}",
+                textfont={"size": 12}, showscale=False
+            ))
+            fig.update_layout(
+                title={"text": "<b>Confusion Matrix</b>", "font": {"size": 14}},
+                height=250, margin=dict(l=20, r=20, t=50, b=20),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                yaxis={"autorange": "reversed"}
+            )
+            return fig
+
+        def create_classification_report() -> go.Figure:
+            """Create YellowBrick-style classification report heatmap."""
+            cm = report_data.get("confusion_matrix", {})
+            if not cm.get("available", False):
+                fig = go.Figure()
+                fig.add_annotation(
+                    text="No data available yet",
+                    xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False,
+                    font=dict(size=14, color="gray")
+                )
+                fig.update_layout(
+                    title={"text": "<b>Classification Report</b>", "font": {"size": 14}},
+                    height=250, margin=dict(l=20, r=20, t=50, b=20),
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    xaxis=dict(visible=False), yaxis=dict(visible=False)
+                )
+                return fig
+
+            tn, fp, fn, tp = cm["tn"], cm["fp"], cm["fn"], cm["tp"]
+
+            # Calculate per-class metrics
+            # Class 0 (Not Fraud): TN=correct, FN=missed (predicted 1 when actual 0)
+            prec_0 = tn / (tn + fn) if (tn + fn) > 0 else 0
+            rec_0 = tn / (tn + fp) if (tn + fp) > 0 else 0
+            f1_0 = 2 * prec_0 * rec_0 / (prec_0 + rec_0) if (prec_0 + rec_0) > 0 else 0
+            support_0 = tn + fp
+
+            # Class 1 (Fraud): TP=correct, FP=false alarm
+            prec_1 = tp / (tp + fp) if (tp + fp) > 0 else 0
+            rec_1 = tp / (tp + fn) if (tp + fn) > 0 else 0
+            f1_1 = 2 * prec_1 * rec_1 / (prec_1 + rec_1) if (prec_1 + rec_1) > 0 else 0
+            support_1 = tp + fn
+
+            # Build heatmap data (rows=classes, cols=metrics)
+            z = [[prec_0, rec_0, f1_0], [prec_1, rec_1, f1_1]]
+            text = [[f"{v:.2f}" for v in row] for row in z]
+
+            fig = go.Figure(go.Heatmap(
+                z=z,
+                x=["Precision", "Recall", "F1"],
+                y=[f"0 (n={support_0:,})", f"1 (n={support_1:,})"],
+                colorscale="YlOrRd",  # YellowBrick default
+                text=text,
+                texttemplate="%{text}",
+                textfont={"size": 14, "color": "black"},
+                showscale=True,
+                zmin=0, zmax=1,
+                colorbar={"len": 0.8, "thickness": 10}
+            ))
+            fig.update_layout(
+                title={"text": "<b>Classification Report</b>", "font": {"size": 14}},
+                height=250, margin=dict(l=20, r=80, t=50, b=20),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                yaxis={"autorange": "reversed"}
+            )
+            return fig
+
+        return {
+            # ROW 1: KPI Indicators (primary metrics with delta from baseline)
+            "kpi_fbeta": create_kpi(raw["fbeta"], "FBeta (β=2)", baseline["fbeta"]),
+            "kpi_rocauc": create_kpi(raw["rocauc"], "ROC AUC", baseline["rocauc"]),
+            "kpi_precision": create_kpi(raw["precision"], "Precision", baseline["precision"]),
+            "kpi_recall": create_kpi(raw["recall"], "Recall", baseline["recall"]),
+            "kpi_rolling_rocauc": create_kpi(raw["rolling_rocauc"], "Rolling AUC", baseline["rolling_rocauc"]),
+            # ROW 2: Gauges (secondary metrics)
+            "gauge_mcc": create_gauge(raw["mcc"], "MCC", min_val=-1, max_val=1),
+            "gauge_balanced_accuracy": create_gauge(raw["balanced_accuracy"], "Balanced Accuracy"),
+            # Confusion Matrix + Classification Report
+            "confusion_matrix": create_confusion_matrix(),
+            "classification_report": create_classification_report(),
         }
 
     @rx.var
@@ -1247,7 +1546,7 @@ class State(rx.State):
                     url = f"{RIVER_BASE_URL}/switch_model",
                     json = {
                         "model_key": model_key,
-                        "project_name": project_name
+                        "project_name": project_name,
                     },
                     timeout = 30.0
                 )
@@ -1607,8 +1906,27 @@ class State(rx.State):
                     **self.mlflow_metrics,
                     project_name: response.json()
                 }
+            # Also fetch report metrics (ConfusionMatrix, ClassificationReport)
+            if project_name == "Transaction Fraud Detection":
+                await self._fetch_report_metrics_internal(project_name, model_name)
         except Exception as e:
             print(f"Error fetching MLflow metrics: {e}")
+
+    async def _fetch_report_metrics_internal(self, project_name: str, model_name: str):
+        """Internal helper to fetch report metrics from MLflow artifacts."""
+        try:
+            response = await httpx_client_post(
+                url=f"{RIVER_BASE_URL}/report_metrics",
+                json={"project_name": project_name, "model_name": model_name},
+                timeout=30.0
+            )
+            async with self:
+                self.report_metrics = {
+                    **self.report_metrics,
+                    project_name: response.json()
+                }
+        except Exception as e:
+            print(f"Error fetching report metrics: {e}")
 
     @rx.event(background = True)
     async def get_mlflow_metrics(self, project_name: str):
@@ -1628,6 +1946,9 @@ class State(rx.State):
                     **self.mlflow_metrics,
                     project_name: response.json()
                 }
+            # Also fetch report metrics (ConfusionMatrix, ClassificationReport)
+            if project_name == "Transaction Fraud Detection":
+                await self._fetch_report_metrics_internal(project_name, model_name)
         except Exception as e:
             print(f"Error fetching MLflow metrics: {e}")
             async with self:
@@ -1655,6 +1976,9 @@ class State(rx.State):
                     **self.mlflow_metrics,
                     project_name: response.json()
                 }
+            # Also refresh report metrics (ConfusionMatrix, ClassificationReport)
+            if project_name == "Transaction Fraud Detection":
+                await self._fetch_report_metrics_internal(project_name, model_name)
             yield rx.toast.success(
                 "Metrics refreshed",
                 description = f"Latest metrics loaded for {project_name}",
@@ -2232,15 +2556,16 @@ class State(rx.State):
         opts = self.dropdown_options.get(project_name, {})
         now = dt.datetime.now()
         # Generate random form data using loaded dropdown options
+        # Use `or` to handle both missing keys AND empty lists
         form_data = {
             # Dropdown fields - pick random from loaded options
-            "currency": random.choice(opts.get("currency", ["USD"])),
-            "merchant_id": random.choice(opts.get("merchant_id", ["merchant_1"])),
-            "product_category": random.choice(opts.get("product_category", ["electronics"])),
-            "transaction_type": random.choice(opts.get("transaction_type", ["purchase"])),
-            "payment_method": random.choice(opts.get("payment_method", ["credit_card"])),
-            "browser": random.choice(opts.get("browser", ["Chrome"])),
-            "os": random.choice(opts.get("os", ["Windows"])),
+            "currency": random.choice(opts.get("currency") or ["USD"]),
+            "merchant_id": random.choice(opts.get("merchant_id") or ["merchant_1"]),
+            "product_category": random.choice(opts.get("product_category") or ["electronics"]),
+            "transaction_type": random.choice(opts.get("transaction_type") or ["purchase"]),
+            "payment_method": random.choice(opts.get("payment_method") or ["credit_card"]),
+            "browser": random.choice(opts.get("browser") or ["Chrome"]),
+            "os": random.choice(opts.get("os") or ["Windows"]),
             # Numeric fields - random within realistic bounds
             "amount": str(round(random.uniform(10.0, 5000.0), 2)),
             "account_age_days": str(random.randint(1, 3650)),
@@ -2284,12 +2609,13 @@ class State(rx.State):
         dest_lon = round(random.uniform(-95.8, -95.0), 6)
         # Estimate distance based on coordinates
         distance_km = round(abs(origin_lat - dest_lat) * 111 + abs(origin_lon - dest_lon) * 85, 2)
+        # Use `or` to handle both missing keys AND empty lists
         form_data = {
             # Dropdown fields - pick random from loaded options
-            "driver_id": random.choice(opts.get("driver_id", ["driver_1000"])),
-            "vehicle_id": random.choice(opts.get("vehicle_id", ["vehicle_100"])),
-            "weather": random.choice(opts.get("weather", ["Clear"])),
-            "vehicle_type": random.choice(opts.get("vehicle_type", ["Sedan"])),
+            "driver_id": random.choice(opts.get("driver_id") or ["driver_1000"]),
+            "vehicle_id": random.choice(opts.get("vehicle_id") or ["vehicle_100"]),
+            "weather": random.choice(opts.get("weather") or ["Clear"]),
+            "vehicle_type": random.choice(opts.get("vehicle_type") or ["Sedan"]),
             # Timestamp fields
             "timestamp_date": now.strftime("%Y-%m-%d"),
             "timestamp_time": now.strftime("%H:%M"),
@@ -2327,13 +2653,14 @@ class State(rx.State):
         project_name = "E-Commerce Customer Interactions"
         opts = self.dropdown_options.get(project_name, {})
         now = dt.datetime.now()
+        # Use `or` to handle both missing keys AND empty lists
         form_data = {
             # Dropdown fields - pick random from loaded options
-            "browser": random.choice(opts.get("browser", ["Chrome"])),
-            "device_type": random.choice(opts.get("device_type", ["Desktop"])),
-            "os": random.choice(opts.get("os", ["Windows"])),
-            "event_type": random.choice(opts.get("event_type", ["page_view"])),
-            "product_category": random.choice(opts.get("product_category", ["Electronics"])),
+            "browser": random.choice(opts.get("browser") or ["Chrome"]),
+            "device_type": random.choice(opts.get("device_type") or ["Desktop"]),
+            "os": random.choice(opts.get("os") or ["Windows"]),
+            "event_type": random.choice(opts.get("event_type") or ["page_view"]),
+            "product_category": random.choice(opts.get("product_category") or ["Electronics"]),
             # Text fields with realistic values
             "product_id": f"prod_{random.randint(1000, 1100)}",
             "referrer_url": random.choice([

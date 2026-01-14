@@ -108,7 +108,7 @@ def main():
             print(f"Traceability tags set: continued_from_run={best_run_id}")
         else:
             mlflow.set_tag("training_mode", "from_scratch")
-            print("Starting fresh training (no previous model)")
+            print("Starting training from scratch (no previous model)")
         print("MLflow run started, entering consumer loop...")
         try:
             # Use while loop to handle consumer timeout and check for shutdown
