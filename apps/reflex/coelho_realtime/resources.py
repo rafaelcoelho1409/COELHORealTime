@@ -1612,21 +1612,7 @@ def transaction_fraud_detection_metrics() -> rx.Component:
             spacing="2",
             width="100%"
         ),
-        # ROW 2: Gauges (secondary metrics)
-        rx.hstack(
-            gauge_card_with_info("gauge_mcc", "mcc"),
-            gauge_card_with_info("gauge_balanced_accuracy", "balanced_accuracy"),
-            spacing="2",
-            width="100%"
-        ),
-        # ROW 3: Confusion Matrix + Classification Report (side by side)
-        rx.hstack(
-            heatmap_card_with_info("confusion_matrix", "confusion_matrix"),
-            heatmap_card_with_info("classification_report", "classification_report"),
-            spacing="2",
-            width="100%"
-        ),
-        # ROW 4: Additional metrics (text cards with info buttons)
+        # ROW 2: Additional metrics (text cards with info buttons)
         rx.grid(
             metric_card("F1", State.tfd_metrics["f1"], "f1"),
             metric_card("Accuracy", State.tfd_metrics["accuracy"], "accuracy"),
@@ -1635,6 +1621,20 @@ def transaction_fraud_detection_metrics() -> rx.Component:
             metric_card("Jaccard", State.tfd_metrics["jaccard"], "jaccard"),
             metric_card("LogLoss", State.tfd_metrics["logloss"], "logloss"),
             columns="6",
+            spacing="2",
+            width="100%"
+        ),
+        # ROW 3: Gauges (secondary metrics)
+        rx.hstack(
+            gauge_card_with_info("gauge_mcc", "mcc"),
+            gauge_card_with_info("gauge_balanced_accuracy", "balanced_accuracy"),
+            spacing="2",
+            width="100%"
+        ),
+        # ROW 4: Confusion Matrix + Classification Report (side by side)
+        rx.hstack(
+            heatmap_card_with_info("confusion_matrix", "confusion_matrix"),
+            heatmap_card_with_info("classification_report", "classification_report"),
             spacing="2",
             width="100%"
         ),
