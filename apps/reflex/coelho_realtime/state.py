@@ -30,7 +30,7 @@ def load_metric_info(project_key: str) -> dict:
 METRIC_INFO = {
     "tfd": load_metric_info("tfd"),
     "eta": load_metric_info("eta"),
-    # Future: "ecci": load_metric_info("ecci"),
+    "ecci": load_metric_info("ecci"),
 }
 
 
@@ -1143,6 +1143,174 @@ class State(rx.State):
         )
         return fig
 
+    # =========================================================================
+    # ECCI Clustering Metrics
+    # =========================================================================
+    @rx.var
+    def ecci_metrics(self) -> dict[str, str]:
+        """Get all ECCI clustering metrics as formatted strings."""
+        metrics = self.mlflow_metrics.get("E-Commerce Customer Interactions", {})
+        if not isinstance(metrics, dict):
+            return {
+                "silhouette": "0.00",
+                "rolling_silhouette": "0.00",
+                "time_rolling_silhouette": "0.00",
+                "n_clusters": "0",
+                "n_micro_clusters": "0",
+            }
+        return {
+            "silhouette": f"{metrics.get('metrics.Silhouette', 0):.4f}",
+            "rolling_silhouette": f"{metrics.get('metrics.RollingSilhouette', 0):.4f}",
+            "time_rolling_silhouette": f"{metrics.get('metrics.TimeRollingSilhouette', 0):.4f}",
+            "n_clusters": f"{int(metrics.get('metrics.n_clusters', 0))}",
+            "n_micro_clusters": f"{int(metrics.get('metrics.n_micro_clusters', 0))}",
+        }
+
+    @rx.var
+    def ecci_metrics_raw(self) -> dict[str, float]:
+        """Get raw ECCI metrics as floats for dashboard calculations."""
+        metrics = self.mlflow_metrics.get("E-Commerce Customer Interactions", {})
+        if not isinstance(metrics, dict):
+            return {
+                "silhouette": 0, "rolling_silhouette": 0, "time_rolling_silhouette": 0,
+                "n_clusters": 0, "n_micro_clusters": 0,
+            }
+        return {
+            "silhouette": metrics.get("metrics.Silhouette", 0),
+            "rolling_silhouette": metrics.get("metrics.RollingSilhouette", 0),
+            "time_rolling_silhouette": metrics.get("metrics.TimeRollingSilhouette", 0),
+            "n_clusters": metrics.get("metrics.n_clusters", 0),
+            "n_micro_clusters": metrics.get("metrics.n_micro_clusters", 0),
+        }
+
+    @rx.var
+    def ecci_dashboard_figures(self) -> dict:
+        """Generate all ECCI dashboard Plotly figures (KPI indicators, gauges)."""
+        raw = self.ecci_metrics_raw
+        mlflow_data = self.mlflow_metrics.get("E-Commerce Customer Interactions", {})
+
+        # Extract baseline metrics for delta calculation
+        baseline = {
+            "silhouette": float(mlflow_data.get("baseline_Silhouette", 0) or 0),
+            "rolling_silhouette": float(mlflow_data.get("baseline_RollingSilhouette", 0) or 0),
+        }
+
+        def create_kpi_silhouette(value: float, title: str, baseline_val: float = 0) -> go.Figure:
+            """Create KPI indicator for Silhouette metrics (higher is better)."""
+            # Color coding: Silhouette ranges from -1 to 1, higher is better
+            if value >= 0.7:
+                color = "#3b82f6"  # blue - excellent
+            elif value >= 0.5:
+                color = "#22c55e"  # green - good
+            elif value >= 0.25:
+                color = "#eab308"  # yellow - fair
+            elif value >= 0:
+                color = "#f97316"  # orange - poor
+            else:
+                color = "#ef4444"  # red - negative (misclassification)
+
+            # Configure delta if baseline exists
+            delta_config = None
+            if baseline_val != 0:
+                delta_config = {
+                    "reference": baseline_val,
+                    "relative": True,
+                    "valueformat": ".1%",
+                    # For Silhouette, increasing is good
+                    "increasing": {"color": "#22c55e"},
+                    "decreasing": {"color": "#ef4444"}
+                }
+
+            fig = go.Figure(go.Indicator(
+                mode="number+delta" if delta_config else "number",
+                value=value,
+                delta=delta_config,
+                title={"text": f"<b>{title}</b>", "font": {"size": 14}},
+                number={"font": {"size": 28, "color": color}, "valueformat": ".4f"}
+            ))
+            fig.update_layout(
+                height=110, margin=dict(l=10, r=10, t=40, b=10),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)"
+            )
+            return fig
+
+        def create_kpi_count(value: float, title: str) -> go.Figure:
+            """Create KPI indicator for cluster counts."""
+            fig = go.Figure(go.Indicator(
+                mode="number",
+                value=value,
+                title={"text": f"<b>{title}</b>", "font": {"size": 14}},
+                number={"font": {"size": 28, "color": "#3b82f6"}, "valueformat": ".0f"}
+            ))
+            fig.update_layout(
+                height=110, margin=dict(l=10, r=10, t=40, b=10),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)"
+            )
+            return fig
+
+        def create_gauge_silhouette(value: float) -> go.Figure:
+            """Create Silhouette gauge (-1 to 1 scale, higher is better)."""
+            steps = [
+                {"range": [-1, 0], "color": "#ef4444"},     # red - misclassification
+                {"range": [0, 0.25], "color": "#f97316"},   # orange - weak structure
+                {"range": [0.25, 0.5], "color": "#eab308"}, # yellow - reasonable
+                {"range": [0.5, 0.7], "color": "#22c55e"},  # green - good
+                {"range": [0.7, 1], "color": "#3b82f6"}     # blue - excellent
+            ]
+            fig = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=value,
+                title={"text": "<b>Silhouette Score</b>", "font": {"size": 14}},
+                number={"valueformat": ".4f", "font": {"size": 24}},
+                gauge={
+                    "axis": {"range": [-1, 1], "tickwidth": 1},
+                    "bar": {"color": "#1e40af"},
+                    "steps": steps,
+                    "threshold": {"value": 0.5, "line": {"color": "black", "width": 2}, "thickness": 0.75}
+                }
+            ))
+            fig.update_layout(
+                height=180, margin=dict(l=20, r=20, t=40, b=10),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)"
+            )
+            return fig
+
+        def create_cluster_stats_indicator(n_clusters: float, n_micro: float) -> go.Figure:
+            """Create dual indicator for cluster statistics (same height as gauge)."""
+            fig = go.Figure()
+            # Left indicator: Macro Clusters
+            fig.add_trace(go.Indicator(
+                mode="number",
+                value=n_clusters,
+                title={"text": "<b>Macro Clusters</b>", "font": {"size": 12}},
+                number={"font": {"size": 36, "color": "#3b82f6"}, "valueformat": ".0f"},
+                domain={"x": [0, 0.45], "y": [0.1, 0.9]}
+            ))
+            # Right indicator: Micro Clusters
+            fig.add_trace(go.Indicator(
+                mode="number",
+                value=n_micro,
+                title={"text": "<b>Micro Clusters</b>", "font": {"size": 12}},
+                number={"font": {"size": 36, "color": "#8b5cf6"}, "valueformat": ".0f"},
+                domain={"x": [0.55, 1], "y": [0.1, 0.9]}
+            ))
+            fig.update_layout(
+                height=180, margin=dict(l=20, r=20, t=40, b=10),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)"
+            )
+            return fig
+
+        return {
+            # ROW 1: KPI Indicators (primary metrics)
+            "kpi_silhouette": create_kpi_silhouette(raw["silhouette"], "Silhouette", baseline["silhouette"]),
+            "kpi_rolling_silhouette": create_kpi_silhouette(raw["rolling_silhouette"], "Rolling Silhouette", baseline["rolling_silhouette"]),
+            "kpi_n_clusters": create_kpi_count(raw["n_clusters"], "Clusters"),
+            "kpi_n_micro_clusters": create_kpi_count(raw["n_micro_clusters"], "Micro Clusters"),
+            # ROW 2: Gauge + Cluster Stats
+            "gauge_silhouette": create_gauge_silhouette(raw["silhouette"]),
+            "cluster_stats": create_cluster_stats_indicator(raw["n_clusters"], raw["n_micro_clusters"]),
+        }
+
     # Average speed for initial ETA estimate (same as Kafka producer)
     _eta_avg_speed_kmh = 40
 
@@ -1519,12 +1687,12 @@ class State(rx.State):
             xaxis_title=selected_feature,
             yaxis_title='Count',
             barmode='group',
-            height=400,
-            margin=dict(l=40, r=20, t=50, b=100),
+            height=500,
+            margin=dict(l=40, r=20, t=50, b=150),
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
             xaxis_tickangle=-45,
-            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+            legend=dict(orientation='h', yanchor='top', y=-0.35, xanchor='center', x=0.5),
         )
         return fig
 
@@ -2041,6 +2209,7 @@ class State(rx.State):
     _mlflow_model_names: dict = {
         "Transaction Fraud Detection": "ARFClassifier",
         "Estimated Time of Arrival": "ARFRegressor",
+        "E-Commerce Customer Interactions": "DBSTREAM",
     }
 
     async def _fetch_mlflow_metrics_internal(self, project_name: str, force_refresh: bool = True):

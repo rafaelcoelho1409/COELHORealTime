@@ -94,7 +94,8 @@ KAFKA_OFFSET_ARTIFACT = "kafka_offset.json"
 BEST_METRIC_CRITERIA = {
     "Transaction Fraud Detection": {"metric_name": "FBeta", "maximize": True},
     "Estimated Time of Arrival": {"metric_name": "MAE", "maximize": False},
-    "E-Commerce Customer Interactions": None,  # Clustering - no metrics, use latest
+    # Clustering: Silhouette coefficient measures cluster quality (-1 to 1, higher is better)
+    "E-Commerce Customer Interactions": {"metric_name": "Silhouette", "maximize": True},
     "Sales Forecasting": {"metric_name": "MAE", "maximize": False},
 }
 

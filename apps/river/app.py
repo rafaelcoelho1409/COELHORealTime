@@ -48,6 +48,8 @@ from functions import (
     SQL_DEFAULT_LIMIT,
     # Best model selection (by metrics)
     get_best_mlflow_run,
+    # Model names mapping
+    MLFLOW_MODEL_NAMES,
 )
 
 
@@ -942,27 +944,47 @@ async def get_ordinal_encoder(request: OrdinalEncoderRequest):
 
 @app.get("/cluster_counts")
 async def get_cluster_counts():
-    """Get cluster counts from JSON file (for DBSTREAM clustering)."""
+    """Get cluster counts from MLflow artifacts (for DBSTREAM clustering)."""
     try:
-        with open("data/cluster_counts.json", 'r') as f:
+        project_name = "E-Commerce Customer Interactions"
+        model_name = MLFLOW_MODEL_NAMES.get(project_name)
+        run_id = get_best_mlflow_run(project_name, model_name)
+        if run_id is None:
+            return {}
+        local_path = mlflow.artifacts.download_artifacts(
+            run_id=run_id,
+            artifact_path="cluster_counts.json"
+        )
+        with open(local_path, 'r') as f:
             cluster_counts = json.load(f)
         return cluster_counts
-    except Exception:
+    except Exception as e:
+        print(f"Error fetching cluster counts from MLflow: {e}")
         return {}
 
 
 @app.post("/cluster_feature_counts")
 async def get_cluster_feature_counts(request: ClusterFeatureCountsRequest):
-    """Get cluster feature counts for a specific column."""
+    """Get cluster feature counts for a specific column from MLflow artifacts."""
     try:
-        with open("data/cluster_feature_counts.json", 'r') as f:
+        project_name = "E-Commerce Customer Interactions"
+        model_name = MLFLOW_MODEL_NAMES.get(project_name)
+        run_id = get_best_mlflow_run(project_name, model_name)
+        if run_id is None:
+            return {}
+        local_path = mlflow.artifacts.download_artifacts(
+            run_id=run_id,
+            artifact_path="cluster_feature_counts.json"
+        )
+        with open(local_path, 'r') as f:
             cluster_counts = json.load(f)
         clusters = list(cluster_counts.keys())
         return {
-            x: cluster_counts[x][request.column_name]
+            x: cluster_counts[x].get(request.column_name, {})
             for x in clusters
         }
-    except Exception:
+    except Exception as e:
+        print(f"Error fetching cluster feature counts from MLflow: {e}")
         return {}
 
 
@@ -1180,37 +1202,90 @@ async def page_init(request: PageInitRequest):
     }
 
     try:
-        # 1. Check model availability
+        # 1. Check model availability and get metrics
         experiment = mlflow.get_experiment_by_name(project_name)
         if experiment:
             experiment_url = f"http://localhost:5001/#/experiments/{experiment.experiment_id}"
-            best_run_id = get_best_mlflow_run(project_name, model_name)
-            if best_run_id:
-                run = mlflow.get_run(best_run_id)
-                metrics = {k: float(v) for k, v in run.data.metrics.items()}
-                # Add baseline metrics as tags
+
+            # First, check for RUNNING experiments (real-time training)
+            running_run_id = None
+            runs_df = mlflow.search_runs(
+                experiment_ids=[experiment.experiment_id],
+                filter_string="attributes.status = 'RUNNING'",
+                max_results=10,
+                order_by=["start_time DESC"]
+            )
+            if not runs_df.empty:
+                running_runs = runs_df[runs_df["tags.mlflow.runName"] == model_name]
+                if not running_runs.empty:
+                    running_run_id = running_runs.iloc[0]["run_id"]
+
+            # If training is active, use running experiment for metrics
+            if running_run_id:
+                run = mlflow.get_run(running_run_id)
+                mlflow_metrics = {
+                    "run_id": running_run_id,
+                    "status": "RUNNING",
+                    "start_time": run.info.start_time,
+                    "is_live": True,
+                }
+                for k, v in run.data.metrics.items():
+                    mlflow_metrics[f"metrics.{k}"] = float(v)
+                # Include baseline tags for delta calculation
                 for key, value in run.data.tags.items():
                     if key.startswith("baseline_"):
                         try:
-                            metrics[key] = float(value)
+                            mlflow_metrics[key] = float(value)
                         except (ValueError, TypeError):
-                            metrics[key] = value
+                            mlflow_metrics[key] = value
                 result["model_available"] = {
                     "available": True,
-                    "run_id": best_run_id,
+                    "run_id": running_run_id,
                     "trained_at": pd.Timestamp(run.info.start_time, unit='ms').isoformat() if run.info.start_time else None,
                     "experiment_id": experiment.experiment_id,
                     "experiment_url": experiment_url,
+                    "is_live": True,
                 }
-                # 2. MLflow metrics (from same run)
-                result["mlflow_metrics"] = {f"metrics.{k}": v for k, v in metrics.items()}
+                result["mlflow_metrics"] = mlflow_metrics
             else:
-                result["model_available"] = {
-                    "available": False,
-                    "message": f"No trained model found for {model_name}",
-                    "experiment_id": experiment.experiment_id,
-                    "experiment_url": experiment_url,
-                }
+                # No running experiment - fall back to best FINISHED model
+                best_run_id = get_best_mlflow_run(project_name, model_name)
+                if best_run_id:
+                    run = mlflow.get_run(best_run_id)
+                    # Build metrics dict with proper prefixes
+                    mlflow_metrics = {
+                        "run_id": best_run_id,
+                        "status": run.info.status,
+                        "start_time": run.info.start_time,
+                        "end_time": run.info.end_time,
+                        "is_live": False,
+                    }
+                    # Add MLflow metrics with "metrics." prefix
+                    for k, v in run.data.metrics.items():
+                        mlflow_metrics[f"metrics.{k}"] = float(v)
+                    # Add baseline tags WITHOUT "metrics." prefix
+                    for key, value in run.data.tags.items():
+                        if key.startswith("baseline_"):
+                            try:
+                                mlflow_metrics[key] = float(value)
+                            except (ValueError, TypeError):
+                                mlflow_metrics[key] = value
+                    result["model_available"] = {
+                        "available": True,
+                        "run_id": best_run_id,
+                        "trained_at": pd.Timestamp(run.info.start_time, unit='ms').isoformat() if run.info.start_time else None,
+                        "experiment_id": experiment.experiment_id,
+                        "experiment_url": experiment_url,
+                    }
+                    # 2. MLflow metrics (from same run)
+                    result["mlflow_metrics"] = mlflow_metrics
+                else:
+                    result["model_available"] = {
+                        "available": False,
+                        "message": f"No trained model found for {model_name}",
+                        "experiment_id": experiment.experiment_id,
+                        "experiment_url": experiment_url,
+                    }
 
         # 3. Initial sample from Delta Lake (with timeout)
         try:

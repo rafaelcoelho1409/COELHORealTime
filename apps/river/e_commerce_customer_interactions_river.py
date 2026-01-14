@@ -1,6 +1,8 @@
 from river import (
-    metrics
+    metrics,
+    utils,
 )
+import datetime as dt
 import pickle
 import json
 import os
@@ -111,39 +113,93 @@ def main():
     mlflow.set_tracking_uri(f"http://{MLFLOW_HOST}:5000")
     mlflow.set_experiment(PROJECT_NAME)
     print(f"MLflow experiment '{PROJECT_NAME}' set successfully")
-
     # Load or create model and encoders from MLflow
     print("Loading model from MLflow (best historical model)")
     encoders = load_or_create_encoders(PROJECT_NAME, "river")
     model = load_or_create_model(PROJECT_NAME, MODEL_NAME)
     # Load cluster data from MLflow
     cluster_counts, cluster_feature_counts = load_cluster_data_from_mlflow()
-
     print("Encoders loaded")
     print(f"Model loaded: {model.__class__.__name__}")
-
     # Load last processed Kafka offset from MLflow
     last_offset = load_kafka_offset_from_mlflow(PROJECT_NAME)
-
     # Create consumer with starting offset
     consumer = create_consumer(PROJECT_NAME, start_offset=last_offset)
     print("Consumer started. Waiting for transactions...")
     # Track current offset for persistence
     current_offset = last_offset if last_offset is not None else -1
+    # -----------------------------------------------------------------------------
+    # CLUSTERING METRICS
+    # -----------------------------------------------------------------------------
+    clustering_metric_classes = {
+        "Silhouette": metrics.Silhouette,
+    }
+    clustering_metric_args = {
+        "Silhouette": {},
+    }
+    # -----------------------------------------------------------------------------
+    # ROLLING METRICS (for concept drift detection)
+    # -----------------------------------------------------------------------------
+    rolling_metric_classes = {
+        "RollingSilhouette": utils.Rolling,
+    }
+    rolling_metric_args = {
+        "RollingSilhouette": {"obj": metrics.Silhouette(), "window_size": 1000},
+    }
+    # -----------------------------------------------------------------------------
+    # TIME-BASED ROLLING METRICS
+    # -----------------------------------------------------------------------------
+    time_rolling_metric_classes = {
+        "TimeRollingSilhouette": utils.TimeRolling,
+    }
+    time_rolling_metric_args = {
+        "TimeRollingSilhouette": {"obj": metrics.Silhouette(), "period": dt.timedelta(minutes=5)},
+    }
+    # =============================================================================
+    # INSTANTIATE ALL METRICS
+    # =============================================================================
+    clustering_metrics = {
+        name: clustering_metric_classes[name](**clustering_metric_args[name])
+        for name in clustering_metric_classes
+    }
+    rolling_metrics = {
+        name: rolling_metric_classes[name](**rolling_metric_args[name])
+        for name in rolling_metric_classes
+    }
+    time_rolling_metrics = {
+        name: time_rolling_metric_classes[name](**time_rolling_metric_args[name])
+        for name in time_rolling_metric_classes
+    }
+    # Initialize cluster history
+    n_clusters_history = []
+    n_micro_clusters_history = []
     # Batch sizes for different operations (tuned for performance)
     PROGRESS_LOG_INTERVAL = 100     # Log progress every N messages
     ARTIFACT_SAVE_INTERVAL = 1000   # Save model/encoders/cluster data to S3 every N messages
     # Get traceability info from best run (if continuing from existing model)
     best_run_id = get_best_mlflow_run(PROJECT_NAME, MODEL_NAME)
+    baseline_metrics = {}
     if best_run_id:
-        print(f"Continuing from best run: {best_run_id}")
-    print(f"Starting MLflow run with model: {model.__class__.__name__}")
-    with mlflow.start_run(run_name = model.__class__.__name__):
+        try:
+            best_run = mlflow.get_run(best_run_id)
+            baseline_metrics = best_run.data.metrics
+            print(f"Loaded baseline metrics from best run: {best_run_id}")
+        except Exception as e:
+            print(f"Could not get baseline metrics from best run: {e}")
+    # Use MODEL_NAME for run name (not model.__class__.__name__) to maintain
+    # compatibility with MLflow queries that filter by run name.
+    print(f"Starting MLflow run with model: {MODEL_NAME}")
+    with mlflow.start_run(run_name = MODEL_NAME):
         # Log traceability tags for model lineage
         if best_run_id:
             mlflow.set_tag("training_mode", "continued")
             mlflow.set_tag("continued_from_run", best_run_id)
-            # Clustering has no metrics, but log cluster count if available
+            # Log baseline metrics as tags (clustering + rolling metrics)
+            all_metric_names = list(clustering_metrics.keys()) + list(rolling_metrics.keys()) + list(time_rolling_metrics.keys()) + ["n_clusters", "n_micro_clusters"]
+            for metric_name in all_metric_names:
+                if metric_name in baseline_metrics:
+                    mlflow.set_tag(f"baseline_{metric_name}", f"{baseline_metrics[metric_name]:.4f}")
+            # Also log cluster counts if available
             if cluster_counts:
                 mlflow.set_tag("baseline_num_clusters", str(len(cluster_counts)))
                 mlflow.set_tag("baseline_total_samples", str(sum(cluster_counts.values())))
@@ -184,16 +240,39 @@ def main():
                         x,
                         encoders,
                         PROJECT_NAME)
+                    timestamp = dt.datetime.strptime(
+                        interaction_event['timestamp'],
+                        "%Y-%m-%dT%H:%M:%S.%f%z")
                     # Update the model
                     model.learn_one(x)
                     prediction = model.predict_one(x)
                     # Track current offset for persistence
                     current_offset = message.offset
+                    # Track cluster statistics
+                    n_clusters_history.append(model.n_clusters)
+                    n_micro_clusters_history.append(len(model.micro_clusters))
                     # Update cluster_counts if provided
                     try:
                         cluster_counts[prediction] += 1
                     except Exception as e:
                         print(f"Error updating cluster_counts: {str(e)}")
+                    # Update metrics (only if at least 2 clusters exist)
+                    if len(model.centers) >= 2:
+                        for metric in clustering_metrics.values():
+                            try:
+                                metric.update(x, prediction, model.centers)
+                            except Exception as e:
+                                print(f"Error updating metric {metric}: {str(e)}")
+                        for metric in rolling_metrics.values():
+                            try:
+                                metric.update(x, prediction, model.centers)
+                            except Exception as e:
+                                print(f"Error updating metric {metric}: {str(e)}")
+                        for metric in time_rolling_metrics.values():
+                            try:
+                                metric.update(x, prediction, model.centers, t=timestamp)
+                            except Exception as e:
+                                print(f"Error updating metric {metric}: {str(e)}")
                     predicted_cluster_label = prediction # prediction is likely an int
                     for feature_key, feature_value in interaction_event.items():
                         if feature_key not in [
@@ -219,6 +298,17 @@ def main():
                     # Periodically log progress
                     if message.offset % PROGRESS_LOG_INTERVAL == 0:
                         print(f"Processed {message.offset} messages")
+                        metrics_to_log = {}
+                        for name, metric in clustering_metrics.items():
+                            metrics_to_log[name] = metric.get()
+                        for name, metric in rolling_metrics.items():
+                            metrics_to_log[name] = metric.get()
+                        for name, metric in time_rolling_metrics.items():
+                            metrics_to_log[name] = metric.get()
+                        # Add cluster statistics
+                        metrics_to_log["n_clusters"] = model.n_clusters
+                        metrics_to_log["n_micro_clusters"] = len(model.micro_clusters)
+                        mlflow.log_metrics(metrics_to_log, step = message.offset)
                     # Save live model to Redis for real-time predictions
                     if message.offset % REDIS_CACHE_INTERVAL == 0:
                         save_live_model_to_redis(PROJECT_NAME, MODEL_NAME, model, encoders)

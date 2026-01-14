@@ -1,0 +1,47 @@
+{
+  "project": "E-Commerce Customer Interactions",
+  "model": "DBSTREAM (Density-Based Stream Clustering)",
+  "task": "Clustering",
+  "metrics": {
+    "silhouette": {
+      "name": "Silhouette Coefficient",
+      "formula": "$$s(i) = \\frac{b(i) - a(i)}{\\max\\{a(i), b(i)\\}}$$",
+      "explanation": "Measures how similar a point is to its own cluster (cohesion) compared to other clusters (separation). a(i) is mean intra-cluster distance, b(i) is mean nearest-cluster distance.",
+      "context": "**Primary metric for clustering quality**. Range: [-1, 1]. A value near 1 indicates the point is well-matched to its cluster and poorly-matched to neighboring clusters. Near 0 means the point is on or very close to the decision boundary. Negative values indicate potential misclassification. **Higher is better**.",
+      "range": "-1 to 1",
+      "optimal": "Higher is better (closer to 1)"
+    },
+    "rolling_silhouette": {
+      "name": "Rolling Silhouette",
+      "formula": "$$\\text{Rolling Silhouette}_t = \\frac{1}{w}\\sum_{i=t-w}^{t}s(i)$$",
+      "explanation": "Silhouette calculated over a sliding window of the most recent samples. Used to detect concept drift in clustering quality.",
+      "context": "With **window_size=1000**, monitors recent clustering quality. A **sudden decrease** indicates **concept drift** - customer behavior patterns may have changed. Essential for **real-time clustering** where customer segments evolve. **Higher and stable is better**.",
+      "range": "-1 to 1",
+      "optimal": "Higher and stable is better"
+    },
+    "time_rolling_silhouette": {
+      "name": "Time Rolling Silhouette",
+      "formula": "$$\\text{TimeRolling Silhouette}_t = \\frac{1}{|W_t|}\\sum_{i \\in W_t}s(i), \\quad W_t = \\{i : t_i \\in [t - \\Delta t, t]\\}$$",
+      "explanation": "Silhouette over a time-based window (last 5 minutes). Sample count varies based on traffic volume.",
+      "context": "With **period=5 minutes**, shows clustering quality for **recent real-world time**. Unlike sample-based rolling, adapts to varying traffic volumes. Sudden drop means customer patterns changed in the last 5 minutes. **Higher and stable is better**.",
+      "range": "-1 to 1",
+      "optimal": "Higher and stable is better"
+    },
+    "n_clusters": {
+      "name": "Number of Clusters",
+      "formula": "$$n_{clusters} = |\\{c_1, c_2, ..., c_k\\}|$$",
+      "explanation": "Count of macro clusters formed by DBSTREAM after merging alpha-connected micro clusters.",
+      "context": "**Cluster count evolution**. DBSTREAM dynamically creates/removes clusters based on data density. Too few clusters may mean over-generalization, too many may indicate noise or fine-grained segments. Monitor for **stability** - frequent changes suggest high variability in customer behavior. **Stable count is better**.",
+      "range": "0 to infinity",
+      "optimal": "Stable and interpretable"
+    },
+    "n_micro_clusters": {
+      "name": "Number of Micro Clusters",
+      "formula": "$$n_{micro} = |\\{mc_1, mc_2, ..., mc_m\\}|$$",
+      "explanation": "Count of micro clusters maintained by DBSTREAM. Micro clusters are the fundamental units before macro cluster formation.",
+      "context": "**Internal cluster representation**. Micro clusters capture local density before being merged into macro clusters. A high ratio of micro to macro clusters indicates well-separated customer segments. **Stable and proportional to data is better**.",
+      "range": "0 to infinity",
+      "optimal": "Stable and proportional"
+    }
+  }
+}

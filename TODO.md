@@ -88,10 +88,10 @@ Kafka → River ML Training Scripts → MLflow
   - [x] Query MLflow for **best model** per project (by metrics)
   - [x] Load model artifacts from MinIO via MLflow
   - [x] Implement `get_best_mlflow_run()` with metric-based selection:
-    - Transaction Fraud Detection: Maximize F1
+    - Transaction Fraud Detection: Maximize FBeta (beta=2.0)
     - Estimated Time of Arrival: Minimize MAE
     - Sales Forecasting: Minimize MAE
-    - E-Commerce Customer Interactions: Latest run (no metrics yet)
+    - E-Commerce Customer Interactions: Maximize Silhouette
   - [x] Load encoders from the same best run as the model
   - [x] Load cluster data (ECCI) from MLflow artifacts
 - [x] Best model continuation training:
@@ -107,13 +107,22 @@ Kafka → River ML Training Scripts → MLflow
 - [ ] Add model info to Reflex UI:
   - [ ] Display current model version on each page
   - [ ] Show last model update timestamp
-- [ ] **ECCI Clustering Metrics** (Priority: MEDIUM)
-  - [ ] Add clustering metrics to ECCI training script:
-    - Silhouette Score (via cluster membership)
-    - Number of clusters formed
-    - Samples per cluster distribution
-  - [ ] Log metrics to MLflow for best model selection
-  - [ ] Update `BEST_METRIC_CRITERIA["E-Commerce Customer Interactions"]` to use cluster metrics
+- [x] **ECCI Clustering Metrics** (COMPLETED)
+  - [x] Add clustering metrics to ECCI training script:
+    - Silhouette Score (primary metric for cluster quality)
+    - Rolling Silhouette (window_size=1000 for concept drift detection)
+    - Time Rolling Silhouette (period=5 minutes)
+    - Number of clusters (macro clusters)
+    - Number of micro clusters
+  - [x] Log metrics to MLflow for best model selection
+  - [x] Update `BEST_METRIC_CRITERIA["E-Commerce Customer Interactions"]` to use Silhouette (maximize)
+  - [x] Add ECCI Metrics tab to Reflex with Plotly dashboard:
+    - KPI indicators with delta from baseline
+    - Silhouette gauge chart
+    - Cluster statistics dual indicator (Plotly)
+    - Metric info dialogs with formulas
+  - [x] Fix MLflow integration for ECCI (model name mapping, page_init for RUNNING experiments)
+  - [x] Fix Feature Distribution chart (legend positioning, height adjustments)
 
 ### Phase 6: Scikit-Learn Service (COMPLETED)
 **Goal:** Create dedicated Scikit-Learn FastAPI service for batch ML
@@ -654,9 +663,9 @@ Services Removed:
 
 ### Best Model Selection from MLflow
 - Implemented `get_best_mlflow_run()` function with metric-based selection
-- Classification models: Maximize F1 score
+- Classification models: Maximize FBeta (beta=2.0 for fraud detection)
 - Regression models: Minimize MAE
-- Clustering models: Use latest run (pending metrics implementation)
+- Clustering models: Maximize Silhouette coefficient
 - Encoders loaded from same run as model for consistency
 
 ### Reflex UI Improvements
@@ -716,6 +725,28 @@ Services Removed:
   - River ML Documentation: https://riverml.xyz/dev/api/metrics/
   - Fraud Detection Best Practices: https://www.cesarsotovalero.net/blog/
   - F-Beta Score Guide: https://machinelearningmastery.com/fbeta-measure-for-ml
+
+### ECCI Clustering Metrics Complete (January 2026)
+- **Deep research** on River ML clustering metrics (Silhouette only internal metric available)
+- **Clustering metrics implemented:**
+  - `Silhouette` - Primary cluster quality metric (-1 to 1, higher is better)
+  - `RollingSilhouette` (window_size=1000) - Concept drift detection
+  - `TimeRollingSilhouette` (period=5 minutes) - Time-based rolling
+  - `n_clusters` - Macro cluster count
+  - `n_micro_clusters` - Micro cluster count (DBSTREAM internal)
+- **Best model selection** updated: Silhouette with maximize=True
+- **Reflex Metrics tab** with Plotly dashboard:
+  - KPI indicators with delta from baseline
+  - Silhouette gauge chart (-1 to 1 scale with color zones)
+  - Cluster statistics dual Plotly indicator (matching gauge height)
+  - Metric info dialogs with LaTeX formulas
+- **MLflow integration fixes:**
+  - Added DBSTREAM to model name mappings
+  - Updated page_init to check RUNNING experiments first
+  - Real-time metrics display during training
+- **Feature Distribution chart** improvements:
+  - Legend moved to bottom center
+  - Height adjusted to prevent overlapping
 
 ### TFD Metrics Dashboard Complete (January 2026)
 - **All 15 metrics displayed** on Reflex TFD Incremental ML page
@@ -788,11 +819,12 @@ Services Removed:
 - **Streamlit Removal (DONE):** Streamlit app fully replaced by Reflex
   - All pages migrated: TFD, ETA, ECCI
   - `apps/streamlit/` and Helm templates deleted
-- **MLflow Integration (PARTIALLY DONE):** Best model selection implemented
+- **MLflow Integration (MOSTLY DONE):** Best model selection implemented
   - Models and encoders loaded from MLflow based on best metrics
   - New training runs continue from best existing model
-  - Pending: UI model version display, hot-reloading, ECCI clustering metrics
-- **Next Quick Wins:** ECCI clustering metrics (for best-model selection) or custom Grafana dashboards
+  - ECCI clustering metrics fully implemented with Silhouette-based selection
+  - Pending: UI model version display, hot-reloading
+- **Next Quick Wins:** Custom Grafana dashboards or Sales Forecasting page
 - **Pending Metrics:** Kafka JMX (waiting for Bitnami update)
 
 ---
@@ -805,4 +837,4 @@ Services Removed:
 
 ---
 
-*Last updated: 2026-01-14 (TFD Metrics Dashboard Complete - All 15 metrics with Plotly visualizations, delta indicators, and real-time updates)*
+*Last updated: 2026-01-14 (ECCI Clustering Metrics Complete - Silhouette-based best model selection, Metrics tab with Plotly dashboard, MLflow real-time integration)*

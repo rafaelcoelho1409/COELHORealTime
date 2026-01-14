@@ -3,11 +3,20 @@ from .state import State, METRIC_INFO
 
 
 ## METRIC INFO DIALOG COMPONENT
+# Context titles for each project type
+CONTEXT_TITLES = {
+    "tfd": "In Fraud Detection",
+    "eta": "In ETA Prediction",
+    "ecci": "In Customer Clustering",
+}
+
 def metric_info_dialog(metric_key: str, project_key: str = "tfd") -> rx.Component:
     """Create an info dialog button showing metric formula and explanation."""
     info = METRIC_INFO.get(project_key, {}).get("metrics", {}).get(metric_key, {})
     if not info:
         return rx.fragment()
+
+    context_title = CONTEXT_TITLES.get(project_key, "Context")
 
     return rx.dialog.root(
         rx.dialog.trigger(
@@ -73,7 +82,7 @@ def metric_info_dialog(metric_key: str, project_key: str = "tfd") -> rx.Componen
                     rx.vstack(
                         rx.hstack(
                             rx.icon("target", size=14),
-                            rx.text("In Fraud Detection", weight="bold", size="2"),
+                            rx.text(context_title, weight="bold", size="2"),
                             spacing="1",
                             align="center"
                         ),
@@ -1662,6 +1671,114 @@ def eta_metric_card(label: str, value: str, metric_key: str) -> rx.Component:
             width="100%"
         ),
         size="1"
+    )
+
+
+## ECCI - CARD HELPER FUNCTIONS
+def ecci_kpi_card_with_info(plotly_key: str, metric_key: str) -> rx.Component:
+    """Create a KPI card with Plotly chart and info button for ECCI."""
+    return rx.card(
+        rx.vstack(
+            rx.hstack(
+                rx.spacer(),
+                metric_info_dialog(metric_key, "ecci"),
+                width="100%",
+                justify="end"
+            ),
+            rx.plotly(data=State.ecci_dashboard_figures[plotly_key], width="100%"),
+            spacing="0",
+            width="100%"
+        ),
+        size="1"
+    )
+
+
+def ecci_gauge_card_with_info(plotly_key: str, metric_key: str) -> rx.Component:
+    """Create a gauge card with Plotly chart and info button for ECCI."""
+    return rx.card(
+        rx.vstack(
+            rx.hstack(
+                rx.spacer(),
+                metric_info_dialog(metric_key, "ecci"),
+                width="100%",
+                justify="end"
+            ),
+            rx.plotly(data=State.ecci_dashboard_figures[plotly_key], width="100%"),
+            spacing="0",
+            width="100%"
+        ),
+        size="1",
+        width="50%"
+    )
+
+
+def ecci_metric_card(label: str, value: str, metric_key: str) -> rx.Component:
+    """Create a metric card with info button for ECCI."""
+    return rx.card(
+        rx.vstack(
+            rx.hstack(
+                rx.text(label, size="2", weight="bold", color="gray"),
+                rx.spacer(),
+                metric_info_dialog(metric_key, "ecci"),
+                width="100%",
+                align="center"
+            ),
+            rx.text(value, size="5", weight="bold"),
+            spacing="1",
+            align="center",
+            width="100%"
+        ),
+        size="1"
+    )
+
+
+def e_commerce_customer_interactions_metrics() -> rx.Component:
+    """Display MLflow clustering metrics for ECCI with Plotly dashboard layout."""
+    return rx.vstack(
+        # Run info badge
+        mlflow_run_info_badge("E-Commerce Customer Interactions"),
+        # ROW 1: KPI Indicators (primary metrics with delta from baseline)
+        rx.grid(
+            ecci_kpi_card_with_info("kpi_silhouette", "silhouette"),
+            ecci_kpi_card_with_info("kpi_rolling_silhouette", "rolling_silhouette"),
+            ecci_kpi_card_with_info("kpi_n_clusters", "n_clusters"),
+            ecci_kpi_card_with_info("kpi_n_micro_clusters", "n_micro_clusters"),
+            columns="4",
+            spacing="2",
+            width="100%"
+        ),
+        # ROW 2: Rolling metrics (text cards with info buttons)
+        rx.grid(
+            ecci_metric_card("Silhouette", State.ecci_metrics["silhouette"], "silhouette"),
+            ecci_metric_card("Rolling Silhouette", State.ecci_metrics["rolling_silhouette"], "rolling_silhouette"),
+            ecci_metric_card("Time Rolling Silhouette", State.ecci_metrics["time_rolling_silhouette"], "time_rolling_silhouette"),
+            columns="3",
+            spacing="2",
+            width="100%"
+        ),
+        # ROW 3: Gauge + Cluster Stats (both as Plotly indicators, same height)
+        rx.hstack(
+            ecci_gauge_card_with_info("gauge_silhouette", "silhouette"),
+            rx.card(
+                rx.vstack(
+                    rx.hstack(
+                        rx.text("Cluster Statistics", size="2", weight="bold", color="gray"),
+                        metric_info_dialog("n_clusters", "ecci"),
+                        width="100%",
+                        justify="end"
+                    ),
+                    rx.plotly(data=State.ecci_dashboard_figures["cluster_stats"], width="100%"),
+                    spacing="0",
+                    width="100%"
+                ),
+                size="1",
+                width="50%"
+            ),
+            spacing="2",
+            width="100%"
+        ),
+        spacing="3",
+        width="100%"
     )
 
 
@@ -3259,7 +3376,7 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
             width = "30%"
         )
 
-    # Right column - Tabs for Prediction and Analytics
+    # Right column - Tabs for Prediction, Metrics and Analytics
     right_column = rx.vstack(
         rx.tabs.root(
             rx.tabs.list(
@@ -3275,6 +3392,15 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
                 rx.tabs.trigger(
                     rx.hstack(
                         rx.icon("chart-bar", size = 14),
+                        rx.text("Metrics"),
+                        spacing = "2",
+                        align_items = "center"
+                    ),
+                    value = "metrics"
+                ),
+                rx.tabs.trigger(
+                    rx.hstack(
+                        rx.icon("layers", size = 14),
                         rx.text("Analytics"),
                         spacing = "2",
                         align_items = "center"
@@ -3285,25 +3411,6 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
         # Tab 1: Cluster Prediction
         rx.tabs.content(
             rx.vstack(
-                # Algorithm info
-                rx.callout(
-                    rx.vstack(
-                        rx.text(
-                            "DBSTREAM is a density-based clustering algorithm for data streams.",
-                            size = "2"
-                        ),
-                        rx.text(
-                            "It identifies clusters dynamically as data points arrive, without predefined cluster counts.",
-                            size = "2",
-                            color = "gray"
-                        ),
-                        spacing = "1",
-                        align_items = "start"
-                    ),
-                    icon = "info",
-                    color = "blue",
-                    width = "100%"
-                ),
                 # Customer Location map - always visible
                 rx.card(
                     rx.vstack(
@@ -3446,7 +3553,30 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
             ),
             value = "prediction"
         ),
-        # Tab 2: Cluster Analytics
+        # Tab 2: Clustering Metrics
+        rx.tabs.content(
+            rx.vstack(
+                rx.hstack(
+                    rx.heading("Clustering Metrics", size = "5"),
+                    rx.button(
+                        rx.icon("refresh-cw", size = 16),
+                        on_click = State.refresh_mlflow_metrics("E-Commerce Customer Interactions"),
+                        size = "1",
+                        variant = "ghost",
+                        cursor = "pointer",
+                        title = "Refresh metrics"
+                    ),
+                    align_items = "center",
+                    spacing = "2"
+                ),
+                e_commerce_customer_interactions_metrics(),
+                spacing = "4",
+                width = "100%",
+                padding_top = "1em"
+            ),
+            value = "metrics"
+        ),
+        # Tab 3: Cluster Analytics
         rx.tabs.content(
             rx.vstack(
                 # Run info badge
