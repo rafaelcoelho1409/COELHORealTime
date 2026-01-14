@@ -33,6 +33,7 @@ from river import (
     preprocessing,
     time_series,
     linear_model,
+    imblearn,
 )
 
 
@@ -65,6 +66,8 @@ MLFLOW_HOST = os.environ.get("MLFLOW_HOST", "localhost")
 mlflow.set_tracking_uri(f"http://{MLFLOW_HOST}:5000")
 # Model name mapping for MLflow
 MLFLOW_MODEL_NAMES = {
+    # TFD: ARFClassifier wrapped with RandomUnderSampler for imbalanced learning
+    # Reference: https://riverml.xyz/latest/examples/imbalanced-learning/
     "Transaction Fraud Detection": "ARFClassifier",
     "Estimated Time of Arrival": "ARFRegressor",
     "E-Commerce Customer Interactions": "DBSTREAM",
@@ -1597,7 +1600,7 @@ def _create_default_model(project_name):
         # - max_size=100.0: Default max memory in MiB
         # - memory_estimate_period=2000000: Default instances between memory checks
         # - merit_preprune=True: Default merit-based pre-pruning
-        return forest.ARFClassifier(
+        classifier = forest.ARFClassifier(
             n_models = 10,
             max_features = "sqrt",
             lambda_value = 6,
@@ -1621,6 +1624,25 @@ def _create_default_model(project_name):
             stop_mem_management = False,
             remove_poor_attrs = False,
             merit_preprune = True,
+            seed = 42,
+        )
+        # =================================================================
+        # RandomUnderSampler - Imbalanced Learning Wrapper
+        # =================================================================
+        # Reference: https://riverml.xyz/latest/api/imblearn/RandomUnderSampler/
+        # Reference: https://riverml.xyz/latest/examples/imbalanced-learning/
+        #
+        # River's imbalanced-learning guide achieved 96.52% ROCAUC using
+        # RandomUnderSampler for credit card fraud detection.
+        #
+        # desired_dist: Target class distribution during training
+        # - {0: 0.5, 1: 0.5}: Balance fraud (1) and non-fraud (0) equally
+        # - This uses rejection sampling to undersample the majority class
+        # - Original data (~1-5% fraud) is rebalanced to 50/50 during training
+        # - Prediction still works on original distribution
+        return imblearn.RandomUnderSampler(
+            classifier = classifier,
+            desired_dist = {0: 0.5, 1: 0.5},
             seed = 42,
         )
     elif project_name == "Estimated Time of Arrival":

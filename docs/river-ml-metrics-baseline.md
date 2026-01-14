@@ -7,12 +7,13 @@ This document captures the baseline metrics for River ML models after configurin
 
 ---
 
-## Transaction Fraud Detection (ARFClassifier)
+## Transaction Fraud Detection (RandomUnderSampler + ARFClassifier)
 
 ### Current Model Configuration
 
 ```python
-forest.ARFClassifier(
+# Base classifier: Adaptive Random Forest
+classifier = forest.ARFClassifier(
     n_models=10,
     max_features="sqrt",
     lambda_value=6,
@@ -33,6 +34,15 @@ forest.ARFClassifier(
     max_size=100.0,
     memory_estimate_period=2000000,
     merit_preprune=True,
+    seed=42,
+)
+
+# Imbalanced learning wrapper: RandomUnderSampler
+# Reference: https://riverml.xyz/latest/examples/imbalanced-learning/
+# River's guide achieved 96.52% ROCAUC with this approach
+model = imblearn.RandomUnderSampler(
+    classifier=classifier,
+    desired_dist={0: 0.5, 1: 0.5},  # Balance fraud/non-fraud during training
     seed=42,
 )
 ```
@@ -86,7 +96,7 @@ forest.ARFClassifier(
 
 ### Improvement Opportunities
 
-1. **RandomUnderSampler**: River's imbalanced-learning guide achieved 96.52% ROCAUC using `imblearn.RandomUnderSampler` wrapper
+1. ~~**RandomUnderSampler**: River's imbalanced-learning guide achieved 96.52% ROCAUC using `imblearn.RandomUnderSampler` wrapper~~ ✅ **IMPLEMENTED** (2026-01-14)
 2. **Weighted Loss**: Combine undersampling with weighted loss for best results
 3. **More Training Data**: Online learning improves over time
 4. **Hyperparameter Tuning**: Adjust `n_models`, `grace_period`, `max_depth` based on validation
@@ -211,10 +221,11 @@ time_series.SNARIMAX(
 10. [x] **Classification Report heatmap** - YellowBrick-style per-class Precision/Recall/F1
 11. [x] **RollingROCAUC displayed** - For drift detection monitoring
 12. [x] **Real-time updates via refresh button** - All metrics update when clicked during training
+13. [x] **RandomUnderSampler for imbalanced learning** - Wrapped ARFClassifier with imblearn.RandomUnderSampler (desired_dist={0: 0.5, 1: 0.5})
 
 ### High Priority
 
-1. [ ] Implement `RandomUnderSampler` for TFD to improve ROCAUC
+1. [x] Implement `RandomUnderSampler` for TFD to improve ROCAUC ✅ **DONE** (2026-01-14)
 2. [ ] Collect baseline metrics for ETA, ECCI, and Sales Forecasting
 3. [ ] Add weighted loss for imbalanced classification
 

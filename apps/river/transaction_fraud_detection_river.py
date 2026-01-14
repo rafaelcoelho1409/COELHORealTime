@@ -190,8 +190,11 @@ def main():
             print(f"Loaded baseline metrics from best run: {best_run_id}")
         except Exception as e:
             print(f"Could not get baseline metrics from best run: {e}")
-    print(f"Starting MLflow run with model: {model.__class__.__name__}")
-    with mlflow.start_run(run_name = model.__class__.__name__):
+    # Use MODEL_NAME for run name (not model.__class__.__name__) to maintain
+    # compatibility with MLflow queries that filter by run name.
+    # The actual model is RandomUnderSampler wrapping ARFClassifier.
+    print(f"Starting MLflow run with model: {MODEL_NAME} (wrapper: {model.__class__.__name__})")
+    with mlflow.start_run(run_name = MODEL_NAME):
         # Log traceability tags for model lineage
         if best_run_id:
             mlflow.set_tag("training_mode", "continued")

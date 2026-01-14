@@ -1263,6 +1263,24 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                         align_items = "center",
                         width = "100%"
                     ),
+                    # Model info row
+                    rx.hstack(
+                        rx.badge(
+                            rx.hstack(
+                                rx.icon("brain", size = 12),
+                                rx.text("RandomUnderSampler + ARFClassifier", size = "1"),
+                                spacing = "1",
+                                align_items = "center"
+                            ),
+                            color_scheme = "blue",
+                            variant = "soft",
+                            size = "1"
+                        ),
+                        rx.badge("Imbalanced Learning", color_scheme = "purple", variant = "soft", size = "1"),
+                        spacing = "2"
+                    ),
+                    # MLflow run info (LIVE/FINISHED status)
+                    mlflow_run_info_badge("Transaction Fraud Detection"),
                     rx.cond(
                         State.tfd_prediction_show,
                         # Show prediction results when available
@@ -1387,6 +1405,22 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                             title = "Refresh metrics"
                         ),
                         align_items = "center",
+                        spacing = "2"
+                    ),
+                    # Model info row
+                    rx.hstack(
+                        rx.badge(
+                            rx.hstack(
+                                rx.icon("brain", size = 12),
+                                rx.text("RandomUnderSampler + ARFClassifier", size = "1"),
+                                spacing = "1",
+                                align_items = "center"
+                            ),
+                            color_scheme = "blue",
+                            variant = "soft",
+                            size = "1"
+                        ),
+                        rx.badge("Imbalanced Learning", color_scheme = "purple", variant = "soft", size = "1"),
                         spacing = "2"
                     ),
                     transaction_fraud_detection_metrics(),

@@ -1,6 +1,6 @@
 {
   "project": "Transaction Fraud Detection",
-  "model": "ARFClassifier (Adaptive Random Forest)",
+  "model": "RandomUnderSampler + ARFClassifier (Imbalanced Learning)",
   "task": "Binary Classification",
   "metrics": {
     "fbeta": {
