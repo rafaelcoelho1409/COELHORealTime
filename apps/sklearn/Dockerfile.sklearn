@@ -1,7 +1,7 @@
-# Stage 1: Builder (has uv, installs dependencies)
-FROM python:3.13-slim AS builder
+# Single-stage Dockerfile for Skaffold file sync
+FROM python:3.13-slim
 
-# Copy uv binary from official image (faster than pip install)
+# Copy uv binary from official image
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # UV optimization flags
@@ -11,42 +11,25 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 
-# Copy dependency files first (for layer caching)
-COPY pyproject.toml ./
-
-# Layer 1: Generate lock file and install dependencies only
-# Cache mount accelerates rebuilds by reusing downloaded packages
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv lock && \
-    uv sync --frozen --no-install-project --no-dev
-
-# Layer 2: Copy source code (no project install needed for FastAPI apps)
-COPY . /app
-
-
-# ============================================
-# Stage 2: Runtime (minimal, no uv, no build tools)
-# ============================================
-FROM python:3.13-slim
-
-# Install only runtime system dependencies
+# Install runtime system dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends procps && \
     rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+# Copy dependency files first (for layer caching)
+COPY pyproject.toml ./
 
-# Copy virtual environment from builder (pre-compiled bytecode)
-COPY --from=builder /app/.venv /app/.venv
+# Install dependencies (cache mount for speed)
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv lock && \
+    uv sync --frozen --no-install-project --no-dev
 
 # Copy application code
-COPY --from=builder /app /app
+COPY . /app
 
-# Use the venv's Python directly (no activation needed)
+# Use the venv's Python directly
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Expose port for Sklearn Batch ML API
 EXPOSE 8003
 
-# Run with entrypoint for hot-reload support
 ENTRYPOINT ["/bin/bash", "/app/entrypoint.sh"]

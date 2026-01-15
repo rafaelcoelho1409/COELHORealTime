@@ -1,5 +1,5 @@
 import reflex as rx
-from ..resources import coelho_realtime_navbar
+from ..components import coelho_realtime_navbar
 
 
 def index() -> rx.Component:

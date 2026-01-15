@@ -1,13 +1,13 @@
 import reflex as rx
-from ..resources import (
+from ..components import (
     coelho_realtime_navbar,
     page_tabs,
     transaction_fraud_detection_form,
     transaction_fraud_detection_batch_form,
     delta_lake_sql_tab,
-    ml_training_switch
+    ml_training_switch,
 )
-from ..state import State
+from ..states import TFDState
 
 
 PROJECT_NAME = "Transaction Fraud Detection"
@@ -19,36 +19,36 @@ def index() -> rx.Component:
         coelho_realtime_navbar(),
         rx.box(
             page_tabs(),
-            padding_x = "2em",
-            width = "100%"
+            padding_x="2em",
+            width="100%"
         ),
         rx.box(
             rx.cond(
-                State.is_delta_lake_sql_tab,
+                TFDState.is_delta_lake_sql_tab,
                 # Delta Lake SQL tab content
                 delta_lake_sql_tab(),
                 rx.cond(
-                    State.is_batch_ml_tab,
+                    TFDState.is_batch_ml_tab,
                     # Batch ML tab content
                     rx.vstack(
                         transaction_fraud_detection_batch_form(),
-                        spacing = "4",
-                        width = "100%"
+                        spacing="4",
+                        width="100%"
                     ),
                     # Incremental ML tab content - form includes ML training switch
                     transaction_fraud_detection_form(MODEL_KEY, PROJECT_NAME),
                 ),
             ),
-            padding = "2em",
-            width = "100%"
+            padding="2em",
+            width="100%"
         ),
         # On mount: combined page initialization (single HTTP call)
-        on_mount = [
-            State.init_page(MODEL_KEY, PROJECT_NAME),
-            State.check_batch_model_available(PROJECT_NAME),  # Separate call to sklearn service
+        on_mount=[
+            TFDState.init_page(MODEL_KEY, PROJECT_NAME),
+            TFDState.check_batch_model_available(PROJECT_NAME),
         ],
         # On unmount: cleanup when leaving the page
-        on_unmount = State.cleanup_on_page_leave(PROJECT_NAME),
-        spacing = "0",
-        width = "100%"
+        on_unmount=TFDState.cleanup_on_page_leave(PROJECT_NAME),
+        spacing="0",
+        width="100%"
     )

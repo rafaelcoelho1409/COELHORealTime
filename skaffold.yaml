@@ -15,11 +15,12 @@ build:
         manual:
           - src: "**/*.py"
             dest: /app
-    # Reflex service
+    # Reflex service (single-stage Dockerfile for proper sync)
     - image: coelho-realtime-reflex
       context: ./apps/reflex
       docker:
         dockerfile: Dockerfile.reflex
+        noCache: false
       sync:
         manual:
           - src: "**/*.py"
@@ -182,11 +183,12 @@ profiles:
             manual:
               - src: "**/*.py"
                 dest: /app
-        # Reflex - Manual sync for hot-reload (infer doesn't work with multi-stage builds)
+        # Reflex - Single-stage Dockerfile for proper file sync
         - image: coelho-realtime-reflex
           context: ./apps/reflex
           docker:
             dockerfile: Dockerfile.reflex
+            noCache: false
           sync:
             manual:
               - src: "**/*.py"
@@ -232,4 +234,5 @@ profiles:
 # NOTE: When useBuildkit is set to true (line 58), docker-buildx must be installed.
 # Install it via your package manager (e.g., `sudo pacman -S docker-buildx` on Arch Linux).
 
+# DON'T USE MULTI-STAGE DOCKER BUILD - Skaffold won't work fine, will always rebuild images every code change
 # sh mirror_localhost_tailscale.sh 5001 3000 8000 9000 9001 8002 8003 9090 3001 9094 9092 4040

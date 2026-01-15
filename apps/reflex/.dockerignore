@@ -32,3 +32,13 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Documentation (not needed in container, prevents rebuild on doc changes)
+*.md
+README*
+LICENSE*
+CHANGELOG*
+
+# Development files
+Dockerfile.reflex
+*.dev

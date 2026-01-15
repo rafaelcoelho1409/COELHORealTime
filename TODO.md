@@ -107,6 +107,15 @@ Kafka → River ML Training Scripts → MLflow
 - [ ] Add model info to Reflex UI:
   - [ ] Display current model version on each page
   - [ ] Show last model update timestamp
+- [ ] **Persist River ML Metrics Across Training Runs** (Priority: MEDIUM)
+  - Problem: When training continues from best model, metrics (FBeta, Recall, etc.) reset to zero
+  - Current behavior: Model loads correctly, but metric objects are created fresh each run
+  - Impact: Continued runs show lower FBeta initially (metrics only reflect new samples)
+  - Solution options:
+    - [ ] Serialize metric objects (not just values) to MLflow artifacts
+    - [ ] Load metric state when continuing training from best model
+    - [ ] Or accept current behavior (metrics show recent performance only)
+  - Affected files: `apps/river/*_river.py` training scripts
 - [x] **ECCI Clustering Metrics** (COMPLETED)
   - [x] Add clustering metrics to ECCI training script:
     - Silhouette Score (primary metric for cluster quality)
@@ -357,6 +366,50 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
   - [x] Fixed /sample and /initial_sample endpoints to validate all projects
   - [x] Added hot-reload (--reload flag) to River entrypoint.sh
   - [x] All three project pages (TFD, ETA, ECCI) now display values correctly
+- [x] **Fix SQL Query Timeouts** (January 2026)
+  - Problem: Default queries used `ORDER BY timestamp DESC LIMIT 100` which scans all rows
+  - Root cause: Delta Lake has no indexes, ORDER BY requires full table scan (1.2M+ rows = 110s)
+  - Solution: Changed default queries to `SELECT * FROM data LIMIT 100` (234ms)
+  - Updated all query templates to use efficient patterns (WHERE filters, GROUP BY aggregations)
+  - Files modified: `apps/reflex/coelho_realtime/states/shared.py`
+
+### Architecture Considerations
+- [ ] **Separate SQL Service** (Priority: LOW - Future consideration)
+  - Current: SQL endpoints (`/sql_query`, `/table_schema`) are in River service
+  - Consideration: Create dedicated SQL/Analytics FastAPI service
+  - **Pros of separation:**
+    - Resource isolation (slow SQL won't affect ML predictions)
+    - Independent scaling (allocate more resources to SQL without impacting River)
+    - Cleaner separation of concerns (River = ML, SQL service = data exploration)
+    - Better timeout handling (SQL can have longer timeouts)
+  - **Cons of separation:**
+    - More complexity (3 services instead of 2)
+    - Additional pod overhead (memory/CPU)
+    - Code duplication (Delta Lake connection, storage options)
+    - Overkill for current scale (only 3 pages use SQL tab)
+  - **Recommendation:** Keep in River unless:
+    - SQL queries consistently timeout even with optimized queries
+    - Heavy SQL usage degrades ML prediction latency
+    - Different scaling profiles needed for SQL vs ML
+
+- [ ] **Add PySpark SQL Engine to Delta Lake SQL Tab** (Priority: LOW - Idea)
+  - Current engines: Polars (default), DuckDB
+  - Idea: Add PySpark SQL as third engine option for comparison/benchmarking
+  - **Potential benefits:**
+    - Compare performance across 3 different SQL engines
+    - PySpark already running in cluster (Spark Structured Streaming)
+    - Native Delta Lake support (Spark is Delta Lake's origin)
+    - Better for very large datasets (distributed processing)
+  - **Challenges:**
+    - Would require Spark microservice with REST API (Spark Connect or custom FastAPI)
+    - Higher latency for small queries (JVM startup, distributed overhead)
+    - More complex infrastructure
+    - Current Spark deployment is for streaming, not interactive queries
+  - **Implementation options:**
+    - Option A: Add Spark Connect server to existing Spark deployment
+    - Option B: Create new Spark Thrift Server for SQL queries
+    - Option C: Skip if Polars/DuckDB are sufficient for interactive use
+  - **Decision:** Defer unless there's a specific need for distributed SQL queries
 
 ### Code Quality
 - [ ] Add unit tests for River/Sklearn endpoints
@@ -437,19 +490,19 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
 #### Reflex Performance Optimization (Priority: HIGH)
 **Problem:** Large `resources.py` file (~3000 lines) causing slow page loads
 
-**1. Split resources.py by Project** (High Impact)
-- [ ] Create `coelho_realtime/components/` directory structure:
+**1. Split resources.py by Project** (High Impact) - ✅ COMPLETED
+- [x] Create `coelho_realtime/components/` directory structure:
   ```
   components/
-  ├── __init__.py
-  ├── common.py          # Shared components (metric_card, badges, dialogs)
-  ├── tfd_components.py  # TFD-specific components
-  ├── eta_components.py  # ETA-specific components
-  ├── ecci_components.py # ECCI-specific components
-  └── sf_components.py   # Sales Forecasting components
+  ├── __init__.py        # Clean import interface
+  ├── shared.py          # Shared components (navbar, tabs, ml_switch, sql_tab)
+  ├── tfd.py             # TFD-specific components
+  ├── eta.py             # ETA-specific components
+  └── ecci.py            # ECCI-specific components
   ```
-- [ ] Move project-specific functions to respective files
-- [ ] Update imports in pages and main app
+- [x] Move project-specific functions to respective files
+- [x] Update imports in pages and main app
+- [x] Original `resources.py` archived and deleted after testing
 
 **2. Memoize Plotly Figures** (High Impact)
 - [ ] Add caching to `tfd_dashboard_figures` computed var
@@ -494,19 +547,19 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
 - [ ] Benefits: 3-10x faster JSON parsing/serialization
 - [ ] Note: orjson returns bytes, use `.decode()` or `orjson.loads()` appropriately
 
-**8. Split state.py into State Modules** (High Impact)
-- [ ] Create `coelho_realtime/state/` directory structure:
+**8. Split state.py into State Modules** (High Impact) - ✅ COMPLETED
+- [x] Create `coelho_realtime/states/` directory structure:
   ```
-  state/
-  ├── __init__.py        # Exports combined State class
-  ├── base.py            # Base state vars and common methods
-  ├── tfd_state.py       # TFD-specific state (forms, metrics, predictions)
-  ├── eta_state.py       # ETA-specific state
-  ├── ecci_state.py      # ECCI-specific state
-  └── sql_state.py       # Delta Lake SQL tab state
+  states/
+  ├── __init__.py        # Clean import interface for all states
+  ├── shared.py          # SharedState base class (common vars, SQL, helpers)
+  ├── tfd.py             # TFDState (forms, metrics, predictions)
+  ├── eta.py             # ETAState (forms, metrics, map)
+  └── ecci.py            # ECCIState (forms, metrics, clustering)
   ```
-- [ ] Use Reflex substates or mixins pattern
-- [ ] Reduces state recalculation scope per page
+- [x] Use Reflex state inheritance pattern (TFDState extends SharedState)
+- [x] SQL state integrated into SharedState (shared across all pages)
+- [x] Original `state.py` (~3700 lines) archived and deleted after testing
 
 **9. Optimize Form Field Loading** (High Impact)
 - [ ] Current issue: Form fields slow to display, sometimes not rendered
@@ -761,6 +814,37 @@ Services Removed:
 - **Report metrics endpoint** (`/report_metrics`) loads ConfusionMatrix and ClassificationReport from MLflow artifacts
 - **Graceful handling** of fresh starts (shows "No data available yet" when no artifacts exist)
 
+### Reflex Modular Architecture Migration (January 2026)
+- **Massive codebase reduction** from 2 monolithic files (~7,400 lines total) to modular structure
+- **Original monolithic files deleted after successful testing:**
+  - `state.py` (~3,700 lines) - replaced by `states/` module
+  - `resources.py` (~3,600 lines) - replaced by `components/` module
+- **New `states/` module** with inheritance pattern:
+  ```
+  states/
+  ├── __init__.py        # Clean import interface
+  ├── shared.py          # SharedState base class (SQL, common helpers)
+  ├── tfd.py             # TFDState (Transaction Fraud Detection)
+  ├── eta.py             # ETAState (Estimated Time of Arrival)
+  └── ecci.py            # ECCIState (E-Commerce Customer Interactions)
+  ```
+- **New `components/` module** with domain separation:
+  ```
+  components/
+  ├── __init__.py        # Clean import interface
+  ├── shared.py          # Navbar, tabs, SQL tab, dialogs
+  ├── tfd.py             # TFD forms, metrics, batch ML
+  ├── eta.py             # ETA forms, metrics, map
+  └── ecci.py            # ECCI forms, metrics, clustering
+  ```
+- **Benefits achieved:**
+  - Improved code organization and maintainability
+  - Easier navigation with domain-specific files
+  - State inheritance reduces code duplication (SharedState → domain states)
+  - SQL functionality shared across all pages via SharedState
+  - Faster IDE performance (smaller files to index)
+  - Clear separation of concerns
+
 ### Redis Live Model Cache for Real-Time Predictions (December 2025)
 - **Problem:** Predictions used MLflow's saved model, not the live training model
 - **Solution:** Redis cache for live model during training
@@ -837,4 +921,4 @@ Services Removed:
 
 ---
 
-*Last updated: 2026-01-14 (ECCI Clustering Metrics Complete - Silhouette-based best model selection, Metrics tab with Plotly dashboard, MLflow real-time integration)*
+*Last updated: 2026-01-15 (SQL Query Timeout Fix - removed ORDER BY from default queries, added Architecture Considerations section for future SQL service separation)*
