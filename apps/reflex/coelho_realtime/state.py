@@ -365,7 +365,7 @@ class State(rx.State):
             return "red" if results.get("prediction", 0) == 1 else "green"
         return "gray"
 
-    @rx.var
+    @rx.var(cache=True)
     def tfd_fraud_gauge(self) -> go.Figure:
         """Generate Plotly gauge chart for fraud probability."""
         prob = self.tfd_fraud_probability * 100
@@ -2039,7 +2039,7 @@ class State(rx.State):
             "user_agent": get_str(sample, "user_agent"),
         }
         async with self:
-            self.form_data = {**self.form_data, "Transaction Fraud Detection": form_data}
+            self.form_data["Transaction Fraud Detection"] = form_data
         # Fetch dropdown options in parallel
         await self._fetch_tfd_options_internal()
 
@@ -2131,9 +2131,9 @@ class State(rx.State):
             # str fields need no conversion
         except (ValueError, TypeError):
             return  # Ignore invalid conversions
-        current = self.form_data.get("Transaction Fraud Detection", {})
-        current[field] = value
-        self.form_data = {**self.form_data, "Transaction Fraud Detection": current}
+        if "Transaction Fraud Detection" not in self.form_data:
+            self.form_data["Transaction Fraud Detection"] = {}
+        self.form_data["Transaction Fraud Detection"][field] = value
 
     @rx.event(background = True)
     async def predict_transaction_fraud_detection(self):
@@ -2382,9 +2382,8 @@ class State(rx.State):
             # Read-only string fields
             "trip_id": get_str(sample, "trip_id"),
         }
-        # Create new dict to trigger reactivity
         async with self:
-            self.form_data = {**self.form_data, "Estimated Time of Arrival": form_data}
+            self.form_data["Estimated Time of Arrival"] = form_data
 
     async def _fetch_eta_options_internal(
         self,
@@ -2484,38 +2483,33 @@ class State(rx.State):
             # str fields need no conversion
         except (ValueError, TypeError):
             return  # Ignore invalid conversions
-        current = self.form_data.get("Estimated Time of Arrival", {})
-        current[field] = value
-        self.form_data = {**self.form_data, "Estimated Time of Arrival": current}
+        if "Estimated Time of Arrival" not in self.form_data:
+            self.form_data["Estimated Time of Arrival"] = {}
+        self.form_data["Estimated Time of Arrival"][field] = value
         # Reset prediction if coordinate field changed
         if field in self._eta_coordinate_fields:
-            self.prediction_results = {
-                **self.prediction_results,
-                "Estimated Time of Arrival": {"show": False, "eta_seconds": 0.0}
-            }
+            self.prediction_results["Estimated Time of Arrival"] = {"show": False, "eta_seconds": 0.0}
 
     @rx.event
     def generate_random_eta_coordinates(self):
         """Generate random coordinates within Houston metro bounds."""
         import random
-        current = self.form_data.get("Estimated Time of Arrival", {})
+        if "Estimated Time of Arrival" not in self.form_data:
+            self.form_data["Estimated Time of Arrival"] = {}
+        form = self.form_data["Estimated Time of Arrival"]
         # Generate random origin coordinates
-        current["origin_lat"] = round(random.uniform(self._eta_lat_bounds[0], self._eta_lat_bounds[1]), 6)
-        current["origin_lon"] = round(random.uniform(self._eta_lon_bounds[0], self._eta_lon_bounds[1]), 6)
+        form["origin_lat"] = round(random.uniform(self._eta_lat_bounds[0], self._eta_lat_bounds[1]), 6)
+        form["origin_lon"] = round(random.uniform(self._eta_lon_bounds[0], self._eta_lon_bounds[1]), 6)
         # Generate random destination coordinates (ensure not too close to origin)
         while True:
             dest_lat = round(random.uniform(self._eta_lat_bounds[0], self._eta_lat_bounds[1]), 6)
             dest_lon = round(random.uniform(self._eta_lon_bounds[0], self._eta_lon_bounds[1]), 6)
-            if abs(current["origin_lat"] - dest_lat) >= 0.01 or abs(current["origin_lon"] - dest_lon) >= 0.01:
+            if abs(form["origin_lat"] - dest_lat) >= 0.01 or abs(form["origin_lon"] - dest_lon) >= 0.01:
                 break
-        current["destination_lat"] = dest_lat
-        current["destination_lon"] = dest_lon
-        self.form_data = {**self.form_data, "Estimated Time of Arrival": current}
+        form["destination_lat"] = dest_lat
+        form["destination_lon"] = dest_lon
         # Reset prediction when coordinates change
-        self.prediction_results = {
-            **self.prediction_results,
-            "Estimated Time of Arrival": {"show": False, "eta_seconds": 0.0}
-        }
+        self.prediction_results["Estimated Time of Arrival"] = {"show": False, "eta_seconds": 0.0}
 
     @rx.event(background = True)
     async def predict_eta(self):
@@ -2638,9 +2632,8 @@ class State(rx.State):
             "search_query": get_str(sample, "search_query"),
             "session_id": get_str(sample, "session_id"),
         }
-        # Create new dict to trigger reactivity
         async with self:
-            self.form_data = {**self.form_data, "E-Commerce Customer Interactions": form_data}
+            self.form_data["E-Commerce Customer Interactions"] = form_data
         # Fetch dropdown options in parallel
         await self._fetch_ecci_options_internal()
 
@@ -2719,23 +2712,21 @@ class State(rx.State):
             # str fields need no conversion
         except (ValueError, TypeError):
             return  # Ignore invalid conversions
-        current = self.form_data.get("E-Commerce Customer Interactions", {})
-        current[field] = value
-        self.form_data = {**self.form_data, "E-Commerce Customer Interactions": current}
+        if "E-Commerce Customer Interactions" not in self.form_data:
+            self.form_data["E-Commerce Customer Interactions"] = {}
+        self.form_data["E-Commerce Customer Interactions"][field] = value
 
     @rx.event
     def generate_random_ecci_coordinates(self):
         """Generate random coordinates within Houston metro bounds for ECCI."""
         import random
-        current = self.form_data.get("E-Commerce Customer Interactions", {})
-        current["lat"] = round(random.uniform(self._ecci_lat_bounds[0], self._ecci_lat_bounds[1]), 3)
-        current["lon"] = round(random.uniform(self._ecci_lon_bounds[0], self._ecci_lon_bounds[1]), 3)
-        self.form_data = {**self.form_data, "E-Commerce Customer Interactions": current}
+        if "E-Commerce Customer Interactions" not in self.form_data:
+            self.form_data["E-Commerce Customer Interactions"] = {}
+        form = self.form_data["E-Commerce Customer Interactions"]
+        form["lat"] = round(random.uniform(self._ecci_lat_bounds[0], self._ecci_lat_bounds[1]), 3)
+        form["lon"] = round(random.uniform(self._ecci_lon_bounds[0], self._ecci_lon_bounds[1]), 3)
         # Reset prediction when coordinates change
-        self.prediction_results = {
-            **self.prediction_results,
-            "E-Commerce Customer Interactions": {"show": False, "cluster": 0}
-        }
+        self.prediction_results["E-Commerce Customer Interactions"] = {"show": False, "cluster": 0}
 
     @rx.event(background=True)
     async def predict_ecci(self):
@@ -2912,11 +2903,8 @@ class State(rx.State):
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) Firefox/120.0",
             ]),
         }
-        self.form_data = {**self.form_data, project_name: form_data}
-        self.prediction_results = {
-            **self.prediction_results,
-            project_name: {"prediction": None, "probability": None, "show": False}
-        }
+        self.form_data[project_name] = form_data
+        self.prediction_results[project_name] = {"prediction": None, "probability": None, "show": False}
 
     @rx.event
     def randomize_eta_form(self):
@@ -2963,11 +2951,8 @@ class State(rx.State):
             # Generated ID
             "trip_id": f"trip_{uuid.uuid4().hex[:12]}",
         }
-        self.form_data = {**self.form_data, project_name: form_data}
-        self.prediction_results = {
-            **self.prediction_results,
-            project_name: {"eta_seconds": 0.0, "show": False}
-        }
+        self.form_data[project_name] = form_data
+        self.prediction_results[project_name] = {"eta_seconds": 0.0, "show": False}
 
     @rx.event
     def randomize_ecci_form(self):
@@ -3008,11 +2993,8 @@ class State(rx.State):
             "page_url": f"https://shop.example.com/products/{random.randint(1000, 9999)}",
             "search_query": random.choice(["", "", "laptop", "phone", "headphones", "shoes"]),
         }
-        self.form_data = {**self.form_data, project_name: form_data}
-        self.prediction_results = {
-            **self.prediction_results,
-            project_name: {"cluster": 0, "show": False}
-        }
+        self.form_data[project_name] = form_data
+        self.prediction_results[project_name] = {"cluster": 0, "show": False}
 
     # =========================================================================
     # Batch ML (Scikit-Learn) Event Handlers
@@ -3695,8 +3677,8 @@ class State(rx.State):
 
         # Set loading state
         async with self:
-            self.sql_loading = {**self.sql_loading, project_name: True}
-            self.sql_error = {**self.sql_error, project_name: ""}
+            self.sql_loading[project_name] = True
+            self.sql_error[project_name] = ""
 
         try:
             response = await httpx_client_post(
@@ -3712,19 +3694,13 @@ class State(rx.State):
             result = response.json()
 
             async with self:
-                self.sql_query_results = {
-                    **self.sql_query_results,
-                    project_name: {
-                        "columns": result.get("columns", []),
-                        "data": result.get("data", []),
-                        "row_count": result.get("row_count", 0)
-                    }
+                self.sql_query_results[project_name] = {
+                    "columns": result.get("columns", []),
+                    "data": result.get("data", []),
+                    "row_count": result.get("row_count", 0)
                 }
-                self.sql_execution_time = {
-                    **self.sql_execution_time,
-                    project_name: result.get("execution_time_ms", 0.0)
-                }
-                self.sql_loading = {**self.sql_loading, project_name: False}
+                self.sql_execution_time[project_name] = result.get("execution_time_ms", 0.0)
+                self.sql_loading[project_name] = False
 
             row_count = result.get("row_count", 0)
             exec_time = result.get("execution_time_ms", 0.0)
@@ -3746,12 +3722,9 @@ class State(rx.State):
                     pass
 
             async with self:
-                self.sql_loading = {**self.sql_loading, project_name: False}
-                self.sql_error = {**self.sql_error, project_name: error_msg}
-                self.sql_query_results = {
-                    **self.sql_query_results,
-                    project_name: {"columns": [], "data": [], "row_count": 0}
-                }
+                self.sql_loading[project_name] = False
+                self.sql_error[project_name] = error_msg
+                self.sql_query_results[project_name] = {"columns": [], "data": [], "row_count": 0}
 
             yield rx.toast.error(
                 "Query failed",
