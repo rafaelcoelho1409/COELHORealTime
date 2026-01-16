@@ -766,179 +766,11 @@ class SharedState(rx.State):
                 self.incremental_model_available[project_name] = False
 
     @rx.event(background=True)
-    async def update_sample(self, project_name: str):
-        """Fetch initial sample from FastAPI (runs in background to avoid lock expiration)."""
-        if project_name == "Home":
-            async with self:
-                self.incremental_ml_sample[project_name] = {}
-            return
-        try:
-            sample = await httpx_client_post(
-                url=f"{RIVER_BASE_URL}/initial_sample",
-                json={"project_name": project_name},
-                timeout=30.0
-            )
-            sample_data = sample.json()
-            async with self:
-                self.incremental_ml_sample[project_name] = sample_data
-            # Initialize form data with sample
-            if project_name == "Transaction Fraud Detection":
-                await self._init_tfd_form_internal(sample_data)
-            elif project_name == "Estimated Time of Arrival":
-                await self._init_eta_form_internal(sample_data)
-            elif project_name == "E-Commerce Customer Interactions":
-                await self._init_ecci_form_internal(sample_data)
-        except Exception as e:
-            print(f"Error fetching initial sample for {project_name}: {e}")
-            async with self:
-                self.incremental_ml_sample[project_name] = {}
-
-    async def _init_tfd_form_internal(self, sample: dict):
-        """Internal helper to initialize TFD form (called from background events)."""
-        # Parse timestamp
-        timestamp_str = sample.get("timestamp") or ""
-        timestamp_date = ""
-        timestamp_time = ""
-        if timestamp_str:
-            try:
-                timestamp = dt.datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%S.%f%z")
-                timestamp_date = timestamp.strftime("%Y-%m-%d")
-                timestamp_time = timestamp.strftime("%H:%M")
-            except:
-                timestamp_date = dt.datetime.now().strftime("%Y-%m-%d")
-                timestamp_time = dt.datetime.now().strftime("%H:%M")
-
-        # Parse JSON string fields from Delta Lake
-        location = parse_json_field(sample, "location")
-        device_info = parse_json_field(sample, "device_info")
-
-        form_data = {
-            # Numeric fields - convert to string for proper display
-            "amount": safe_float_str(sample.get("amount"), 0.0),
-            "account_age_days": safe_int_str(sample.get("account_age_days"), 0),
-            "lat": safe_float_str(location.get("lat"), 0.0),
-            "lon": safe_float_str(location.get("lon"), 0.0),
-            # Timestamp fields
-            "timestamp_date": timestamp_date,
-            "timestamp_time": timestamp_time,
-            # String fields - use or "" to handle None
-            "currency": get_str(sample, "currency"),
-            "merchant_id": get_str(sample, "merchant_id"),
-            "product_category": get_str(sample, "product_category"),
-            "transaction_type": get_str(sample, "transaction_type"),
-            "payment_method": get_str(sample, "payment_method"),
-            "browser": device_info.get("browser") or "",
-            "os": device_info.get("os") or "",
-            # Boolean fields
-            "cvv_provided": safe_bool(sample.get("cvv_provided"), False),
-            "billing_address_match": safe_bool(sample.get("billing_address_match"), False),
-            # ID fields
-            "transaction_id": get_str(sample, "transaction_id"),
-            "user_id": get_str(sample, "user_id"),
-            "ip_address": get_str(sample, "ip_address"),
-            "user_agent": get_str(sample, "user_agent"),
-        }
-        async with self:
-            self.form_data["Transaction Fraud Detection"] = form_data
-
-    async def _init_eta_form_internal(self, sample: dict):
-        """Internal helper to initialize ETA form (called from background events)."""
-        # Parse timestamp
-        timestamp_str = sample.get("timestamp") or ""
-        timestamp_date = ""
-        timestamp_time = ""
-        if timestamp_str:
-            try:
-                timestamp = dt.datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%S.%f%z")
-                timestamp_date = timestamp.strftime("%Y-%m-%d")
-                timestamp_time = timestamp.strftime("%H:%M")
-            except:
-                timestamp_date = dt.datetime.now().strftime("%Y-%m-%d")
-                timestamp_time = dt.datetime.now().strftime("%H:%M")
-
-        # Parse JSON string fields from Delta Lake
-        origin = parse_json_field(sample, "origin")
-        destination = parse_json_field(sample, "destination")
-
-        form_data = {
-            # Coordinate fields
-            "origin_lat": safe_float_str(origin.get("lat"), 0.0),
-            "origin_lon": safe_float_str(origin.get("lon"), 0.0),
-            "destination_lat": safe_float_str(destination.get("lat"), 0.0),
-            "destination_lon": safe_float_str(destination.get("lon"), 0.0),
-            # Numeric fields
-            "distance_km": safe_float_str(sample.get("distance_km"), 0.0),
-            "hour_of_day": safe_int_str(sample.get("hour_of_day"), 0),
-            "day_of_week": safe_int_str(sample.get("day_of_week"), 0),
-            "is_rush_hour": safe_bool(sample.get("is_rush_hour"), False),
-            "is_weekend": safe_bool(sample.get("is_weekend"), False),
-            # Timestamp fields
-            "timestamp_date": timestamp_date,
-            "timestamp_time": timestamp_time,
-            # String fields
-            "driver_id": get_str(sample, "driver_id"),
-            "vehicle_id": get_str(sample, "vehicle_id"),
-            "weather": get_str(sample, "weather"),
-            "vehicle_type": get_str(sample, "vehicle_type"),
-            "trip_id": get_str(sample, "trip_id"),
-        }
-        async with self:
-            self.form_data["Estimated Time of Arrival"] = form_data
-
-    async def _init_ecci_form_internal(self, sample: dict):
-        """Internal helper to initialize ECCI form (called from background events)."""
-        # Parse timestamp
-        timestamp_str = sample.get("timestamp") or ""
-        timestamp_date = ""
-        timestamp_time = ""
-        if timestamp_str:
-            try:
-                timestamp = dt.datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%S.%f%z")
-                timestamp_date = timestamp.strftime("%Y-%m-%d")
-                timestamp_time = timestamp.strftime("%H:%M")
-            except:
-                timestamp_date = dt.datetime.now().strftime("%Y-%m-%d")
-                timestamp_time = dt.datetime.now().strftime("%H:%M")
-
-        # Parse JSON string fields from Delta Lake
-        location = parse_json_field(sample, "location")
-
-        form_data = {
-            # Numeric fields
-            "session_duration_sec": safe_int_str(sample.get("session_duration_sec"), 0),
-            "pages_viewed": safe_int_str(sample.get("pages_viewed"), 0),
-            "total_clicks": safe_int_str(sample.get("total_clicks"), 0),
-            "add_to_cart_count": safe_int_str(sample.get("add_to_cart_count"), 0),
-            "checkout_initiated": safe_bool(sample.get("checkout_initiated"), False),
-            "purchase_completed": safe_bool(sample.get("purchase_completed"), False),
-            "cart_abandonment": safe_bool(sample.get("cart_abandonment"), False),
-            "total_spent": safe_float_str(sample.get("total_spent"), 0.0),
-            # Coordinate fields
-            "lat": safe_float_str(location.get("lat"), 0.0),
-            "lon": safe_float_str(location.get("lon"), 0.0),
-            # Timestamp fields
-            "timestamp_date": timestamp_date,
-            "timestamp_time": timestamp_time,
-            # String fields
-            "customer_id": get_str(sample, "customer_id"),
-            "session_id": get_str(sample, "session_id"),
-            "device_type": get_str(sample, "device_type"),
-            "traffic_source": get_str(sample, "traffic_source"),
-            "product_category_viewed": get_str(sample, "product_category_viewed"),
-            "customer_segment": get_str(sample, "customer_segment"),
-        }
-        async with self:
-            self.form_data["E-Commerce Customer Interactions"] = form_data
-
-    @rx.event(background=True)
     async def init_page(self, model_key: str, project_name: str):
-        """Combined page initialization - replaces multiple HTTP calls with one.
+        """Combined page initialization - fetches MLflow metrics and training status.
 
-        This single endpoint replaces:
-        - set_current_page_model
-        - update_sample
-        - check_incremental_model_available
-        - get_mlflow_metrics (partial)
+        Forms are populated via randomize_*_form on page mount (local, instant).
+        Dropdown options are loaded from local JSON at startup via orjson.
         """
         # Synchronous state update first
         async with self:
@@ -973,17 +805,9 @@ class SharedState(rx.State):
                 if metrics:
                     self.mlflow_metrics[project_name] = metrics
 
-                # Initial sample for form fields
-                sample = data.get("initial_sample", {})
-                if sample:
-                    self.incremental_ml_sample[project_name] = sample
-                    # Update form data with sample values
-                    self._update_form_from_sample(project_name, sample)
-
-                # Dropdown options (can update pre-loaded options with fresh data)
-                options = data.get("dropdown_options", {})
-                if options:
-                    self.dropdown_options[project_name] = options
+                # NOTE: initial_sample removed - forms are populated locally
+                # NOTE: dropdown_options removed - loaded from local JSON at startup
+                # Forms are randomized on page load via on_mount (see pages/*.py)
 
                 # Training status
                 training = data.get("training_status", {})

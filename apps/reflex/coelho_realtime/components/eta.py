@@ -143,7 +143,13 @@ def gauge_card_with_info(plotly_key: str, metric_key: str) -> rx.Component:
 # =============================================================================
 def eta_map() -> rx.Component:
     """Display Folium map for ETA origin/destination."""
-    return rx.html(ETAState.eta_folium_map_html)
+    return rx.box(
+        rx.html(ETAState.eta_folium_map_html),
+        width="100%",
+        height="100%",
+        min_height="280px",
+        class_name="[&_iframe]:w-full [&_iframe]:h-full [&_iframe]:min-h-[280px] [&_iframe]:border-0"
+    )
 
 
 # =============================================================================
@@ -436,7 +442,8 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
                 rx.text(f"Initial Estimated Travel Time: {ETAState.eta_initial_estimated_travel_time_seconds} s", size="1", color="gray"),
                 spacing="1",
                 align_items="start",
-                width="100%"
+                width="100%",
+                margin_top="8px"
             ),
             spacing="2",
             align_items="start",
@@ -486,9 +493,19 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
                                     spacing="2",
                                     align_items="center"
                                 ),
-                                eta_map(),
-                                rx.text(f"Estimated Distance: {ETAState.eta_estimated_distance_km} km", size="2", color="gray"),
-                                rx.text(f"Initial Estimated Travel Time: {ETAState.eta_initial_estimated_travel_time_seconds} s", size="2", color="gray"),
+                                rx.box(
+                                    eta_map(),
+                                    width="100%",
+                                    height="280px",
+                                    overflow="hidden",
+                                ),
+                                rx.vstack(
+                                    rx.text(f"Estimated Distance: {ETAState.eta_estimated_distance_km} km", size="2", color="gray"),
+                                    rx.text(f"Initial Estimated Travel Time: {ETAState.eta_initial_estimated_travel_time_seconds} s", size="2", color="gray"),
+                                    spacing="1",
+                                    width="100%",
+                                    padding_top="12px",
+                                ),
                                 spacing="2",
                                 width="100%",
                                 height="100%"
@@ -546,7 +563,7 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
                             ),
                             variant="surface",
                             width="50%",
-                            height="380px"
+                            height="400px"
                         ),
                         spacing="3",
                         width="100%",
@@ -584,7 +601,7 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
             default_value="prediction",
             width="100%"
         ),
-        on_mount=ETAState.get_mlflow_metrics("Estimated Time of Arrival"),
+        # NOTE: on_mount removed - init_page already fetches mlflow_metrics on page mount
         align_items="start",
         spacing="4",
         width="70%"

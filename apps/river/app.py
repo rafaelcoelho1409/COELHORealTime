@@ -34,7 +34,6 @@ from functions import (
     # Polars optimized functions (lightweight, lazy evaluation)
     get_unique_values_polars,
     get_sample_polars,
-    get_initial_sample_polars,
     precompute_all_unique_values_polars,
     # Static dropdown options (instant access, mirrors Kafka producer constants)
     get_static_dropdown_options,
@@ -50,6 +49,8 @@ from functions import (
     get_best_mlflow_run,
     # Model names mapping
     MLFLOW_MODEL_NAMES,
+    # Cached experiment lookup (performance optimization)
+    get_cached_experiment,
 )
 
 
@@ -70,7 +71,7 @@ model_dict: dict = {name: {} for name in PROJECT_NAMES}
 encoders_dict: dict = {name: {} for name in PROJECT_NAMES}
 consumer_dict: dict = {name: None for name in PROJECT_NAMES}
 data_dict: dict = {name: None for name in PROJECT_NAMES}
-initial_sample_dict: dict = {name: None for name in PROJECT_NAMES}
+# NOTE: initial_sample_dict removed - forms populated locally in Reflex
 # Precomputed unique values cache (populated at startup for instant access)
 unique_values_cache: dict = {name: {} for name in PROJECT_NAMES}
 
@@ -84,8 +85,7 @@ class Healthcheck(BaseModel):
     encoders_load: dict[str, str] | dict[str, None] = {x: None for x in PROJECT_NAMES}
     data_load: dict[str, str] | dict[str, None] = {x: None for x in PROJECT_NAMES}
     data_message: dict[str, str] | dict[str, None] = {x: None for x in PROJECT_NAMES}
-    initial_data_sample_loaded: dict[str, bool] | dict[str, None] = {x: None for x in PROJECT_NAMES}
-    initial_data_sample_message: dict[str, str] | dict[str, None] = {x: None for x in PROJECT_NAMES}
+    # NOTE: initial_data_sample fields removed - forms populated locally in Reflex
 
 
 # Initialize healthcheck with default state
@@ -93,7 +93,6 @@ healthcheck = Healthcheck(
     model_load = {x: "not_attempted" for x in PROJECT_NAMES},
     encoders_load = {x: "not_attempted" for x in PROJECT_NAMES},
     data_load = {x: "not_attempted" for x in PROJECT_NAMES},
-    initial_data_sample_loaded = {x: False for x in PROJECT_NAMES}
 )
 
 
@@ -275,8 +274,7 @@ class UniqueValuesRequest(BaseModel):
     limit: int = 100
 
 
-class InitialSampleRequest(BaseModel):
-    project_name: str
+# NOTE: InitialSampleRequest removed - endpoint no longer exists
 
 
 class OrdinalEncoderRequest(BaseModel):
@@ -345,8 +343,9 @@ def _sync_get_mlflow_metrics(project_name: str, model_name: str) -> dict:
     - Otherwise: metrics from best FINISHED model (same as predictions)
 
     This provides live updates during training while showing stable metrics when idle.
+    Uses cached experiment lookup for performance.
     """
-    experiment = mlflow.get_experiment_by_name(project_name)
+    experiment = get_cached_experiment(project_name)
     if experiment is None:
         raise ValueError(f"Experiment '{project_name}' not found in MLflow")
 
@@ -465,22 +464,15 @@ async def lifespan(app: FastAPI):
         data_dict, \
         model_dict, \
         encoders_dict, \
-        initial_sample_dict, \
         unique_values_cache, \
         healthcheck
     # 1. Initialize unique values from static options (instant - no I/O)
     print("Starting River ML service...", flush = True)
     data_load_status = {}
     data_message_dict = {}
-    initial_data_sample_loaded_status = {}
-    initial_data_sample_message_dict = {}
-    project_model_mapping = {
-        "Transaction Fraud Detection": TransactionFraudDetection,
-        "Estimated Time of Arrival": EstimatedTimeOfArrival,
-        "E-Commerce Customer Interactions": ECommerceCustomerInteractions,
-    }
-    # Load static dropdown options first (instant - mirrors Kafka producer constants)
-    # This ensures forms work immediately, even on fresh start with no Delta Lake data
+    # Load static dropdown options (instant - mirrors Kafka producer constants)
+    # NOTE: These are only used for /unique_values endpoint fallback
+    # Reflex loads dropdown options from local JSON files at startup
     for project_name in PROJECT_NAMES:
         static_options = get_static_dropdown_options(project_name)
         if static_options:
@@ -492,13 +484,8 @@ async def lifespan(app: FastAPI):
             unique_values_cache[project_name] = {}
             data_load_status[project_name] = "no_static_options"
             data_message_dict[project_name] = "No static options defined"
-        # Initial sample loading deferred - forms work without it
-        initial_data_sample_loaded_status[project_name] = False
-        initial_data_sample_message_dict[project_name] = "Sample loading deferred to on-demand"
     healthcheck.data_load = data_load_status
     healthcheck.data_message = data_message_dict
-    healthcheck.initial_data_sample_loaded = initial_data_sample_loaded_status
-    healthcheck.initial_data_sample_message = initial_data_sample_message_dict
     # 2. Skip Kafka consumers at startup - create on-demand for training scripts
     print("Kafka consumers will be created on-demand for training scripts.", flush = True)
     # consumer_dict is already initialized with None values
@@ -873,50 +860,9 @@ async def get_unique_values(request: UniqueValuesRequest):
         )
 
 
-@app.post("/initial_sample")
-async def get_initial_sample(request: InitialSampleRequest):
-    """Get initial sample (on-demand from Delta Lake if not cached).
-
-    Returns validated Pydantic models with JSON fields parsed from Delta Lake strings.
-    """
-    global initial_sample_dict
-    project_name = request.project_name
-    project_model_mapping = {
-        "Transaction Fraud Detection": TransactionFraudDetection,
-        "Estimated Time of Arrival": EstimatedTimeOfArrival,
-        "E-Commerce Customer Interactions": ECommerceCustomerInteractions,
-    }
-    # Return cached sample if available
-    if initial_sample_dict.get(project_name) is not None:
-        return initial_sample_dict[project_name]
-    # Load on-demand from Delta Lake via Polars
-    try:
-        sample_dict = await asyncio.wait_for(
-            asyncio.to_thread(get_initial_sample_polars, project_name),
-            timeout = 15.0
-        )
-        if sample_dict:
-            model_class = project_model_mapping.get(project_name)
-            if model_class:
-                validated_sample = model_class(**sample_dict)
-                initial_sample_dict[project_name] = validated_sample
-                return validated_sample
-        raise HTTPException(
-            status_code = 503,
-            detail = f"No data available for {project_name} in Delta Lake."
-        )
-    except asyncio.TimeoutError:
-        raise HTTPException(
-            status_code = 504,
-            detail = f"Timeout loading sample for {project_name}. Delta Lake may be unavailable."
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code = 500,
-            detail = f"Error loading sample for {project_name}: {e}"
-        )
+# NOTE: /initial_sample endpoint REMOVED
+# Forms are now populated via randomize_*_form on page mount in Reflex (local, instant)
+# This eliminates the Delta Lake dependency for form initialization
 
 
 @app.post("/get_ordinal_encoder")
@@ -942,21 +888,41 @@ async def get_ordinal_encoder(request: OrdinalEncoderRequest):
     )
 
 
+# Cache for cluster artifacts (avoids repeated MLflow downloads)
+_cluster_cache: Dict[str, tuple[float, str, Any]] = {}
+_CLUSTER_CACHE_TTL = 60  # 1 minute cache
+
+
 @app.get("/cluster_counts")
 async def get_cluster_counts():
-    """Get cluster counts from MLflow artifacts (for DBSTREAM clustering)."""
+    """Get cluster counts from MLflow artifacts (for DBSTREAM clustering).
+
+    Results are cached for 1 minute to avoid repeated MLflow artifact downloads.
+    """
     try:
         project_name = "E-Commerce Customer Interactions"
         model_name = MLFLOW_MODEL_NAMES.get(project_name)
         run_id = get_best_mlflow_run(project_name, model_name)
         if run_id is None:
             return {}
+
+        # Check cache
+        cache_key = f"cluster_counts:{run_id}"
+        cache_entry = _cluster_cache.get(cache_key)
+        if cache_entry:
+            timestamp, cached_run_id, data = cache_entry
+            if time.time() - timestamp < _CLUSTER_CACHE_TTL and cached_run_id == run_id:
+                return data
+
         local_path = mlflow.artifacts.download_artifacts(
             run_id=run_id,
             artifact_path="cluster_counts.json"
         )
         with open(local_path, 'r') as f:
             cluster_counts = json.load(f)
+
+        # Update cache
+        _cluster_cache[cache_key] = (time.time(), run_id, cluster_counts)
         return cluster_counts
     except Exception as e:
         print(f"Error fetching cluster counts from MLflow: {e}")
@@ -965,19 +931,37 @@ async def get_cluster_counts():
 
 @app.post("/cluster_feature_counts")
 async def get_cluster_feature_counts(request: ClusterFeatureCountsRequest):
-    """Get cluster feature counts for a specific column from MLflow artifacts."""
+    """Get cluster feature counts for a specific column from MLflow artifacts.
+
+    Results are cached for 1 minute to avoid repeated MLflow artifact downloads.
+    """
     try:
         project_name = "E-Commerce Customer Interactions"
         model_name = MLFLOW_MODEL_NAMES.get(project_name)
         run_id = get_best_mlflow_run(project_name, model_name)
         if run_id is None:
             return {}
+
+        # Check cache for full feature counts data
+        cache_key = f"cluster_feature_counts:{run_id}"
+        cache_entry = _cluster_cache.get(cache_key)
+        if cache_entry:
+            timestamp, cached_run_id, data = cache_entry
+            if time.time() - timestamp < _CLUSTER_CACHE_TTL and cached_run_id == run_id:
+                # Return filtered data from cache
+                clusters = list(data.keys())
+                return {x: data[x].get(request.column_name, {}) for x in clusters}
+
         local_path = mlflow.artifacts.download_artifacts(
             run_id=run_id,
             artifact_path="cluster_feature_counts.json"
         )
         with open(local_path, 'r') as f:
             cluster_counts = json.load(f)
+
+        # Update cache with full data
+        _cluster_cache[cache_key] = (time.time(), run_id, cluster_counts)
+
         clusters = list(cluster_counts.keys())
         return {
             x: cluster_counts[x].get(request.column_name, {})
@@ -1024,14 +1008,24 @@ async def get_mlflow_metrics(request: MLflowMetricsRequest):
         )
 
 
+# Cache for report metrics (ConfusionMatrix, ClassificationReport)
+_report_metrics_cache: Dict[str, tuple[float, str, dict]] = {}
+_REPORT_METRICS_CACHE_TTL = 30  # 30 seconds cache (shorter for live training)
+
+
 def _sync_get_report_metrics(project_name: str, model_name: str) -> dict:
-    """Load report_metrics.pkl artifact from MLflow (ConfusionMatrix, ClassificationReport)."""
+    """Load report_metrics.pkl artifact from MLflow (ConfusionMatrix, ClassificationReport).
+
+    Uses cached experiment lookup for performance.
+    Results are cached for 30 seconds to avoid repeated artifact downloads.
+    """
     # First check for RUNNING experiment, then fall back to best FINISHED
-    experiment = mlflow.get_experiment_by_name(project_name)
+    experiment = get_cached_experiment(project_name)
     if experiment is None:
         return {"available": False, "error": f"Experiment '{project_name}' not found"}
 
     run_id = None
+    is_live = False
     # Check for RUNNING experiment first
     runs_df = mlflow.search_runs(
         experiment_ids=[experiment.experiment_id],
@@ -1043,6 +1037,7 @@ def _sync_get_report_metrics(project_name: str, model_name: str) -> dict:
         running_runs = runs_df[runs_df["tags.mlflow.runName"] == model_name]
         if not running_runs.empty:
             run_id = running_runs.iloc[0]["run_id"]
+            is_live = True
 
     # Fall back to best FINISHED model
     if run_id is None:
@@ -1050,6 +1045,15 @@ def _sync_get_report_metrics(project_name: str, model_name: str) -> dict:
 
     if run_id is None:
         return {"available": False, "error": "No trained model found"}
+
+    # Check cache (skip cache for live training - need fresh data)
+    if not is_live:
+        cache_key = f"report_metrics:{run_id}"
+        cache_entry = _report_metrics_cache.get(cache_key)
+        if cache_entry:
+            timestamp, cached_run_id, data = cache_entry
+            if time.time() - timestamp < _REPORT_METRICS_CACHE_TTL and cached_run_id == run_id:
+                return data
 
     # Download and load report_metrics.pkl artifact
     try:
@@ -1097,12 +1101,17 @@ def _sync_get_report_metrics(project_name: str, model_name: str) -> dict:
                 except Exception as e:
                     cr_data = {"available": False, "error": str(e)}
 
-            return {
+            result = {
                 "available": True,
                 "run_id": run_id,
                 "confusion_matrix": cm_data,
                 "classification_report": cr_data
             }
+            # Update cache (only for non-live runs)
+            if not is_live:
+                cache_key = f"report_metrics:{run_id}"
+                _report_metrics_cache[cache_key] = (time.time(), run_id, result)
+            return result
     except Exception as e:
         return {"available": False, "error": f"Artifact not found: {str(e)}"}
 
@@ -1130,11 +1139,12 @@ async def get_report_metrics(request: MLflowMetricsRequest):
 async def check_model_available(request: ModelAvailabilityRequest):
     """Check if a trained River model is available in MLflow.
     Uses get_best_mlflow_run to find the best model (same as predictions).
+    Uses cached experiment lookup for performance.
     """
     project_name = request.project_name
     model_name = request.model_name
     try:
-        experiment = mlflow.get_experiment_by_name(project_name)
+        experiment = get_cached_experiment(project_name)
         if experiment is None:
             return {
                 "available": False,
@@ -1185,25 +1195,23 @@ async def page_init(request: PageInitRequest):
     Returns all data needed for page load in a single call:
     - model_available: Check if trained model exists in MLflow
     - mlflow_metrics: Latest metrics from best model run
-    - initial_sample: Sample data for form fields
-    - dropdown_options: Static options for form dropdowns
     - training_status: Whether training is currently active
 
-    This replaces 5-6 separate HTTP calls with a single request.
+    Note: dropdown_options and initial_sample removed - Reflex handles locally:
+    - dropdown_options: Loaded from local JSON files at startup via orjson
+    - initial_sample: Forms populated via randomize on page mount (instant)
     """
     project_name = request.project_name
     model_name = request.model_name
     result = {
         "model_available": {"available": False},
         "mlflow_metrics": {},
-        "initial_sample": {},
-        "dropdown_options": {},
         "training_status": {"is_training": False},
     }
 
     try:
-        # 1. Check model availability and get metrics
-        experiment = mlflow.get_experiment_by_name(project_name)
+        # 1. Check model availability and get metrics (uses cached experiment lookup)
+        experiment = get_cached_experiment(project_name)
         if experiment:
             experiment_url = f"http://localhost:5001/#/experiments/{experiment.experiment_id}"
 
@@ -1287,20 +1295,8 @@ async def page_init(request: PageInitRequest):
                         "experiment_url": experiment_url,
                     }
 
-        # 3. Initial sample from Delta Lake (with timeout)
-        try:
-            sample = await asyncio.wait_for(
-                asyncio.to_thread(get_initial_sample_polars, project_name),
-                timeout=5.0
-            )
-            result["initial_sample"] = sample if sample else {}
-        except asyncio.TimeoutError:
-            result["initial_sample"] = {}
-        except Exception:
-            result["initial_sample"] = {}
-
-        # 4. Static dropdown options (instant)
-        result["dropdown_options"] = get_static_dropdown_options(project_name)
+        # 3. initial_sample - REMOVED (Reflex randomizes forms locally on page mount)
+        # 4. dropdown_options - REMOVED (Reflex loads from local JSON files)
 
         # 5. Training status
         result["training_status"] = {"is_training": is_training_active(project_name, model_name)}

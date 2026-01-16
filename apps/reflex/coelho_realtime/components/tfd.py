@@ -737,7 +737,7 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
             default_value="prediction",
             width="100%"
         ),
-        on_mount=TFDState.get_mlflow_metrics("Transaction Fraud Detection"),
+        # NOTE: on_mount removed - init_page already fetches mlflow_metrics on page mount
         align_items="start",
         spacing="4",
         width="70%"

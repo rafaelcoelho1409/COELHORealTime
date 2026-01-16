@@ -31,8 +31,11 @@ def index() -> rx.Component:
             padding="2em",
             width="100%"
         ),
-        # On mount: combined page initialization (single HTTP call)
-        on_mount=ETAState.init_page(MODEL_KEY, PROJECT_NAME),
+        # On mount: page initialization + form randomization (instant local)
+        on_mount=[
+            ETAState.randomize_eta_form,  # Populate form with random values (local, instant)
+            ETAState.init_page(MODEL_KEY, PROJECT_NAME),  # Fetch MLflow metrics
+        ],
         # On unmount: cleanup when leaving the page
         on_unmount=ETAState.cleanup_on_page_leave(PROJECT_NAME),
         spacing="0",

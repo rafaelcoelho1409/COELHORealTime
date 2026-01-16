@@ -163,8 +163,9 @@ def get_static_dropdown_options(project_name: str) -> Dict[str, List[str]]:
 # =============================================================================
 import redis
 
-# Redis connection (lazy initialization)
+# Redis connection (lazy initialization with connection pooling)
 _redis_client: Optional[redis.Redis] = None
+_redis_verified: bool = False  # Track if connection was verified at least once
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
 # Redis key prefixes
 REDIS_LIVE_MODEL_PREFIX = "live_model"
@@ -175,8 +176,12 @@ REDIS_CACHE_INTERVAL = 100
 
 
 def get_redis_client() -> Optional[redis.Redis]:
-    """Get Redis client (lazy initialization with connection pooling)."""
-    global _redis_client
+    """Get Redis client (lazy initialization with connection pooling).
+
+    Connection is verified once at startup, then reused without ping on every call.
+    Redis client handles reconnection automatically if connection drops.
+    """
+    global _redis_client, _redis_verified
     if _redis_client is None:
         try:
             _redis_client = redis.from_url(
@@ -184,10 +189,13 @@ def get_redis_client() -> Optional[redis.Redis]:
                 decode_responses=False,  # Keep binary for pickle
                 socket_timeout=5.0,
                 socket_connect_timeout=5.0,
+                retry_on_timeout=True,  # Auto-retry on timeout
             )
-            # Test connection
-            _redis_client.ping()
-            print(f"Connected to Redis at {REDIS_URL}")
+            # Only ping once to verify connection works
+            if not _redis_verified:
+                _redis_client.ping()
+                _redis_verified = True
+                print(f"Connected to Redis at {REDIS_URL}")
         except Exception as e:
             print(f"Warning: Could not connect to Redis: {e}")
             _redis_client = None
@@ -332,12 +340,41 @@ def clear_live_model_from_redis(project_name: str, model_name: str) -> bool:
 
 
 # =============================================================================
+# MLflow Experiment Cache (avoids repeated experiment lookups)
+# =============================================================================
+_experiment_cache: Dict[str, tuple[float, Any]] = {}
+_EXPERIMENT_CACHE_TTL = 300  # 5 minutes
+
+
+def get_cached_experiment(project_name: str) -> Optional[Any]:
+    """Get MLflow experiment with caching (5 minute TTL).
+
+    Experiment names/IDs rarely change, so caching avoids repeated API calls.
+    Returns the experiment object or None if not found.
+    """
+    import time as _time
+    cache_entry = _experiment_cache.get(project_name)
+    if cache_entry:
+        timestamp, experiment = cache_entry
+        if _time.time() - timestamp < _EXPERIMENT_CACHE_TTL:
+            return experiment
+    # Cache miss or expired - fetch from MLflow
+    try:
+        experiment = mlflow.get_experiment_by_name(project_name)
+        _experiment_cache[project_name] = (_time.time(), experiment)
+        return experiment
+    except Exception as e:
+        print(f"Error getting MLflow experiment for {project_name}: {e}")
+        return None
+
+
+# =============================================================================
 # MLflow Artifact Loading Functions
 # =============================================================================
 def get_latest_mlflow_run(project_name: str, model_name: str) -> Optional[str]:
     """Get the latest MLflow run ID for a project and model."""
     try:
-        experiment = mlflow.get_experiment_by_name(project_name)
+        experiment = get_cached_experiment(project_name)
         if experiment is None:
             print(f"No MLflow experiment found for {project_name}")
             return None
@@ -383,13 +420,13 @@ def get_best_mlflow_run(project_name: str, model_name: str) -> Optional[str]:
     Returns None if no runs exist (new model will be created from scratch).
     """
     try:
-        experiment = mlflow.get_experiment_by_name(project_name)
+        experiment = get_cached_experiment(project_name)
         if experiment is None:
             print(f"No MLflow experiment found for {project_name}")
             return None
         runs_df = mlflow.search_runs(
             experiment_ids = [experiment.experiment_id],
-            max_results = 1000,  # Get more runs to find the best
+            max_results = 50,  # Reduced from 1000 - sufficient for finding best model
             order_by = ["start_time DESC"],
             filter_string = "attributes.status = 'FINISHED'"  # Only completed runs with full artifacts
         )
@@ -537,7 +574,7 @@ def load_kafka_offset_from_mlflow(project_name: str) -> Optional[int]:
             except Exception as e:
                 print(f"Best run doesn't have offset artifact, searching other runs...")
         # Fallback: search all FINISHED runs for the highest offset
-        experiment = mlflow.get_experiment_by_name(project_name)
+        experiment = get_cached_experiment(project_name)
         if experiment is None:
             print(f"No MLflow experiment found for {project_name}, starting from offset 0")
             return None
@@ -730,21 +767,26 @@ def _sanitize_for_json(data: list[dict]) -> list[dict]:
 _duckdb_conn: Optional[duckdb.DuckDBPyConnection] = None
 
 
-def _get_duckdb_connection() -> duckdb.DuckDBPyConnection:
-    """Get or create a persistent DuckDB connection configured for MinIO."""
+def _get_duckdb_connection(force_reconnect: bool = False) -> duckdb.DuckDBPyConnection:
+    """Get or create a persistent DuckDB connection configured for MinIO.
+
+    Args:
+        force_reconnect: If True, recreate connection even if one exists.
+                        Used for recovery after connection errors.
+
+    Connection is kept alive and reused. If a query fails due to stale connection,
+    caller should retry with force_reconnect=True.
+    """
     global _duckdb_conn
 
-    if _duckdb_conn is not None:
-        try:
-            # Test if connection is still valid
-            _duckdb_conn.execute("SELECT 1")
-            return _duckdb_conn
-        except Exception:
-            # Connection is stale, recreate it
-            _duckdb_conn = None
+    if _duckdb_conn is not None and not force_reconnect:
+        return _duckdb_conn
 
     # Create new connection and configure it
-    print("Creating new DuckDB connection with Delta extension...")
+    if force_reconnect:
+        print("Recreating DuckDB connection...")
+    else:
+        print("Creating new DuckDB connection with Delta extension...")
 
     # Set environment variables for delta-rs/object_store
     os.environ["AWS_ACCESS_KEY_ID"] = MINIO_ACCESS_KEY
@@ -916,56 +958,70 @@ def execute_delta_sql(
     effective_limit = min(limit, SQL_MAX_ROWS)
     query_with_limit = _enforce_limit(query, effective_limit)
 
-    # 4. Execute query with native DuckDB delta extension
-    try:
-        # Get persistent DuckDB connection (already configured for MinIO)
-        conn = _get_duckdb_connection()
+    # 4. Execute query with native DuckDB delta extension (with retry on connection error)
+    full_query = f"""
+    WITH data AS (
+        SELECT * FROM delta_scan('{delta_path}')
+    )
+    {query_with_limit}
+    """
 
-        # Create a CTE that makes the Delta table available as 'data'
-        # This allows users to write simple queries like: SELECT * FROM data
-        full_query = f"""
-        WITH data AS (
-            SELECT * FROM delta_scan('{delta_path}')
-        )
-        {query_with_limit}
-        """
+    for attempt in range(2):  # Max 2 attempts (original + 1 retry)
+        try:
+            # Get persistent DuckDB connection
+            conn = _get_duckdb_connection(force_reconnect=(attempt > 0))
 
-        print(f"Executing DuckDB query for {project_name}: {query_with_limit[:100]}...")
+            if attempt == 0:
+                print(f"Executing DuckDB query for {project_name}: {query_with_limit[:100]}...")
 
-        # Execute the query
-        result = conn.execute(full_query).fetchdf()
+            # Execute the query
+            result = conn.execute(full_query).fetchdf()
 
-        print(f"Query returned {len(result)} rows")
+            print(f"Query returned {len(result)} rows")
 
-        execution_time = (time.time() - start_time) * 1000
+            execution_time = (time.time() - start_time) * 1000
 
-        # Check if result was truncated
-        truncated = len(result) >= effective_limit
+            # Check if result was truncated
+            truncated = len(result) >= effective_limit
 
-        # Convert to list of dicts and sanitize for JSON
-        data = _sanitize_for_json(result.to_dict(orient="records"))
+            # Convert to list of dicts and sanitize for JSON
+            data = _sanitize_for_json(result.to_dict(orient="records"))
 
-        return {
-            "columns": list(result.columns),
-            "data": data,
-            "row_count": len(result),
-            "execution_time_ms": round(execution_time, 2),
-            "truncated": truncated,
-            "error": None,
-            "engine": "duckdb"
-        }
-    except Exception as e:
-        error_msg = f"Query execution error: {str(e)}"
-        print(f"DuckDB error for {project_name}: {error_msg}")
-        return {
-            "columns": [],
-            "data": [],
-            "row_count": 0,
-            "execution_time_ms": (time.time() - start_time) * 1000,
-            "truncated": False,
-            "error": error_msg,
-            "engine": "duckdb"
-        }
+            return {
+                "columns": list(result.columns),
+                "data": data,
+                "row_count": len(result),
+                "execution_time_ms": round(execution_time, 2),
+                "truncated": truncated,
+                "error": None,
+                "engine": "duckdb"
+            }
+        except Exception as e:
+            if attempt == 0 and "connection" in str(e).lower():
+                print(f"DuckDB connection error, retrying with fresh connection...")
+                continue  # Retry with force_reconnect=True
+            error_msg = f"Query execution error: {str(e)}"
+            print(f"DuckDB error for {project_name}: {error_msg}")
+            return {
+                "columns": [],
+                "data": [],
+                "row_count": 0,
+                "execution_time_ms": (time.time() - start_time) * 1000,
+                "truncated": False,
+                "error": error_msg,
+                "engine": "duckdb"
+            }
+
+    # Should not reach here, but safety fallback
+    return {
+        "columns": [],
+        "data": [],
+        "row_count": 0,
+        "execution_time_ms": (time.time() - start_time) * 1000,
+        "truncated": False,
+        "error": "Unexpected error in query execution",
+        "engine": "duckdb"
+    }
 
 
 def execute_delta_sql_polars(

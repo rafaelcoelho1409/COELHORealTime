@@ -31,9 +31,10 @@ def index() -> rx.Component:
             padding="2em",
             width="100%"
         ),
-        # On mount: combined page initialization + ECCI-specific cluster analytics
+        # On mount: page initialization + form randomization (instant local)
         on_mount=[
-            ECCIState.init_page(MODEL_KEY, PROJECT_NAME),
+            ECCIState.randomize_ecci_form,  # Populate form with random values (local, instant)
+            ECCIState.init_page(MODEL_KEY, PROJECT_NAME),  # Fetch MLflow metrics
             ECCIState.fetch_ecci_cluster_counts,
             ECCIState.fetch_ecci_cluster_feature_counts,
         ],

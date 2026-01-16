@@ -42,9 +42,10 @@ def index() -> rx.Component:
             padding="2em",
             width="100%"
         ),
-        # On mount: combined page initialization (single HTTP call)
+        # On mount: page initialization + form randomization (instant local)
         on_mount=[
-            TFDState.init_page(MODEL_KEY, PROJECT_NAME),
+            TFDState.randomize_tfd_form,  # Populate form with random values (local, instant)
+            TFDState.init_page(MODEL_KEY, PROJECT_NAME),  # Fetch MLflow metrics
             TFDState.check_batch_model_available(PROJECT_NAME),
         ],
         # On unmount: cleanup when leaving the page
