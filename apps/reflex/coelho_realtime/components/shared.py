@@ -242,6 +242,137 @@ def ml_training_switch(model_key: str, project_name: str) -> rx.Component:
     )
 
 
+def batch_ml_training_box(model_key: str, project_name: str) -> rx.Component:
+    """
+    A training box component for Batch ML (Scikit-Learn).
+    Unlike Incremental ML's switch, this uses a button to trigger one-time training.
+    Shows spinner during training and model info when available.
+    """
+    return rx.card(
+        rx.vstack(
+            rx.hstack(
+                rx.vstack(
+                    rx.hstack(
+                        rx.icon("layers", size=18, color=rx.cond(
+                            SharedState.batch_model_available[project_name],
+                            rx.color("blue", 9),
+                            rx.color("gray", 9)
+                        )),
+                        rx.text(
+                            "Batch ML Training",
+                            size="3",
+                            weight="medium"
+                        ),
+                        spacing="2",
+                        align_items="center"
+                    ),
+                    rx.text(
+                        rx.cond(
+                            SharedState.batch_training_loading[project_name],
+                            "Training in progress...",
+                            rx.cond(
+                                SharedState.batch_model_available[project_name],
+                                "Model trained and ready",
+                                "Click Train to create model"
+                            )
+                        ),
+                        size="1",
+                        color="gray"
+                    ),
+                    spacing="1",
+                    align_items="start"
+                ),
+                rx.cond(
+                    SharedState.batch_training_loading[project_name],
+                    rx.spinner(size="3"),
+                    rx.button(
+                        rx.hstack(
+                            rx.icon("play", size=14),
+                            rx.text("Train", size="2"),
+                            spacing="1",
+                            align_items="center"
+                        ),
+                        on_click=SharedState.train_batch_model(model_key, project_name),
+                        size="2",
+                        color_scheme="blue",
+                        variant="solid"
+                    )
+                ),
+                justify="between",
+                align_items="center",
+                width="100%"
+            ),
+            rx.divider(size="4", width="100%"),
+            # Model name badge and MLflow button
+            rx.hstack(
+                rx.badge(
+                    rx.hstack(
+                        rx.icon("brain", size=12),
+                        rx.text(SharedState.batch_ml_model_name[project_name], size="1"),
+                        spacing="1",
+                        align_items="center"
+                    ),
+                    color_scheme="purple",
+                    variant="soft",
+                    size="1"
+                ),
+                # MLflow button - links to experiment
+                rx.cond(
+                    SharedState.batch_mlflow_experiment_url[project_name] != "",
+                    rx.link(
+                        rx.button(
+                            rx.hstack(
+                                rx.image(
+                                    src="https://cdn.simpleicons.org/mlflow/0194E2",
+                                    width="14px",
+                                    height="14px"
+                                ),
+                                rx.text("MLflow", size="1"),
+                                spacing="1",
+                                align_items="center"
+                            ),
+                            size="1",
+                            variant="soft",
+                            color_scheme="cyan",
+                            width="100%"
+                        ),
+                        href=SharedState.batch_mlflow_experiment_url[project_name],
+                        is_external=True,
+                        flex="1"
+                    ),
+                    rx.button(
+                        rx.hstack(
+                            rx.image(
+                                src="https://cdn.simpleicons.org/mlflow/0194E2",
+                                width="14px",
+                                height="14px",
+                                opacity="0.5"
+                            ),
+                            rx.text("MLflow", size="1"),
+                            spacing="1",
+                            align_items="center"
+                        ),
+                        size="1",
+                        variant="soft",
+                        color_scheme="gray",
+                        disabled=True,
+                        flex="1"
+                    )
+                ),
+                spacing="2",
+                align_items="center",
+                width="100%"
+            ),
+            spacing="2",
+            align_items="start",
+            width="100%"
+        ),
+        variant="surface",
+        size="2",
+        width="100%"
+    )
+
+
 def coelho_realtime_navbar() -> rx.Component:
     return rx.box(
         rx.box(

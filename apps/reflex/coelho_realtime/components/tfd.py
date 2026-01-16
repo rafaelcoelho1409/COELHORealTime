@@ -10,8 +10,8 @@ This module contains all TFD-specific UI components:
 All components use TFDState for TFD-specific state.
 """
 import reflex as rx
-from ..states import TFDState, METRIC_INFO
-from .shared import metric_info_dialog, ml_training_switch
+from ..states import TFDState, SharedState, METRIC_INFO
+from .shared import metric_info_dialog, ml_training_switch, batch_ml_training_box
 
 
 # =============================================================================
@@ -755,101 +755,76 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
 # =============================================================================
 # TFD Batch ML Form
 # =============================================================================
-def transaction_fraud_detection_batch_form() -> rx.Component:
-    """Batch ML form for Transaction Fraud Detection using XGBClassifier."""
-    return rx.hstack(
-        # Left column - Form (reuses same form as incremental ML)
-        rx.card(
-            rx.vstack(
-                # Form Legend
+def transaction_fraud_detection_batch_form(model_key: str = None, project_name: str = None) -> rx.Component:
+    """Batch ML form for Transaction Fraud Detection using XGBClassifier.
+
+    Mirrors the Incremental ML form layout with batch_ml_training_box instead of ml_training_switch.
+    """
+    # Build form card with 3-column layout (same as incremental ML)
+    form_card = rx.card(
+        rx.vstack(
+            # Form Legend
+            rx.hstack(
+                rx.icon("credit-card", size=20, color=rx.color("accent", 10)),
+                rx.heading("Transaction Details", size="4", weight="bold"),
+                spacing="2",
+                align_items="center"
+            ),
+            # Predict button at TOP for visibility
+            rx.button(
+                "Predict",
+                on_click=TFDState.predict_batch_tfd,
+                size="2",
+                width="100%",
+                disabled=~SharedState.batch_model_available["Transaction Fraud Detection"]
+            ),
+            # Randomize button below Predict
+            rx.button(
                 rx.hstack(
-                    rx.icon("credit-card", size=20, color=rx.color("accent", 10)),
-                    rx.heading("Transaction Details", size="4", weight="bold"),
-                    spacing="2",
+                    rx.icon("shuffle", size=14),
+                    rx.text("Randomize All Fields", size="2"),
+                    spacing="1",
                     align_items="center"
                 ),
-                rx.text(
-                    "Enter transaction data to predict fraud probability using the batch ML model.",
-                    size="2",
-                    color="gray"
-                ),
-                # Randomize button
-                rx.button(
-                    rx.hstack(
-                        rx.icon("shuffle", size=14),
-                        rx.text("Randomize All Fields", size="2"),
-                        spacing="2",
-                        align_items="center"
+                on_click=TFDState.randomize_tfd_form,
+                variant="soft",
+                color_scheme="blue",
+                size="2",
+                width="100%"
+            ),
+            rx.divider(),
+            # Form fields in 3-column grid (same as incremental ML)
+            rx.grid(
+                # Amount
+                rx.vstack(
+                    rx.text("Amount", size="1", color="gray"),
+                    rx.input(
+                        type="number",
+                        value=TFDState.tfd_form_data.get("amount", ""),
+                        on_change=lambda v: TFDState.update_tfd("amount", v),
+                        step=0.01,
+                        width="100%"
                     ),
-                    on_click=TFDState.randomize_tfd_form,
-                    variant="soft",
-                    color_scheme="blue",
-                    size="2",
+                    spacing="1",
+                    align_items="start",
                     width="100%"
                 ),
-                rx.divider(),
-                # Row 1: Amount and Account Age
-                rx.hstack(
-                    rx.vstack(
-                        rx.text("Amount", size="1", color="gray"),
-                        rx.input(
-                            type="number",
-                            value=TFDState.tfd_form_data.get("amount", ""),
-                            on_change=lambda v: TFDState.update_tfd("amount", v),
-                            step=0.01,
-                            width="100%"
-                        ),
-                        spacing="1",
-                        align_items="start",
+                # Account Age
+                rx.vstack(
+                    rx.text("Account Age", size="1", color="gray"),
+                    rx.input(
+                        type="number",
+                        value=TFDState.tfd_form_data.get("account_age_days", ""),
+                        on_change=lambda v: TFDState.update_tfd("account_age_days", v),
+                        min=0,
+                        step=1,
                         width="100%"
                     ),
-                    rx.vstack(
-                        rx.text("Account Age (days)", size="1", color="gray"),
-                        rx.input(
-                            type="number",
-                            value=TFDState.tfd_form_data.get("account_age_days", ""),
-                            on_change=lambda v: TFDState.update_tfd("account_age_days", v),
-                            min=0,
-                            step=1,
-                            width="100%"
-                        ),
-                        spacing="1",
-                        align_items="start",
-                        width="100%"
-                    ),
-                    spacing="3",
+                    spacing="1",
+                    align_items="start",
                     width="100%"
                 ),
-                # Row 2: Date and Time
-                rx.hstack(
-                    rx.vstack(
-                        rx.text("Date", size="1", color="gray"),
-                        rx.input(
-                            type="date",
-                            value=TFDState.tfd_form_data.get("timestamp_date", ""),
-                            on_change=lambda v: TFDState.update_tfd("timestamp_date", v),
-                            width="100%"
-                        ),
-                        spacing="1",
-                        align_items="start",
-                        width="100%"
-                    ),
-                    rx.vstack(
-                        rx.text("Time", size="1", color="gray"),
-                        rx.input(
-                            type="time",
-                            value=TFDState.tfd_form_data.get("timestamp_time", ""),
-                            on_change=lambda v: TFDState.update_tfd("timestamp_time", v),
-                            width="100%"
-                        ),
-                        spacing="1",
-                        align_items="start",
-                        width="100%"
-                    ),
-                    spacing="3",
-                    width="100%"
-                ),
-                # Row 3: Currency
+                # Currency
                 rx.vstack(
                     rx.text("Currency", size="1", color="gray"),
                     rx.select(
@@ -862,505 +837,492 @@ def transaction_fraud_detection_batch_form() -> rx.Component:
                     align_items="start",
                     width="100%"
                 ),
-                # Row 4: Merchant ID and Product Category
-                rx.hstack(
-                    rx.vstack(
-                        rx.text("Merchant ID", size="1", color="gray"),
-                        rx.select(
-                            TFDState.tfd_options["merchant_id"],
-                            value=TFDState.tfd_form_data.get("merchant_id", ""),
-                            on_change=lambda v: TFDState.update_tfd("merchant_id", v),
-                            width="100%"
-                        ),
-                        spacing="1",
-                        align_items="start",
-                        width="100%"
-                    ),
-                    rx.vstack(
-                        rx.text("Product Category", size="1", color="gray"),
-                        rx.select(
-                            TFDState.tfd_options["product_category"],
-                            value=TFDState.tfd_form_data.get("product_category", ""),
-                            on_change=lambda v: TFDState.update_tfd("product_category", v),
-                            width="100%"
-                        ),
-                        spacing="1",
-                        align_items="start",
-                        width="100%"
-                    ),
-                    spacing="3",
-                    width="100%"
-                ),
-                # Row 5: Transaction Type and Payment Method
-                rx.hstack(
-                    rx.vstack(
-                        rx.text("Transaction Type", size="1", color="gray"),
-                        rx.select(
-                            TFDState.tfd_options["transaction_type"],
-                            value=TFDState.tfd_form_data.get("transaction_type", ""),
-                            on_change=lambda v: TFDState.update_tfd("transaction_type", v),
-                            width="100%"
-                        ),
-                        spacing="1",
-                        align_items="start",
-                        width="100%"
-                    ),
-                    rx.vstack(
-                        rx.text("Payment Method", size="1", color="gray"),
-                        rx.select(
-                            TFDState.tfd_options["payment_method"],
-                            value=TFDState.tfd_form_data.get("payment_method", ""),
-                            on_change=lambda v: TFDState.update_tfd("payment_method", v),
-                            width="100%"
-                        ),
-                        spacing="1",
-                        align_items="start",
-                        width="100%"
-                    ),
-                    spacing="3",
-                    width="100%"
-                ),
-                # Row 6: Latitude and Longitude
-                rx.hstack(
-                    rx.vstack(
-                        rx.text("Latitude", size="1", color="gray"),
-                        rx.input(
-                            type="number",
-                            value=TFDState.tfd_form_data.get("lat", ""),
-                            on_change=lambda v: TFDState.update_tfd("lat", v),
-                            min=-90.0,
-                            max=90.0,
-                            step=0.0001,
-                            width="100%"
-                        ),
-                        spacing="1",
-                        align_items="start",
-                        width="100%"
-                    ),
-                    rx.vstack(
-                        rx.text("Longitude", size="1", color="gray"),
-                        rx.input(
-                            type="number",
-                            value=TFDState.tfd_form_data.get("lon", ""),
-                            on_change=lambda v: TFDState.update_tfd("lon", v),
-                            min=-180.0,
-                            max=180.0,
-                            step=0.0001,
-                            width="100%"
-                        ),
-                        spacing="1",
-                        align_items="start",
-                        width="100%"
-                    ),
-                    spacing="3",
-                    width="100%"
-                ),
-                # Row 7: Browser and OS
-                rx.hstack(
-                    rx.vstack(
-                        rx.text("Browser", size="1", color="gray"),
-                        rx.select(
-                            TFDState.tfd_options["browser"],
-                            value=TFDState.tfd_form_data.get("browser", ""),
-                            on_change=lambda v: TFDState.update_tfd("browser", v),
-                            width="100%"
-                        ),
-                        spacing="1",
-                        align_items="start",
-                        width="100%"
-                    ),
-                    rx.vstack(
-                        rx.text("OS", size="1", color="gray"),
-                        rx.select(
-                            TFDState.tfd_options["os"],
-                            value=TFDState.tfd_form_data.get("os", ""),
-                            on_change=lambda v: TFDState.update_tfd("os", v),
-                            width="100%"
-                        ),
-                        spacing="1",
-                        align_items="start",
-                        width="100%"
-                    ),
-                    spacing="3",
-                    width="100%"
-                ),
-                # Row 8: CVV Provided and Billing Address Match
-                rx.hstack(
-                    rx.checkbox(
-                        "CVV Provided",
-                        checked=TFDState.tfd_form_data.get("cvv_provided", False),
-                        on_change=lambda v: TFDState.update_tfd("cvv_provided", v),
-                        size="1"
-                    ),
-                    rx.checkbox(
-                        "Billing Address Match",
-                        checked=TFDState.tfd_form_data.get("billing_address_match", False),
-                        on_change=lambda v: TFDState.update_tfd("billing_address_match", v),
-                        size="1"
-                    ),
-                    spacing="4",
-                    width="100%"
-                ),
-                # Display fields
+                # Date
                 rx.vstack(
-                    rx.text(
-                        f"Transaction ID: {TFDState.tfd_form_data.get('transaction_id', '')}",
-                        size="1",
-                        color="gray"
-                    ),
-                    rx.text(
-                        f"User ID: {TFDState.tfd_form_data.get('user_id', '')}",
-                        size="1",
-                        color="gray"
-                    ),
-                    rx.text(
-                        f"IP Address: {TFDState.tfd_form_data.get('ip_address', '')}",
-                        size="1",
-                        color="gray"
-                    ),
-                    rx.text(
-                        f"User Agent: {TFDState.tfd_form_data.get('user_agent', '')}",
-                        size="1",
-                        color="gray"
+                    rx.text("Date", size="1", color="gray"),
+                    rx.input(
+                        type="date",
+                        value=TFDState.tfd_form_data.get("timestamp_date", ""),
+                        on_change=lambda v: TFDState.update_tfd("timestamp_date", v),
+                        width="100%"
                     ),
                     spacing="1",
                     align_items="start",
                     width="100%"
                 ),
-                # Predict button (disabled if model not available)
-                rx.button(
-                    rx.cond(
-                        TFDState.tfd_batch_model_available,
-                        rx.hstack(
-                            rx.icon("brain", size=16),
-                            rx.text("Predict"),
-                            spacing="2",
-                            align_items="center"
-                        ),
-                        rx.hstack(
-                            rx.icon("lock", size=16),
-                            rx.text("Train Model First"),
-                            spacing="2",
-                            align_items="center"
-                        )
+                # Time
+                rx.vstack(
+                    rx.text("Time", size="1", color="gray"),
+                    rx.input(
+                        type="time",
+                        value=TFDState.tfd_form_data.get("timestamp_time", ""),
+                        on_change=lambda v: TFDState.update_tfd("timestamp_time", v),
+                        width="100%"
                     ),
-                    on_click=TFDState.predict_batch_tfd,
-                    disabled=~TFDState.tfd_batch_model_available,
-                    size="3",
+                    spacing="1",
+                    align_items="start",
                     width="100%"
                 ),
-                spacing="3",
+                # Merchant ID
+                rx.vstack(
+                    rx.text("Merchant ID", size="1", color="gray"),
+                    rx.select(
+                        TFDState.tfd_options["merchant_id"],
+                        value=TFDState.tfd_form_data.get("merchant_id", ""),
+                        on_change=lambda v: TFDState.update_tfd("merchant_id", v),
+                        width="100%"
+                    ),
+                    spacing="1",
+                    align_items="start",
+                    width="100%"
+                ),
+                # Product Category
+                rx.vstack(
+                    rx.text("Category", size="1", color="gray"),
+                    rx.select(
+                        TFDState.tfd_options["product_category"],
+                        value=TFDState.tfd_form_data.get("product_category", ""),
+                        on_change=lambda v: TFDState.update_tfd("product_category", v),
+                        width="100%"
+                    ),
+                    spacing="1",
+                    align_items="start",
+                    width="100%"
+                ),
+                # Transaction Type
+                rx.vstack(
+                    rx.text("Type", size="1", color="gray"),
+                    rx.select(
+                        TFDState.tfd_options["transaction_type"],
+                        value=TFDState.tfd_form_data.get("transaction_type", ""),
+                        on_change=lambda v: TFDState.update_tfd("transaction_type", v),
+                        width="100%"
+                    ),
+                    spacing="1",
+                    align_items="start",
+                    width="100%"
+                ),
+                # Payment Method
+                rx.vstack(
+                    rx.text("Payment", size="1", color="gray"),
+                    rx.select(
+                        TFDState.tfd_options["payment_method"],
+                        value=TFDState.tfd_form_data.get("payment_method", ""),
+                        on_change=lambda v: TFDState.update_tfd("payment_method", v),
+                        width="100%"
+                    ),
+                    spacing="1",
+                    align_items="start",
+                    width="100%"
+                ),
+                # Latitude
+                rx.vstack(
+                    rx.text("Latitude", size="1", color="gray"),
+                    rx.input(
+                        type="number",
+                        value=TFDState.tfd_form_data.get("lat", ""),
+                        on_change=lambda v: TFDState.update_tfd("lat", v),
+                        min=-90.0,
+                        max=90.0,
+                        step=0.0001,
+                        width="100%"
+                    ),
+                    spacing="1",
+                    align_items="start",
+                    width="100%"
+                ),
+                # Longitude
+                rx.vstack(
+                    rx.text("Longitude", size="1", color="gray"),
+                    rx.input(
+                        type="number",
+                        value=TFDState.tfd_form_data.get("lon", ""),
+                        on_change=lambda v: TFDState.update_tfd("lon", v),
+                        min=-180.0,
+                        max=180.0,
+                        step=0.0001,
+                        width="100%"
+                    ),
+                    spacing="1",
+                    align_items="start",
+                    width="100%"
+                ),
+                # Browser
+                rx.vstack(
+                    rx.text("Browser", size="1", color="gray"),
+                    rx.select(
+                        TFDState.tfd_options["browser"],
+                        value=TFDState.tfd_form_data.get("browser", ""),
+                        on_change=lambda v: TFDState.update_tfd("browser", v),
+                        width="100%"
+                    ),
+                    spacing="1",
+                    align_items="start",
+                    width="100%"
+                ),
+                # OS
+                rx.vstack(
+                    rx.text("OS", size="1", color="gray"),
+                    rx.select(
+                        TFDState.tfd_options["os"],
+                        value=TFDState.tfd_form_data.get("os", ""),
+                        on_change=lambda v: TFDState.update_tfd("os", v),
+                        width="100%"
+                    ),
+                    spacing="1",
+                    align_items="start",
+                    width="100%"
+                ),
+                # CVV Provided
+                rx.vstack(
+                    rx.text("CVV", size="1", color="gray"),
+                    rx.checkbox(
+                        "Provided",
+                        checked=TFDState.tfd_form_data.get("cvv_provided", False),
+                        on_change=lambda v: TFDState.update_tfd("cvv_provided", v),
+                        size="1"
+                    ),
+                    spacing="1",
+                    align_items="start",
+                    width="100%"
+                ),
+                # Billing Address Match
+                rx.vstack(
+                    rx.text("Billing", size="1", color="gray"),
+                    rx.checkbox(
+                        "Address Match",
+                        checked=TFDState.tfd_form_data.get("billing_address_match", False),
+                        on_change=lambda v: TFDState.update_tfd("billing_address_match", v),
+                        size="1"
+                    ),
+                    spacing="1",
+                    align_items="start",
+                    width="100%"
+                ),
+                columns="3",
+                spacing="2",
+                width="100%"
+            ),
+            # Display fields (read-only info stacked vertically)
+            rx.vstack(
+                rx.text(
+                    f"Transaction ID: {TFDState.tfd_form_data.get('transaction_id', '')}",
+                    size="1",
+                    color="gray"
+                ),
+                rx.text(
+                    f"User ID: {TFDState.tfd_form_data.get('user_id', '')}",
+                    size="1",
+                    color="gray"
+                ),
+                rx.text(
+                    f"IP Address: {TFDState.tfd_form_data.get('ip_address', '')}",
+                    size="1",
+                    color="gray"
+                ),
+                spacing="1",
                 align_items="start",
                 width="100%"
             ),
-            width="30%"
+            spacing="2",
+            align_items="start",
+            width="100%"
         ),
-        # Right column - Metrics and Results
-        rx.vstack(
-            rx.markdown(
-                f"**Batch ML model:** {TFDState.batch_ml_model_name['Transaction Fraud Detection']}",
-                size="2",
-                color="gray"
-            ),
-            # Training tile with toggle
-            rx.card(
-                rx.vstack(
+        width="100%"
+    )
+
+    # Build left column with batch ML training box
+    if model_key and project_name:
+        left_column = rx.vstack(
+            batch_ml_training_box(model_key, project_name),
+            form_card,
+            spacing="4",
+            width="30%"
+        )
+    else:
+        left_column = rx.vstack(
+            batch_ml_training_box("XGBClassifier", "Transaction Fraud Detection"),
+            form_card,
+            spacing="4",
+            width="30%"
+        )
+
+    # Right column - Tabs for Prediction and Metrics (same structure as incremental ML)
+    right_column = rx.vstack(
+        rx.tabs.root(
+            rx.tabs.list(
+                rx.tabs.trigger(
                     rx.hstack(
-                        rx.icon("graduation-cap", size=20, color=rx.color("accent", 10)),
-                        rx.heading("Model Training", size="4", weight="bold"),
-                        rx.spacer(),
-                        # Toggle for batch ML training - loading state
-                        rx.cond(
-                            TFDState.batch_training_loading,
-                            rx.hstack(
-                                rx.spinner(size="2"),
-                                rx.text("Training...", size="2", color="gray"),
-                                spacing="2"
-                            ),
-                            rx.fragment()  # No toggle for now since toggle_batch_ml_training needs to be migrated
-                        ),
+                        rx.icon("target", size=14),
+                        rx.text("Prediction"),
+                        spacing="2",
+                        align_items="center"
+                    ),
+                    value="prediction"
+                ),
+                rx.tabs.trigger(
+                    rx.hstack(
+                        rx.icon("chart-bar", size=14),
+                        rx.text("Metrics"),
+                        spacing="2",
+                        align_items="center"
+                    ),
+                    value="metrics"
+                ),
+            ),
+            # Tab 1: Prediction
+            rx.tabs.content(
+                rx.vstack(
+                    # Prediction section - header always visible
+                    rx.hstack(
+                        rx.icon("shield-alert", size=20, color=rx.color("accent", 10)),
+                        rx.heading("Prediction Result", size="5", weight="bold"),
                         spacing="2",
                         align_items="center",
                         width="100%"
                     ),
-                    # Training status display
-                    rx.cond(
-                        TFDState.batch_training_loading,
-                        # Training in progress
-                        rx.vstack(
-                            rx.text(
-                                "Training in progress. This may take a few minutes.",
-                                size="2",
-                                color="gray"
+                    # Model info row
+                    rx.hstack(
+                        rx.badge(
+                            rx.hstack(
+                                rx.icon("brain", size=12),
+                                rx.text("XGBoost Classifier (Scikit-Learn)", size="1"),
+                                spacing="1",
+                                align_items="center"
                             ),
-                            rx.text(
-                                "Toggle off to stop training.",
-                                size="1",
-                                color="gray"
-                            ),
-                            spacing="1",
-                            width="100%"
+                            color_scheme="purple",
+                            variant="soft",
+                            size="1"
                         ),
-                        # Not training - show status
-                        rx.vstack(
-                            # Show trained status if model available
-                            rx.cond(
-                                TFDState.tfd_batch_model_available,
-                                rx.hstack(
-                                    rx.icon("circle-check", size=16, color="green"),
-                                    rx.text("Model trained and ready", size="2", color="green"),
-                                    spacing="2",
-                                    align_items="center"
-                                ),
-                                rx.hstack(
-                                    rx.icon("circle-alert", size=16, color="orange"),
-                                    rx.text("No trained model available", size="2", color="orange"),
-                                    spacing="2",
-                                    align_items="center"
-                                )
-                            ),
-                            # Last trained timestamp
-                            rx.cond(
-                                TFDState.tfd_batch_last_trained != "",
-                                rx.text(
-                                    f"Last trained: {TFDState.tfd_batch_last_trained}",
-                                    size="1",
-                                    color="gray"
-                                ),
-                                rx.fragment()
-                            ),
-                            # Training error display
-                            rx.cond(
-                                TFDState.batch_training_error != "",
-                                rx.callout(
-                                    TFDState.batch_training_error,
-                                    icon="triangle-alert",
-                                    color="red",
-                                    size="1"
-                                ),
-                                rx.fragment()
-                            ),
-                            spacing="2",
-                            align_items="start",
-                            width="100%"
-                        )
+                        rx.badge("Batch ML", color_scheme="blue", variant="soft", size="1"),
+                        spacing="2"
                     ),
-                    spacing="3",
-                    align_items="start",
-                    width="100%"
-                ),
-                width="100%"
-            ),
-            # Tabs for Predictions and Detailed Metrics
-            rx.tabs.root(
-                rx.tabs.list(
-                    rx.tabs.trigger("Predictions", value="predictions"),
-                    rx.tabs.trigger("Detailed Metrics", value="detailed_metrics"),
-                ),
-                # Tab 1: Predictions
-                rx.tabs.content(
-                    rx.vstack(
-                        rx.heading("Classification Metrics", size="6"),
-                        transaction_fraud_detection_batch_metrics(),
-                        rx.divider(),
-                        # Prediction section
-                        rx.hstack(
-                            rx.icon("shield-alert", size=20, color=rx.color("accent", 10)),
-                            rx.heading("Prediction Result", size="5", weight="bold"),
-                            spacing="2",
-                            align_items="center",
-                            width="100%"
-                        ),
-                        rx.cond(
-                            TFDState.tfd_batch_prediction_show,
-                            # Show prediction results when available
-                            rx.card(
-                                rx.vstack(
-                                    # Plotly Gauge Chart
-                                    rx.plotly(data=TFDState.tfd_batch_fraud_gauge, width="100%"),
-                                    # Prediction summary cards
-                                    rx.hstack(
-                                        rx.card(
-                                            rx.vstack(
-                                                rx.hstack(
-                                                    rx.icon("triangle-alert", size=16, color=TFDState.tfd_batch_prediction_color),
-                                                    rx.text("Classification", size="2", color="gray"),
-                                                    spacing="1",
-                                                    align_items="center"
-                                                ),
-                                                rx.text(
-                                                    TFDState.tfd_batch_prediction_text,
-                                                    size="7",
-                                                    weight="bold",
-                                                    color=TFDState.tfd_batch_prediction_color,
-                                                    align="center"
-                                                ),
+                    rx.cond(
+                        TFDState.tfd_batch_prediction_show,
+                        # Show prediction results when available
+                        rx.card(
+                            rx.vstack(
+                                # Plotly Gauge Chart
+                                rx.plotly(data=TFDState.tfd_batch_fraud_gauge, width="100%"),
+                                # Prediction summary cards (compact)
+                                rx.hstack(
+                                    rx.card(
+                                        rx.vstack(
+                                            rx.hstack(
+                                                rx.icon("triangle-alert", size=14, color=TFDState.tfd_batch_prediction_color),
+                                                rx.text("Classification", size="1", color="gray"),
                                                 spacing="1",
-                                                align_items="center",
-                                                width="100%"
+                                                align_items="center"
                                             ),
-                                            variant="surface",
-                                            size="2",
+                                            rx.text(
+                                                TFDState.tfd_batch_prediction_text,
+                                                size="5",
+                                                weight="bold",
+                                                color=TFDState.tfd_batch_prediction_color,
+                                                align="center"
+                                            ),
+                                            spacing="1",
+                                            align_items="center",
                                             width="100%"
                                         ),
-                                        rx.card(
-                                            rx.vstack(
-                                                rx.hstack(
-                                                    rx.icon("percent", size=16, color="red"),
-                                                    rx.text("Fraud", size="2", color="gray"),
-                                                    spacing="1",
-                                                    align_items="center"
-                                                ),
-                                                rx.text(
-                                                    f"{TFDState.tfd_batch_fraud_probability * 100:.2f}%",
-                                                    size="7",
-                                                    weight="bold",
-                                                    align="center",
-                                                    color="red"
-                                                ),
-                                                spacing="1",
-                                                align_items="center",
-                                                width="100%"
-                                            ),
-                                            variant="surface",
-                                            size="2",
-                                            width="100%"
-                                        ),
-                                        rx.card(
-                                            rx.vstack(
-                                                rx.hstack(
-                                                    rx.icon("circle-check", size=16, color="green"),
-                                                    rx.text("Not Fraud", size="2", color="gray"),
-                                                    spacing="1",
-                                                    align_items="center"
-                                                ),
-                                                rx.text(
-                                                    f"{(1 - TFDState.tfd_batch_fraud_probability) * 100:.2f}%",
-                                                    size="7",
-                                                    weight="bold",
-                                                    align="center",
-                                                    color="green"
-                                                ),
-                                                spacing="1",
-                                                align_items="center",
-                                                width="100%"
-                                            ),
-                                            variant="surface",
-                                            size="2",
-                                            width="100%"
-                                        ),
-                                        spacing="3",
+                                        variant="surface",
+                                        size="1",
                                         width="100%"
                                     ),
-                                    spacing="4",
+                                    rx.card(
+                                        rx.vstack(
+                                            rx.hstack(
+                                                rx.icon("percent", size=14, color="red"),
+                                                rx.text("Fraud", size="1", color="gray"),
+                                                spacing="1",
+                                                align_items="center"
+                                            ),
+                                            rx.text(
+                                                f"{TFDState.tfd_batch_fraud_probability * 100:.2f}%",
+                                                size="5",
+                                                weight="bold",
+                                                align="center",
+                                                color="red"
+                                            ),
+                                            spacing="1",
+                                            align_items="center",
+                                            width="100%"
+                                        ),
+                                        variant="surface",
+                                        size="1",
+                                        width="100%"
+                                    ),
+                                    rx.card(
+                                        rx.vstack(
+                                            rx.hstack(
+                                                rx.icon("circle-check", size=14, color="green"),
+                                                rx.text("Not Fraud", size="1", color="gray"),
+                                                spacing="1",
+                                                align_items="center"
+                                            ),
+                                            rx.text(
+                                                f"{(1 - TFDState.tfd_batch_fraud_probability) * 100:.2f}%",
+                                                size="5",
+                                                weight="bold",
+                                                align="center",
+                                                color="green"
+                                            ),
+                                            spacing="1",
+                                            align_items="center",
+                                            width="100%"
+                                        ),
+                                        variant="surface",
+                                        size="1",
+                                        width="100%"
+                                    ),
+                                    spacing="2",
                                     width="100%"
                                 ),
-                                variant="classic",
+                                spacing="4",
                                 width="100%"
                             ),
-                            # No prediction yet - show instructions
-                            rx.cond(
-                                TFDState.tfd_batch_model_available,
-                                rx.callout(
-                                    "Fill in the transaction details and click **Predict** to get the fraud probability.",
-                                    icon="info",
-                                    color="blue",
-                                    width="100%"
-                                ),
-                                rx.callout(
-                                    "No trained model available. Toggle **Model Training** to train first.",
-                                    icon="triangle-alert",
-                                    color="orange",
-                                    width="100%"
-                                )
-                            )
-                        ),
-                        spacing="4",
-                        width="100%",
-                        padding_top="1em"
-                    ),
-                    value="predictions"
-                ),
-                # Tab 2: Detailed Metrics (YellowBrick visualizations)
-                rx.tabs.content(
-                    rx.vstack(
-                        rx.heading("YellowBrick Visualizations", size="5"),
-                        rx.text("Select a metric type and visualization to display.", size="2", color="gray"),
-                        # YellowBrick metric type selector
-                        rx.hstack(
-                            rx.vstack(
-                                rx.text("Metric Type", size="1", color="gray"),
-                                rx.select(
-                                    TFDState.yellowbrick_metric_types,
-                                    value=TFDState.yellowbrick_metric_type,
-                                    on_change=TFDState.set_yellowbrick_metric_type,
-                                    width="100%"
-                                ),
-                                spacing="1",
-                                width="50%"
-                            ),
-                            rx.vstack(
-                                rx.text("Visualization", size="1", color="gray"),
-                                rx.select(
-                                    TFDState.yellowbrick_metric_options,
-                                    value=TFDState.yellowbrick_metric_name,
-                                    on_change=TFDState.set_yellowbrick_metric_name,
-                                    width="100%"
-                                ),
-                                spacing="1",
-                                width="50%"
-                            ),
-                            spacing="3",
+                            variant="classic",
                             width="100%"
                         ),
-                        # Loading spinner
+                        # Show info or warning message when no prediction yet
                         rx.cond(
-                            TFDState.yellowbrick_loading,
-                            rx.hstack(
-                                rx.spinner(size="3"),
-                                rx.text("Loading visualization...", size="2", color="gray"),
-                                spacing="2",
-                                align_items="center",
-                                justify="center",
-                                width="100%",
-                                padding="4em"
-                            ),
-                            rx.fragment()
-                        ),
-                        # Error display
-                        rx.cond(
-                            TFDState.yellowbrick_error != "",
+                            SharedState.batch_model_available["Transaction Fraud Detection"],
                             rx.callout(
-                                TFDState.yellowbrick_error,
-                                icon="triangle-alert",
-                                color="red",
+                                "Fill in the transaction details and click **Predict** to get the fraud probability.",
+                                icon="info",
+                                color="blue",
                                 width="100%"
                             ),
-                            rx.fragment()
-                        ),
-                        # Image display
-                        rx.cond(
-                            TFDState.yellowbrick_image_base64 != "",
-                            rx.image(
-                                src=f"data:image/png;base64,{TFDState.yellowbrick_image_base64}",
-                                width="100%",
-                                alt="YellowBrick visualization"
-                            ),
-                            rx.fragment()
-                        ),
-                        spacing="4",
-                        width="100%",
-                        padding_top="1em"
+                            rx.callout(
+                                "No trained model available. Click **Train** to train the batch model first.",
+                                icon="triangle-alert",
+                                color="orange",
+                                width="100%"
+                            )
+                        )
                     ),
-                    value="detailed_metrics"
+                    spacing="4",
+                    width="100%",
+                    padding_top="1em"
                 ),
-                default_value="predictions",
-                width="100%"
+                value="prediction"
             ),
-            align_items="start",
-            spacing="4",
-            width="70%"
+            # Tab 2: Metrics
+            rx.tabs.content(
+                rx.vstack(
+                    rx.hstack(
+                        rx.heading("Classification Metrics", size="5"),
+                        rx.button(
+                            rx.icon("refresh-cw", size=16),
+                            on_click=SharedState.get_batch_mlflow_metrics("Transaction Fraud Detection"),
+                            size="1",
+                            variant="ghost",
+                            cursor="pointer",
+                            title="Refresh metrics"
+                        ),
+                        align_items="center",
+                        spacing="2"
+                    ),
+                    # Model info row
+                    rx.hstack(
+                        rx.badge(
+                            rx.hstack(
+                                rx.icon("brain", size=12),
+                                rx.text("XGBoost Classifier (Scikit-Learn)", size="1"),
+                                spacing="1",
+                                align_items="center"
+                            ),
+                            color_scheme="purple",
+                            variant="soft",
+                            size="1"
+                        ),
+                        rx.badge("Batch ML", color_scheme="blue", variant="soft", size="1"),
+                        spacing="2"
+                    ),
+                    transaction_fraud_detection_batch_metrics(),
+                    # YellowBrick Visualizations section
+                    rx.divider(),
+                    rx.heading("YellowBrick Visualizations", size="5"),
+                    rx.text("Select a metric type and visualization to display.", size="2", color="gray"),
+                    # YellowBrick metric type selector
+                    rx.hstack(
+                        rx.vstack(
+                            rx.text("Metric Type", size="1", color="gray"),
+                            rx.select(
+                                TFDState.yellowbrick_metric_types,
+                                value=TFDState.yellowbrick_metric_type,
+                                on_change=TFDState.set_yellowbrick_metric_type,
+                                width="100%"
+                            ),
+                            spacing="1",
+                            width="50%"
+                        ),
+                        rx.vstack(
+                            rx.text("Visualization", size="1", color="gray"),
+                            rx.select(
+                                TFDState.yellowbrick_metric_options,
+                                value=TFDState.yellowbrick_metric_name,
+                                on_change=TFDState.set_yellowbrick_metric_name,
+                                width="100%"
+                            ),
+                            spacing="1",
+                            width="50%"
+                        ),
+                        spacing="3",
+                        width="100%"
+                    ),
+                    # Loading spinner
+                    rx.cond(
+                        TFDState.yellowbrick_loading,
+                        rx.hstack(
+                            rx.spinner(size="3"),
+                            rx.text("Loading visualization...", size="2", color="gray"),
+                            spacing="2",
+                            align_items="center",
+                            justify="center",
+                            width="100%",
+                            padding="4em"
+                        ),
+                        rx.fragment()
+                    ),
+                    # Error display
+                    rx.cond(
+                        TFDState.yellowbrick_error != "",
+                        rx.callout(
+                            TFDState.yellowbrick_error,
+                            icon="triangle-alert",
+                            color="red",
+                            width="100%"
+                        ),
+                        rx.fragment()
+                    ),
+                    # Image display
+                    rx.cond(
+                        TFDState.yellowbrick_image_base64 != "",
+                        rx.image(
+                            src=f"data:image/png;base64,{TFDState.yellowbrick_image_base64}",
+                            width="100%",
+                            alt="YellowBrick visualization"
+                        ),
+                        rx.fragment()
+                    ),
+                    spacing="4",
+                    width="100%",
+                    padding_top="1em"
+                ),
+                value="metrics"
+            ),
+            default_value="prediction",
+            width="100%"
         ),
+        align_items="start",
+        spacing="4",
+        width="70%"
+    )
+
+    return rx.hstack(
+        left_column,
+        right_column,
         spacing="6",
         align_items="start",
         width="100%"

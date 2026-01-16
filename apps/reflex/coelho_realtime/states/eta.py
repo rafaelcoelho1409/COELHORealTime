@@ -540,3 +540,130 @@ class ETAState(SharedState):
         }
         self.form_data[project_name] = form_data
         self.prediction_results[project_name] = {"eta_seconds": 0.0, "show": False}
+
+    # ==========================================================================
+    # BATCH ML PREDICTION (Scikit-Learn)
+    # ==========================================================================
+    @rx.var
+    def eta_batch_prediction_show(self) -> bool:
+        """Check if batch ETA prediction results should be shown."""
+        results = self.batch_prediction_results.get("Estimated Time of Arrival", {})
+        if isinstance(results, dict):
+            return results.get("show", False)
+        return False
+
+    @rx.var
+    def eta_batch_prediction_seconds(self) -> float:
+        """Get batch ETA prediction in seconds."""
+        results = self.batch_prediction_results.get("Estimated Time of Arrival", {})
+        if isinstance(results, dict):
+            return results.get("eta_seconds", 0.0)
+        return 0.0
+
+    @rx.var
+    def eta_batch_prediction_minutes(self) -> float:
+        """Get batch ETA prediction in minutes."""
+        return round(self.eta_batch_prediction_seconds / 60, 2) if self.eta_batch_prediction_seconds > 0 else 0.0
+
+    @rx.var
+    def eta_batch_prediction_figure(self) -> go.Figure:
+        """Generate Plotly figure for batch ETA prediction display."""
+        seconds = self.eta_batch_prediction_seconds
+        minutes = self.eta_batch_prediction_minutes
+
+        fig = go.Figure()
+        fig.add_trace(
+            go.Indicator(
+                mode="number",
+                value=seconds,
+                title={'text': "<b>Seconds</b>", 'font': {'size': 18}},
+                number={'font': {'size': 48, 'color': '#8b5cf6'}},  # Purple for batch ML
+                domain={'row': 0, 'column': 0}
+            )
+        )
+        fig.add_trace(
+            go.Indicator(
+                mode="number",
+                value=minutes,
+                title={'text': "<b>Minutes</b>", 'font': {'size': 18}},
+                number={'font': {'size': 48, 'color': '#3b82f6'}},  # Blue for batch ML
+                domain={'row': 1, 'column': 0}
+            )
+        )
+        fig.update_layout(
+            grid={'rows': 2, 'columns': 1, 'pattern': "independent"},
+            height=250,
+            margin=dict(l=20, r=20, t=40, b=20),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+        )
+        return fig
+
+    @rx.event(background=True)
+    async def predict_batch_eta(self):
+        """Make batch prediction for ETA using Scikit-Learn model."""
+        from .shared import SKLEARN_BASE_URL
+        project_name = "Estimated Time of Arrival"
+        current_form = self.form_data.get(project_name, {})
+        timestamp = f"{current_form.get('timestamp_date', '')}T{current_form.get('timestamp_time', '')}:00.000000+00:00"
+
+        payload = {
+            "project_name": project_name,
+            "model_name": "XGBRegressor",
+            "trip_id": current_form.get("trip_id", ""),
+            "driver_id": current_form.get("driver_id", ""),
+            "vehicle_id": current_form.get("vehicle_id", ""),
+            "timestamp": timestamp,
+            "origin": {
+                "lat": float(current_form.get("origin_lat", 0)),
+                "lon": float(current_form.get("origin_lon", 0))
+            },
+            "destination": {
+                "lat": float(current_form.get("destination_lat", 0)),
+                "lon": float(current_form.get("destination_lon", 0))
+            },
+            "estimated_distance_km": self.eta_estimated_distance_km,
+            "weather": current_form.get("weather", ""),
+            "temperature_celsius": float(current_form.get("temperature_celsius", 0)),
+            "day_of_week": int(current_form.get("day_of_week", 0)),
+            "hour_of_day": int(current_form.get("hour_of_day", 0)),
+            "driver_rating": float(current_form.get("driver_rating", 0)),
+            "vehicle_type": current_form.get("vehicle_type", ""),
+            "initial_estimated_travel_time_seconds": self.eta_initial_estimated_travel_time_seconds,
+            "debug_traffic_factor": float(current_form.get("debug_traffic_factor", 0)),
+            "debug_weather_factor": float(current_form.get("debug_weather_factor", 0)),
+            "debug_incident_delay_seconds": int(current_form.get("debug_incident_delay_seconds", 0)),
+            "debug_driver_factor": float(current_form.get("debug_driver_factor", 0))
+        }
+
+        try:
+            print(f"Making batch ETA prediction with payload: {payload}")
+            response = await httpx_client_post(
+                url=f"{SKLEARN_BASE_URL}/predict",
+                json=payload,
+                timeout=30.0
+            )
+            result = response.json()
+            print(f"Batch ETA Prediction result: {result}")
+            eta_seconds = result.get("Estimated Time of Arrival", 0.0)
+
+            async with self:
+                self.batch_prediction_results = {
+                    **self.batch_prediction_results,
+                    project_name: {
+                        "eta_seconds": eta_seconds,
+                        "model_source": "sklearn",
+                        "show": True
+                    }
+                }
+        except Exception as e:
+            print(f"Error making batch ETA prediction: {e}")
+            async with self:
+                self.batch_prediction_results = {
+                    **self.batch_prediction_results,
+                    project_name: {
+                        "eta_seconds": 0.0,
+                        "model_source": "sklearn",
+                        "show": False
+                    }
+                }

@@ -225,6 +225,58 @@ class SharedState(rx.State):
     }
 
     # ==========================================================================
+    # BATCH ML STATE VARIABLES (Scikit-Learn)
+    # ==========================================================================
+    # Batch ML training loading state per project
+    batch_training_loading: dict = {
+        "Transaction Fraud Detection": False,
+        "Estimated Time of Arrival": False,
+        "E-Commerce Customer Interactions": False
+    }
+
+    # Batch ML model availability (checked from MLflow)
+    batch_model_available: dict = {
+        "Transaction Fraud Detection": False,
+        "Estimated Time of Arrival": False,
+        "E-Commerce Customer Interactions": False
+    }
+
+    # Batch ML model names for display
+    batch_ml_model_name: dict = {
+        "Transaction Fraud Detection": "XGBoost Classifier (Scikit-Learn)",
+        "Estimated Time of Arrival": "XGBoost Regressor (Scikit-Learn)",
+        "E-Commerce Customer Interactions": "KMeans Clustering (Scikit-Learn)",
+    }
+
+    # Batch model name mapping for MLflow
+    _batch_model_names: dict = {
+        "Transaction Fraud Detection": "XGBClassifier",
+        "Estimated Time of Arrival": "XGBRegressor",
+        "E-Commerce Customer Interactions": "KMeans",
+    }
+
+    # Batch MLflow experiment URLs for each project
+    batch_mlflow_experiment_url: dict = {
+        "Transaction Fraud Detection": "",
+        "Estimated Time of Arrival": "",
+        "E-Commerce Customer Interactions": ""
+    }
+
+    # Batch MLflow metrics
+    batch_mlflow_metrics: dict = {
+        "Transaction Fraud Detection": {},
+        "Estimated Time of Arrival": {},
+        "E-Commerce Customer Interactions": {}
+    }
+
+    # Batch prediction results
+    batch_prediction_results: dict = {
+        "Transaction Fraud Detection": {},
+        "Estimated Time of Arrival": {},
+        "E-Commerce Customer Interactions": {}
+    }
+
+    # ==========================================================================
     # SQL / DELTA LAKE STATE VARIABLES
     # ==========================================================================
     sql_query_input: dict = {
@@ -1028,3 +1080,115 @@ class SharedState(rx.State):
 
         except Exception as e:
             print(f"Error fetching table schema for {project_name}: {e}")
+
+    # ==========================================================================
+    # BATCH ML EVENT HANDLERS (Scikit-Learn)
+    # ==========================================================================
+    @rx.event(background=True)
+    async def train_batch_model(self, model_key: str, project_name: str):
+        """Train a batch ML model using Scikit-Learn service."""
+        async with self:
+            self.batch_training_loading[project_name] = True
+
+        yield rx.toast.info(
+            "Batch ML training started",
+            description=f"Training {self.batch_ml_model_name.get(project_name, 'model')}...",
+            duration=5000,
+        )
+
+        try:
+            response = await httpx_client_post(
+                url=f"{SKLEARN_BASE_URL}/train",
+                json={
+                    "project_name": project_name,
+                },
+                timeout=300.0  # 5 minutes timeout for batch training
+            )
+            result = response.json()
+
+            async with self:
+                self.batch_training_loading[project_name] = False
+                self.batch_model_available[project_name] = True
+                # Store experiment URL if available
+                experiment_url = result.get("experiment_url", "")
+                if experiment_url:
+                    self.batch_mlflow_experiment_url[project_name] = experiment_url
+
+            yield rx.toast.success(
+                "Batch ML training complete",
+                description=f"Model trained successfully for {project_name}",
+                duration=5000,
+                close_button=True,
+            )
+
+            # Fetch metrics after training
+            yield SharedState.get_batch_mlflow_metrics(project_name)
+
+        except Exception as e:
+            error_msg = str(e)
+            print(f"Error training batch model: {error_msg}")
+            async with self:
+                self.batch_training_loading[project_name] = False
+
+            yield rx.toast.error(
+                "Batch ML training failed",
+                description=error_msg[:100] if len(error_msg) > 100 else error_msg,
+                duration=8000,
+                close_button=True,
+            )
+
+    @rx.event(background=True)
+    async def check_batch_model_available(self, project_name: str):
+        """Check if a trained batch (Scikit-Learn) model is available in MLflow."""
+        model_name = self._batch_model_names.get(project_name, "XGBClassifier")
+        try:
+            response = await httpx_client_post(
+                url=f"{SKLEARN_BASE_URL}/model_available",
+                json={
+                    "project_name": project_name,
+                    "model_name": model_name
+                },
+                timeout=30.0
+            )
+            result = response.json()
+
+            async with self:
+                self.batch_model_available[project_name] = result.get("available", False)
+                # Store experiment URL (available even if no model trained yet)
+                experiment_url = result.get("experiment_url", "")
+                if experiment_url:
+                    self.batch_mlflow_experiment_url[project_name] = experiment_url
+
+        except Exception as e:
+            print(f"Error checking batch model availability: {e}")
+            async with self:
+                self.batch_model_available[project_name] = False
+
+    @rx.event(background=True)
+    async def get_batch_mlflow_metrics(self, project_name: str):
+        """Fetch MLflow metrics for a batch model."""
+        model_name = self._batch_model_names.get(project_name, "XGBClassifier")
+        try:
+            response = await httpx_client_post(
+                url=f"{SKLEARN_BASE_URL}/mlflow_metrics",
+                json={
+                    "project_name": project_name,
+                    "model_name": model_name
+                },
+                timeout=60.0
+            )
+            async with self:
+                self.batch_mlflow_metrics[project_name] = response.json()
+
+        except Exception as e:
+            print(f"Error fetching batch MLflow metrics: {e}")
+            async with self:
+                self.batch_mlflow_metrics[project_name] = {}
+
+    @rx.event(background=True)
+    async def init_batch_page(self, project_name: str):
+        """Initialize batch ML page - check model availability and fetch metrics."""
+        # Check model availability
+        yield SharedState.check_batch_model_available(project_name)
+        # Fetch metrics if model available
+        yield SharedState.get_batch_mlflow_metrics(project_name)

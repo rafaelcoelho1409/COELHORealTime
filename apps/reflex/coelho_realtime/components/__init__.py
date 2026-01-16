@@ -18,6 +18,7 @@ from .shared import (
     coelho_realtime_navbar,
     page_tabs,
     ml_training_switch,
+    batch_ml_training_box,
     metric_info_dialog,
     delta_lake_sql_tab,
     CONTEXT_TITLES,
@@ -33,6 +34,7 @@ from .tfd import (
 # ETA components (migrated)
 from .eta import (
     estimated_time_of_arrival_form,
+    estimated_time_of_arrival_batch_form,
     estimated_time_of_arrival_metrics,
     eta_map,
 )
@@ -40,6 +42,7 @@ from .eta import (
 # ECCI components (migrated)
 from .ecci import (
     e_commerce_customer_interactions_form,
+    e_commerce_customer_interactions_batch_form,
     e_commerce_customer_interactions_metrics,
     ecci_map,
 )
@@ -49,6 +52,7 @@ __all__ = [
     "coelho_realtime_navbar",
     "page_tabs",
     "ml_training_switch",
+    "batch_ml_training_box",
     "metric_info_dialog",
     "delta_lake_sql_tab",
     "CONTEXT_TITLES",
@@ -60,11 +64,13 @@ __all__ = [
 
     # ETA components (migrated)
     "estimated_time_of_arrival_form",
+    "estimated_time_of_arrival_batch_form",
     "estimated_time_of_arrival_metrics",
     "eta_map",
 
     # ECCI components (migrated)
     "e_commerce_customer_interactions_form",
+    "e_commerce_customer_interactions_batch_form",
     "e_commerce_customer_interactions_metrics",
     "ecci_map",
 ]

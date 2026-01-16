@@ -5,9 +5,8 @@ from ..components import (
     transaction_fraud_detection_form,
     transaction_fraud_detection_batch_form,
     delta_lake_sql_tab,
-    ml_training_switch,
 )
-from ..states import TFDState
+from ..states import TFDState, SharedState
 
 
 PROJECT_NAME = "Transaction Fraud Detection"
@@ -30,11 +29,7 @@ def index() -> rx.Component:
                 rx.cond(
                     TFDState.is_batch_ml_tab,
                     # Batch ML tab content
-                    rx.vstack(
-                        transaction_fraud_detection_batch_form(),
-                        spacing="4",
-                        width="100%"
-                    ),
+                    transaction_fraud_detection_batch_form("XGBClassifier", PROJECT_NAME),
                     # Incremental ML tab content - form includes ML training switch
                     transaction_fraud_detection_form(MODEL_KEY, PROJECT_NAME),
                 ),
@@ -46,7 +41,7 @@ def index() -> rx.Component:
         on_mount=[
             TFDState.randomize_tfd_form,  # Populate form with random values (local, instant)
             TFDState.init_page(MODEL_KEY, PROJECT_NAME),  # Fetch MLflow metrics
-            TFDState.check_batch_model_available(PROJECT_NAME),
+            SharedState.check_batch_model_available(PROJECT_NAME),  # Check batch model
         ],
         # On unmount: cleanup when leaving the page
         on_unmount=TFDState.cleanup_on_page_leave(PROJECT_NAME),

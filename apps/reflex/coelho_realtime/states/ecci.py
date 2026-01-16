@@ -632,3 +632,110 @@ class ECCIState(SharedState):
         """Set the selected feature and trigger data fetch."""
         self.ecci_selected_feature = feature
         return ECCIState.fetch_ecci_cluster_feature_counts(feature)
+
+    # ==========================================================================
+    # BATCH ML PREDICTION (Scikit-Learn)
+    # ==========================================================================
+    @rx.var
+    def ecci_batch_prediction_show(self) -> bool:
+        """Check if batch ECCI prediction results should be shown."""
+        results = self.batch_prediction_results.get("E-Commerce Customer Interactions", {})
+        if isinstance(results, dict):
+            return results.get("show", False)
+        return False
+
+    @rx.var
+    def ecci_batch_predicted_cluster(self) -> int:
+        """Get batch predicted cluster ID."""
+        results = self.batch_prediction_results.get("E-Commerce Customer Interactions", {})
+        if isinstance(results, dict):
+            return results.get("cluster_id", -1)
+        return -1
+
+    @rx.var
+    def ecci_batch_prediction_figure(self) -> go.Figure:
+        """Generate Plotly figure for batch ECCI cluster prediction."""
+        cluster_id = self.ecci_batch_predicted_cluster
+
+        fig = go.Figure()
+        fig.add_trace(
+            go.Indicator(
+                mode="number",
+                value=cluster_id,
+                title={'text': "<b>Cluster</b>", 'font': {'size': 18}},
+                number={'font': {'size': 72, 'color': '#8b5cf6'}},  # Purple for batch ML
+            )
+        )
+        fig.update_layout(
+            height=200,
+            margin=dict(l=20, r=20, t=40, b=20),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+        )
+        return fig
+
+    @rx.event(background=True)
+    async def predict_batch_ecci(self):
+        """Make batch prediction for ECCI using Scikit-Learn model."""
+        from .shared import SKLEARN_BASE_URL
+        project_name = "E-Commerce Customer Interactions"
+        current_form = self.form_data.get(project_name, {})
+        timestamp = f"{current_form.get('timestamp_date', '')}T{current_form.get('timestamp_time', '')}:00.000000+00:00"
+
+        payload = {
+            "project_name": project_name,
+            "model_name": "KMeans",
+            "customer_id": current_form.get("customer_id", ""),
+            "event_id": current_form.get("event_id", ""),
+            "session_id": current_form.get("session_id", ""),
+            "timestamp": timestamp,
+            "event_type": current_form.get("event_type", ""),
+            "product_id": current_form.get("product_id", ""),
+            "product_category": current_form.get("product_category", ""),
+            "price": float(current_form.get("price", 0)),
+            "quantity": int(current_form.get("quantity", 1)),
+            "lat": float(current_form.get("lat", 0)),
+            "lon": float(current_form.get("lon", 0)),
+            "page_url": current_form.get("page_url", ""),
+            "referrer_url": current_form.get("referrer_url", ""),
+            "search_query": current_form.get("search_query", ""),
+            "time_on_page_seconds": int(current_form.get("time_on_page_seconds", 0)),
+            "device_info": {
+                "device_type": current_form.get("device_type", ""),
+                "browser": current_form.get("browser", ""),
+                "os": current_form.get("os", "")
+            },
+            "session_event_sequence": int(current_form.get("session_event_sequence", 1))
+        }
+
+        try:
+            print(f"Making batch ECCI prediction with payload: {payload}")
+            response = await httpx_client_post(
+                url=f"{SKLEARN_BASE_URL}/predict",
+                json=payload,
+                timeout=30.0
+            )
+            result = response.json()
+            print(f"Batch ECCI Prediction result: {result}")
+            cluster_id = result.get("cluster_id", -1)
+
+            async with self:
+                self.batch_prediction_results = {
+                    **self.batch_prediction_results,
+                    project_name: {
+                        "cluster_id": cluster_id,
+                        "model_source": "sklearn",
+                        "show": True
+                    }
+                }
+        except Exception as e:
+            print(f"Error making batch ECCI prediction: {e}")
+            async with self:
+                self.batch_prediction_results = {
+                    **self.batch_prediction_results,
+                    project_name: {
+                        "cluster_id": -1,
+                        "model_source": "sklearn",
+                        "show": False
+                    }
+                }

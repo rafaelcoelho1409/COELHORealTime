@@ -3,9 +3,10 @@ from ..components import (
     coelho_realtime_navbar,
     page_tabs,
     e_commerce_customer_interactions_form,
+    e_commerce_customer_interactions_batch_form,
     delta_lake_sql_tab,
 )
-from ..states import ECCIState
+from ..states import ECCIState, SharedState
 
 
 PROJECT_NAME = "E-Commerce Customer Interactions"
@@ -25,8 +26,13 @@ def index() -> rx.Component:
                 ECCIState.is_delta_lake_sql_tab,
                 # Delta Lake SQL tab content
                 delta_lake_sql_tab(),
-                # Incremental ML tab content (ECCI only has incremental ML)
-                e_commerce_customer_interactions_form(MODEL_KEY, PROJECT_NAME),
+                rx.cond(
+                    ECCIState.is_batch_ml_tab,
+                    # Batch ML tab content
+                    e_commerce_customer_interactions_batch_form("KMeans", PROJECT_NAME),
+                    # Incremental ML tab content
+                    e_commerce_customer_interactions_form(MODEL_KEY, PROJECT_NAME),
+                ),
             ),
             padding="2em",
             width="100%"
@@ -37,6 +43,7 @@ def index() -> rx.Component:
             ECCIState.init_page(MODEL_KEY, PROJECT_NAME),  # Fetch MLflow metrics
             ECCIState.fetch_ecci_cluster_counts,
             ECCIState.fetch_ecci_cluster_feature_counts,
+            SharedState.check_batch_model_available(PROJECT_NAME),  # Check batch model
         ],
         # On unmount: cleanup when leaving the page
         on_unmount=ECCIState.cleanup_on_page_leave(PROJECT_NAME),
