@@ -59,6 +59,7 @@ manifests:
         chartPath: ./k3d/helm
         namespace: coelho-realtime
         createNamespace: true
+        skipBuildDependencies: true  # Dependencies committed to repo - see docs/helm_dependencies.md
         setValueTemplates:
           # Skaffold will automatically replace these with built image tags
           # NOTE: fastapi and streamlit services removed - replaced by river/sklearn/reflex
@@ -222,6 +223,7 @@ profiles:
             chartPath: ./k3d/helm
             namespace: coelho-realtime
             createNamespace: true
+            skipBuildDependencies: true  # Dependencies committed to repo - see docs/helm_dependencies.md
             setValueTemplates:
               # NOTE: fastapi and streamlit removed - replaced by river/sklearn/reflex
               kafka-producers.image: "{{.IMAGE_NAME_coelho_realtime_kafka_producers}}:{{.IMAGE_TAG_coelho_realtime_kafka_producers}}"

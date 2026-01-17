@@ -2,45 +2,35 @@
 Scikit-Learn Batch ML Helper Functions
 
 Functions for batch machine learning training and YellowBrick visualizations.
-Reads data from Delta Lake on MinIO (S3-compatible storage) via Polars.
+Reads data from Delta Lake on MinIO (S3-compatible storage) via DuckDB.
+Models and encoders are loaded from MLflow artifacts (with local fallback).
 """
 import pickle
 import os
-import sys
-import time
 import io
 import base64
-from typing import Any, Dict, Optional, List
-from kafka import KafkaConsumer
-from kafka.errors import NoBrokersAvailable
-import json
+from typing import Optional, Dict, Any
 import pandas as pd
 import numpy as np
-import datetime as dt
-import polars as pl
-from sklearn.preprocessing import (
-    StandardScaler,
-    OneHotEncoder,
-)
-from sklearn.compose import ColumnTransformer
+import mlflow
+from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import (
     train_test_split,
-    StratifiedKFold
+    StratifiedKFold,
 )
-from xgboost import XGBClassifier
+from catboost import CatBoostClassifier
 from yellowbrick import (
     classifier,
     features,
     target,
-    model_selection
+    model_selection,
 )
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import duckdb
+import orjson
 
-
-KAFKA_HOST = os.environ.get("KAFKA_HOST", "localhost")
-KAFKA_BROKERS = f'{KAFKA_HOST}:9092'
 
 # MinIO (S3-compatible) configuration for Delta Lake
 MINIO_HOST = os.environ.get("MINIO_HOST", "localhost")
@@ -48,17 +38,25 @@ MINIO_ENDPOINT = f"http://{MINIO_HOST}:9000"
 MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
 MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "minioadmin123")
 
-# Delta Lake storage options for Polars/deltalake
-DELTA_STORAGE_OPTIONS = {
-    "AWS_ENDPOINT_URL": MINIO_ENDPOINT,
-    "AWS_ACCESS_KEY_ID": MINIO_ACCESS_KEY,
-    "AWS_SECRET_ACCESS_KEY": MINIO_SECRET_KEY,
-    "AWS_REGION": "us-east-1",
-    "AWS_S3_ALLOW_UNSAFE_RENAME": "true",
-    "AWS_ALLOW_HTTP": "true",
+# MLflow configuration
+MLFLOW_HOST = os.environ.get("MLFLOW_HOST", "localhost")
+MLFLOW_TRACKING_URI = f"http://{MLFLOW_HOST}:5000"
+
+# MLflow model names for each project (batch ML)
+MLFLOW_MODEL_NAMES = {
+    "Transaction Fraud Detection": "CatBoostClassifier",
+    "Estimated Time of Arrival": "CatBoostRegressor",
+    "E-Commerce Customer Interactions": "KMeans",
 }
 
-# Delta Lake paths (using s3:// for Polars)
+# Encoder artifact names (saved to MLflow during training)
+ENCODER_ARTIFACT_NAMES = {
+    "Transaction Fraud Detection": "sklearn_encoders.pkl",
+    "Estimated Time of Arrival": "sklearn_encoders.pkl",
+    "E-Commerce Customer Interactions": "sklearn_encoders.pkl",
+}
+
+# Delta Lake paths (S3 paths for DuckDB delta_scan)
 DELTA_PATHS = {
     "Transaction Fraud Detection": "s3://lakehouse/delta/transaction_fraud_detection",
     "Estimated Time of Arrival": "s3://lakehouse/delta/estimated_time_of_arrival",
@@ -66,14 +64,189 @@ DELTA_PATHS = {
 }
 
 
+# Persistent DuckDB connection for Delta Lake queries
+# Configured once at module load, reused for all queries (fast)
+_duckdb_conn: Optional[duckdb.DuckDBPyConnection] = None
+
+def _get_duckdb_connection(force_reconnect: bool = False) -> duckdb.DuckDBPyConnection:
+    """Get or create a persistent DuckDB connection configured for MinIO.
+
+    Args:
+        force_reconnect: If True, recreate connection even if one exists.
+                        Used for recovery after connection errors.
+
+    Connection is kept alive and reused. If a query fails due to stale connection,
+    caller should retry with force_reconnect=True.
+    """
+    global _duckdb_conn
+    if _duckdb_conn is not None and not force_reconnect:
+        return _duckdb_conn
+    # Create new connection and configure it
+    if force_reconnect:
+        print("Recreating DuckDB connection...")
+    else:
+        print("Creating new DuckDB connection with Delta extension...")
+    # Set environment variables for delta-rs/object_store
+    os.environ["AWS_ACCESS_KEY_ID"] = MINIO_ACCESS_KEY
+    os.environ["AWS_SECRET_ACCESS_KEY"] = MINIO_SECRET_KEY
+    os.environ["AWS_ENDPOINT_URL"] = f"http://{MINIO_HOST}:9000"
+    os.environ["AWS_ALLOW_HTTP"] = "true"
+    os.environ["AWS_REGION"] = "us-east-1"
+    os.environ["AWS_EC2_METADATA_DISABLED"] = "true"
+    conn = duckdb.connect()
+    # Install and load delta extension (install is cached to disk)
+    conn.execute("INSTALL delta;")
+    conn.execute("LOAD delta;")
+    # Configure S3/MinIO credentials
+    minio_host_port = f"{MINIO_HOST}:9000"
+    conn.execute("DROP SECRET IF EXISTS minio_secret;")
+    conn.execute(f"""
+        CREATE SECRET minio_secret (
+            TYPE S3,
+            KEY_ID '{MINIO_ACCESS_KEY}',
+            SECRET '{MINIO_SECRET_KEY}',
+            ENDPOINT '{minio_host_port}',
+            URL_STYLE 'path',
+            USE_SSL false,
+            REGION 'us-east-1'
+        );
+    """)
+    _duckdb_conn = conn
+    print("DuckDB connection ready with Delta extension loaded")
+    return _duckdb_conn
+
+
+# Initialize connection at module load (optional - will be created on first query if not)
+try:
+    _get_duckdb_connection()
+except Exception as e:
+    print(f"Warning: Could not initialize DuckDB connection: {e}")
+
+
+# =============================================================================
+# MLflow Encoder Functions
+# =============================================================================
+def get_best_mlflow_run(project_name: str, model_name: str) -> Optional[str]:
+    """Get the best MLflow run ID based on metrics for a project.
+
+    For classification (TFD): Uses F1 score (higher is better)
+    For regression (ETA): Uses RMSE (lower is better)
+    For clustering (ECCI): Uses Silhouette score (higher is better)
+
+    Returns:
+        run_id of the best run, or None if no runs found.
+    """
+    try:
+        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+        experiment = mlflow.get_experiment_by_name(project_name)
+        if experiment is None:
+            print(f"No MLflow experiment found for {project_name}")
+            return None
+
+        # Define metric and order based on project type
+        if project_name == "Transaction Fraud Detection":
+            metric_key = "metrics.F1"
+            ascending = False  # Higher F1 is better
+        elif project_name == "Estimated Time of Arrival":
+            metric_key = "metrics.RMSE"
+            ascending = True  # Lower RMSE is better
+        else:
+            metric_key = "metrics.F1"
+            ascending = False
+
+        # Search for completed runs with the model name
+        runs = mlflow.search_runs(
+            experiment_ids=[experiment.experiment_id],
+            filter_string=f"tags.mlflow.runName = '{model_name}' and status = 'FINISHED'",
+            order_by=[f"{metric_key} {'ASC' if ascending else 'DESC'}"],
+            max_results=1,
+        )
+
+        if runs.empty:
+            print(f"No completed runs found for {project_name}/{model_name}")
+            return None
+
+        run_id = runs.iloc[0]["run_id"]
+        print(f"Best MLflow run for {project_name}: {run_id}")
+        return run_id
+
+    except Exception as e:
+        print(f"Error finding best MLflow run: {e}")
+        return None
+
+
+def load_encoders_from_mlflow(project_name: str) -> Optional[Dict[str, Any]]:
+    """Load encoders from the best MLflow run based on metrics.
+
+    Uses get_best_mlflow_run to find the run with optimal metrics,
+    ensuring encoders are loaded from the same run as the best model.
+
+    Returns:
+        Dict with preprocessor/encoders, or None if not found.
+    """
+    try:
+        model_name = MLFLOW_MODEL_NAMES.get(project_name)
+        if not model_name:
+            print(f"Unknown project for encoder loading: {project_name}")
+            return None
+
+        run_id = get_best_mlflow_run(project_name, model_name)
+        if run_id is None:
+            return None
+
+        # Download encoder artifact
+        artifact_name = ENCODER_ARTIFACT_NAMES.get(project_name)
+        if not artifact_name:
+            print(f"No encoder artifact name for {project_name}")
+            return None
+
+        local_path = mlflow.artifacts.download_artifacts(
+            run_id=run_id,
+            artifact_path=artifact_name,
+        )
+
+        with open(local_path, 'rb') as f:
+            encoders = pickle.load(f)
+
+        print(f"Sklearn encoders loaded from best MLflow run: {project_name} (run_id={run_id})")
+        return encoders
+
+    except Exception as e:
+        print(f"Error loading sklearn encoders from MLflow: {e}")
+        return None
+
+
+def load_or_create_sklearn_encoders(project_name: str) -> Dict[str, Any]:
+    """Load encoders from MLflow artifacts or create new ones.
+
+    Tries to load from MLflow first (best model's encoders).
+    Falls back to creating default encoders if not available.
+
+    Returns:
+        Dict with preprocessor/encoders.
+    """
+    # Try loading from MLflow first
+    encoders = load_encoders_from_mlflow(project_name)
+    if encoders is not None:
+        return encoders
+
+    # No encoders in MLflow, create new ones
+    print(f"No sklearn encoders in MLflow for {project_name}, creating new ones.")
+    return _create_default_encoders(project_name)
+
+
 # =============================================================================
 # Data Processing Functions (Sklearn)
 # =============================================================================
 def extract_device_info_sklearn(data):
-    """Extract device info from nested dict to separate columns."""
     data = data.copy()
-    data_to_join = pd.json_normalize(data["device_info"])
-    data = data.drop("device_info", axis=1)
+    # Parse JSON strings to dictionaries
+    # Using orjson for speed (already imported)
+    device_dicts = data["device_info"].apply(
+        lambda x: orjson.loads(x) if isinstance(x, str) else x
+    )
+    data_to_join = pd.json_normalize(device_dicts)
+    data = data.drop("device_info", axis = 1)
     data = data.join(data_to_join)
     return data
 
@@ -81,7 +254,7 @@ def extract_device_info_sklearn(data):
 def extract_timestamp_info_sklearn(data):
     """Extract timestamp components to separate columns."""
     data = data.copy()
-    data["timestamp"] = pd.to_datetime(data["timestamp"], format='ISO8601')
+    data["timestamp"] = pd.to_datetime(data["timestamp"], format = 'ISO8601')
     data["year"] = data["timestamp"].dt.year
     data["month"] = data["timestamp"].dt.month
     data["day"] = data["timestamp"].dt.day
@@ -93,136 +266,31 @@ def extract_timestamp_info_sklearn(data):
 
 
 def extract_coordinates_sklearn(data):
-    """Extract location coordinates from nested dict to separate columns."""
     data = data.copy()
-    data_to_join = pd.json_normalize(data["location"])
-    data = data.drop("location", axis=1)
+    location_dicts = data["location"].apply(
+        lambda x: orjson.loads(x) if isinstance(x, str) else x
+    )
+    data_to_join = pd.json_normalize(location_dicts)
+    data = data.drop("location", axis = 1)
     data = data.join(data_to_join)
     return data
 
 
-def load_sklearn_encoders(project_name: str):
-    """Load pre-trained sklearn encoders from disk."""
-    encoders_folders = {
-        "Transaction Fraud Detection": "encoders/sklearn/transaction_fraud_detection.pkl",
-        "Estimated Time of Arrival": "encoders/sklearn/estimated_time_of_arrival.pkl",
-        "E-Commerce Customer Interactions": "encoders/sklearn/e_commerce_customer_interactions.pkl",
-    }
-    encoder_path = encoders_folders.get(project_name)
-    if not encoder_path:
-        raise ValueError(f"Unknown project: {project_name}")
+def _create_default_encoders(project_name: str) -> dict:
+    """Create default encoders for CatBoost (no OneHotEncoder needed).
 
-    try:
-        with open(encoder_path, 'rb') as f:
-            encoders = pickle.load(f)
-        print(f"Scikit-Learn encoders loaded for {project_name}")
-        return encoders
-    except FileNotFoundError as e:
-        raise FileNotFoundError(f"Scikit-Learn encoders not found for project {project_name}.") from e
-    except Exception as e:
-        raise Exception(f"Error loading Scikit-Learn encoders for project {project_name}: {e}") from e
+    Used as fallback for fresh starts when no pre-trained encoders exist.
+    CatBoost handles categorical features natively, so we only need StandardScaler.
 
-
-def create_consumer(project_name: str, max_retries: int = 5, retry_delay: float = 5.0):
-    """Create Kafka consumer with manual partition assignment.
-
-    Note: Uses manual partition assignment instead of group-based subscription
-    due to Kafka 4.0 compatibility issues with kafka-python's consumer group protocol.
+    Returns:
+        Dict with scaler, feature lists, and categorical indices.
     """
-    from kafka import TopicPartition
-
-    consumer_name_dict = {
-        "Transaction Fraud Detection": "transaction_fraud_detection",
-        "Estimated Time of Arrival": "estimated_time_of_arrival",
-        "E-Commerce Customer Interactions": "e_commerce_customer_interactions",
-    }
-    KAFKA_TOPIC = consumer_name_dict.get(project_name)
-    if not KAFKA_TOPIC:
-        raise ValueError(f"Unknown project: {project_name}")
-
-    for attempt in range(max_retries):
-        try:
-            # Create consumer without topic subscription (manual assignment)
-            consumer = KafkaConsumer(
-                bootstrap_servers=KAFKA_BROKERS,
-                value_deserializer=lambda v: json.loads(v.decode('utf-8')),
-                consumer_timeout_ms=1000,
-                api_version=(3, 7),  # Force API version for Kafka 4.0 compatibility
-            )
-
-            # Manually assign partition 0 of the topic
-            tp = TopicPartition(KAFKA_TOPIC, 0)
-            consumer.assign([tp])
-
-            # Seek to beginning to read all messages
-            consumer.seek_to_beginning(tp)
-
-            print(f"Kafka consumer created for {project_name} (manual assignment)")
-            return consumer
-        except NoBrokersAvailable as e:
-            if attempt < max_retries - 1:
-                print(f"Kafka not available for {project_name}, retrying in {retry_delay}s...")
-                time.sleep(retry_delay)
-            else:
-                print(f"Failed to connect to Kafka for {project_name} after {max_retries} attempts.")
-                return None
-        except Exception as e:
-            print(f"Error creating Kafka consumer for {project_name}: {e}")
-            return None
-    return None
-
-
-def load_or_create_data(consumer, project_name: str) -> pd.DataFrame:
-    """Load data from Delta Lake on MinIO via Polars or fallback to Kafka."""
-    DELTA_PATH = DELTA_PATHS.get(project_name, "")
-
-    # Try loading from Delta Lake via Polars (fast, lazy evaluation)
-    try:
-        print(f"Attempting to load data from Delta Lake via Polars: {DELTA_PATH}")
-        lf = pl.scan_delta(DELTA_PATH, storage_options=DELTA_STORAGE_OPTIONS)
-        data_df = lf.collect().to_pandas()
-        print(f"Data loaded from Delta Lake for {project_name}: {len(data_df)} rows")
-        return data_df
-    except Exception as e:
-        print(f"Delta Lake not available for {project_name}: {e}")
-        print("Falling back to Kafka...")
-
-    # Fallback to Kafka if Delta Lake is not available
-    if consumer is not None:
-        try:
-            transaction = None
-            for message in consumer:
-                transaction = message.value
-                break
-            if transaction is not None:
-                data_df = pd.DataFrame([transaction])
-                print(f"Created data from Kafka for {project_name}")
-                return data_df
-        except Exception as e:
-            print(f"Error loading data from Kafka: {e}")
-
-    print(f"Warning: No data available for {project_name}")
-    return pd.DataFrame()
-
-
-def process_batch_data(data: pd.DataFrame, project_name: str):
-    """Process batch data and fit/save sklearn encoders."""
-    data = data.copy()
-    os.makedirs("encoders/sklearn", exist_ok=True)
-    filename = "encoders/sklearn/" + project_name.lower().replace(' ', '_').replace("-", "_") + ".pkl"
-
     if project_name == "Transaction Fraud Detection":
-        data = extract_device_info_sklearn(data)
-        data = extract_timestamp_info_sklearn(data)
         numerical_features = [
             "amount",
             "account_age_days",
             "cvv_provided",
-            "billing_address_match"
-        ]
-        binary_features = [
-            "cvv_provided",
-            "billing_address_match"
+            "billing_address_match",
         ]
         categorical_features = [
             "currency",
@@ -239,49 +307,475 @@ def process_batch_data(data: pd.DataFrame, project_name: str):
             "minute",
             "second",
         ]
-        numerical_transformer = StandardScaler()
-        categorical_transformer = OneHotEncoder(
-            handle_unknown='ignore',
-            sparse_output=False)
-        preprocessor = ColumnTransformer(
-            transformers=[
-                ("numerical", numerical_transformer, numerical_features),
-                ("binary", "passthrough", binary_features),
-                ("categorical", categorical_transformer, categorical_features),
-            ]
-        )
-        preprocessor.set_output(transform="pandas")
-        X = data.drop('is_fraud', axis=1)
+        # Full feature order: numerical first, then categorical
+        all_features = numerical_features + categorical_features
+
+        # Categorical feature indices (relative to all_features)
+        cat_feature_indices = list(range(
+            len(numerical_features),
+            len(all_features)
+        ))
+
+        return {
+            "scaler": StandardScaler(),  # Unfitted - will be fitted on first use
+            "numerical_features": numerical_features,
+            "categorical_features": categorical_features,
+            "cat_feature_indices": cat_feature_indices,
+            "feature_names": all_features,
+        }
+    else:
+        raise ValueError(f"Unknown project: {project_name}")
+
+
+def load_or_create_data(
+    project_name: str,
+    sample_frac: Optional[float] = None,
+    max_rows: Optional[int] = None,
+) -> pd.DataFrame:
+    """Load data from Delta Lake on MinIO via DuckDB.
+
+    Uses persistent DuckDB connection with Delta extension.
+    Retries with reconnection on failure.
+
+    Args:
+        project_name: Project name to load data for.
+        sample_frac: Optional fraction of data to sample (0.0-1.0).
+                     E.g., 0.3 = 30% of data.
+        max_rows: Optional maximum number of rows to load.
+                  Applied after sampling if both specified.
+
+    Returns:
+        DataFrame with loaded data.
+    """
+    delta_path = DELTA_PATHS.get(project_name, "")
+    if not delta_path:
+        raise ValueError(f"Unknown project: {project_name}")
+
+    # Build query with optional sampling
+    query = f"SELECT * FROM delta_scan('{delta_path}')"
+    if sample_frac is not None and 0 < sample_frac < 1:
+        query += f" USING SAMPLE {sample_frac * 100}%"
+    if max_rows is not None:
+        query += f" LIMIT {max_rows}"
+
+    try:
+        print(f"Loading data from Delta Lake via DuckDB: {delta_path}")
+        if sample_frac:
+            print(f"  Sampling: {sample_frac * 100}%")
+        if max_rows:
+            print(f"  Max rows: {max_rows}")
+        conn = _get_duckdb_connection()
+        result = conn.execute(query).df()
+        print(f"Data loaded from Delta Lake for {project_name}: {len(result)} rows")
+        return result
+    except Exception as e:
+        # Retry with reconnection on failure
+        print(f"DuckDB query failed, attempting reconnect: {e}")
+        conn = _get_duckdb_connection(force_reconnect=True)
+        result = conn.execute(query).df()
+        print(f"Data loaded from Delta Lake for {project_name}: {len(result)} rows")
+        return result
+
+
+def process_batch_data(data: pd.DataFrame, project_name: str):
+    """Process batch data for CatBoost training.
+
+    Memory-optimized version that leverages CatBoost's native categorical handling.
+    No OneHotEncoder needed - CatBoost handles categoricals internally.
+
+    Returns:
+        X_train, X_test, y_train, y_test, preprocessor_dict
+        preprocessor_dict contains:
+          - 'scaler': fitted StandardScaler for numerical features
+          - 'numerical_features': list of numerical feature names
+          - 'categorical_features': list of categorical feature names
+          - 'cat_feature_indices': indices of categorical features in final X
+    """
+    if project_name == "Transaction Fraud Detection":
+        # Extract nested JSON fields (modifies in place where possible)
+        data = extract_device_info_sklearn(data)
+        data = extract_timestamp_info_sklearn(data)
+
+        # Define feature groups
+        numerical_features = [
+            "amount",
+            "account_age_days",
+        ]
+        binary_features = [
+            "cvv_provided",
+            "billing_address_match",
+        ]
+        categorical_features = [
+            "currency",
+            "merchant_id",
+            "payment_method",
+            "product_category",
+            "transaction_type",
+            "browser",
+            "os",
+            "year",
+            "month",
+            "day",
+            "hour",
+            "minute",
+            "second",
+        ]
+
+        # Memory optimization: convert categoricals to category dtype
+        # This reduces memory significantly for high-cardinality columns
+        print("Optimizing memory with categorical dtypes...")
+        for col in categorical_features:
+            if col in data.columns:
+                data[col] = data[col].astype('category')
+
+        # Downcast numerical columns
+        for col in numerical_features + binary_features:
+            if col in data.columns:
+                data[col] = pd.to_numeric(data[col], downcast='float')
+
+        # Prepare features and target
+        all_features = numerical_features + binary_features + categorical_features
+        available_features = [f for f in all_features if f in data.columns]
+
+        X = data[available_features]
         y = data['is_fraud']
+
+        # Free memory from original data
+        del data
+
+        print(f"Features: {len(available_features)} ({len(numerical_features)} numerical, "
+              f"{len(binary_features)} binary, {len(categorical_features)} categorical)")
+
+        # Train/test split
         X_train, X_test, y_train, y_test = train_test_split(
             X, y,
             test_size=0.2,
             stratify=y,
-            random_state=42
+            random_state=42,
         )
-        preprocessor.fit(X_train)
-        preprocessor_dict = {"preprocessor": preprocessor}
-        with open(filename, 'wb') as f:
-            pickle.dump(preprocessor_dict, f)
-        X_train = preprocessor.transform(X_train)
-        X_test = preprocessor.transform(X_test)
-        return X_train, X_test, y_train, y_test
+
+        # Free memory
+        del X, y
+
+        # Scale only numerical features (CatBoost handles categoricals natively)
+        scaler = StandardScaler()
+        numerical_cols_present = [c for c in numerical_features + binary_features if c in X_train.columns]
+
+        if numerical_cols_present:
+            X_train[numerical_cols_present] = scaler.fit_transform(X_train[numerical_cols_present])
+            X_test[numerical_cols_present] = scaler.transform(X_test[numerical_cols_present])
+
+        # Get categorical feature indices for CatBoost
+        cat_feature_indices = [
+            X_train.columns.get_loc(col)
+            for col in categorical_features
+            if col in X_train.columns
+        ]
+
+        # Preprocessor dict for saving to MLflow
+        preprocessor_dict = {
+            "scaler": scaler,
+            "numerical_features": numerical_cols_present,
+            "categorical_features": categorical_features,
+            "cat_feature_indices": cat_feature_indices,
+            "feature_names": list(X_train.columns),
+        }
+
+        print(f"Training set: {len(X_train)} samples, Test set: {len(X_test)} samples")
+        print(f"Categorical feature indices for CatBoost: {cat_feature_indices}")
+
+        return X_train, X_test, y_train, y_test, preprocessor_dict
     else:
         raise ValueError(f"Unsupported project for batch processing: {project_name}")
 
 
-def process_sklearn_sample(x: dict, project_name: str) -> pd.DataFrame:
-    """Process a single sample for sklearn prediction."""
-    filename = "encoders/sklearn/" + project_name.lower().replace(' ', '_').replace("-", "_") + ".pkl"
+# =============================================================================
+# DuckDB SQL-Based Preprocessing (Optimized - No Sklearn Transformations)
+# =============================================================================
+# Feature definitions for Transaction Fraud Detection
+TFD_NUMERICAL_FEATURES = ["amount", "account_age_days", "cvv_provided", "billing_address_match"]
+TFD_CATEGORICAL_FEATURES = [
+    "currency", "merchant_id", "payment_method", "product_category",
+    "transaction_type", "browser", "os",
+    "year", "month", "day", "hour", "minute", "second",
+]
+TFD_ALL_FEATURES = TFD_NUMERICAL_FEATURES + TFD_CATEGORICAL_FEATURES
+TFD_CAT_FEATURE_INDICES = list(range(len(TFD_NUMERICAL_FEATURES), len(TFD_ALL_FEATURES)))
+
+
+def load_data_duckdb(
+    project_name: str,
+    sample_frac: float | None = None,
+    max_rows: int | None = None,
+) -> tuple[pd.DataFrame, pd.Series, dict]:
+    """Load and preprocess data using pure DuckDB SQL.
+
+    All transformations (JSON extraction, timestamp parsing) done in SQL.
+    No pandas transformations needed - data is ready for CatBoost.
+
+    Key insight: CatBoost is tree-based and doesn't require feature scaling.
+    StandardScaler is unnecessary overhead for gradient boosting models.
+
+    Args:
+        project_name: Project name (e.g., "Transaction Fraud Detection")
+        sample_frac: Optional fraction of data to sample (0.0-1.0)
+        max_rows: Optional maximum number of rows to load
+
+    Returns:
+        X: Features DataFrame ready for CatBoost
+        y: Target Series
+        metadata: Dict with feature info for CatBoost (cat_feature_indices, etc.)
+    """
     if project_name == "Transaction Fraud Detection":
-        x = pd.DataFrame([x])
-        x = extract_device_info_sklearn(x)
-        x = extract_timestamp_info_sklearn(x)
-        with open(filename, 'rb') as f:
-            preprocessor_dict = pickle.load(f)
-        preprocessor = preprocessor_dict["preprocessor"]
-        x = preprocessor.transform(x)
-        return x
+        return _load_tfd_data_duckdb(sample_frac, max_rows)
+    else:
+        raise ValueError(f"Unsupported project for DuckDB loading: {project_name}")
+
+
+def _load_tfd_data_duckdb(
+    sample_frac: float | None = None,
+    max_rows: int | None = None,
+) -> tuple[pd.DataFrame, pd.Series, dict]:
+    """Load Transaction Fraud Detection data with pure DuckDB SQL.
+
+    Single SQL query does:
+    - JSON extraction (device_info → browser, os)
+    - Timestamp extraction (→ year, month, day, hour, minute, second)
+    - Column selection and ordering
+    - Sampling (if requested)
+
+    No pandas transformations, no StandardScaler (tree models don't need it).
+    """
+    delta_path = DELTA_PATHS["Transaction Fraud Detection"]
+
+    # Build the SQL query - all preprocessing in one pass
+    query = f"""
+    SELECT
+        -- Numerical features (no scaling needed for CatBoost)
+        amount,
+        account_age_days,
+        CAST(cvv_provided AS INTEGER) AS cvv_provided,
+        CAST(billing_address_match AS INTEGER) AS billing_address_match,
+
+        -- Categorical features from JSON (extracted in SQL)
+        json_extract_string(device_info, '$.browser') AS browser,
+        json_extract_string(device_info, '$.os') AS os,
+
+        -- Categorical features (direct columns)
+        currency,
+        merchant_id,
+        payment_method,
+        product_category,
+        transaction_type,
+
+        -- Timestamp components (extracted in SQL, cast VARCHAR to TIMESTAMP first)
+        CAST(date_part('year', CAST(timestamp AS TIMESTAMP)) AS INTEGER) AS year,
+        CAST(date_part('month', CAST(timestamp AS TIMESTAMP)) AS INTEGER) AS month,
+        CAST(date_part('day', CAST(timestamp AS TIMESTAMP)) AS INTEGER) AS day,
+        CAST(date_part('hour', CAST(timestamp AS TIMESTAMP)) AS INTEGER) AS hour,
+        CAST(date_part('minute', CAST(timestamp AS TIMESTAMP)) AS INTEGER) AS minute,
+        CAST(date_part('second', CAST(timestamp AS TIMESTAMP)) AS INTEGER) AS second,
+
+        -- Target
+        is_fraud
+
+    FROM delta_scan('{delta_path}')
+    """
+
+    # Add sampling clause (DuckDB's efficient sampling at scan time)
+    if sample_frac is not None and 0 < sample_frac < 1:
+        query += f" USING SAMPLE {sample_frac * 100}%"
+
+    # Add limit clause
+    if max_rows is not None:
+        query += f" LIMIT {max_rows}"
+
+    # Execute query
+    try:
+        print(f"Loading TFD data via DuckDB SQL (single-pass preprocessing)...")
+        if sample_frac:
+            print(f"  Sampling: {sample_frac * 100}%")
+        if max_rows:
+            print(f"  Max rows: {max_rows}")
+
+        conn = _get_duckdb_connection()
+        df = conn.execute(query).df()
+
+        print(f"  Loaded {len(df)} rows with {len(df.columns)} columns")
+
+    except Exception as e:
+        print(f"DuckDB query failed, attempting reconnect: {e}")
+        conn = _get_duckdb_connection(force_reconnect=True)
+        df = conn.execute(query).df()
+        print(f"  Loaded {len(df)} rows with {len(df.columns)} columns")
+
+    # Split features and target
+    y = df["is_fraud"]
+    X = df.drop("is_fraud", axis=1)
+
+    # Convert categorical columns to category dtype (memory efficient + CatBoost compatible)
+    for col in TFD_CATEGORICAL_FEATURES:
+        if col in X.columns:
+            X[col] = X[col].astype("category")
+
+    # Metadata for CatBoost
+    metadata = {
+        "numerical_features": TFD_NUMERICAL_FEATURES,
+        "categorical_features": TFD_CATEGORICAL_FEATURES,
+        "cat_feature_indices": TFD_CAT_FEATURE_INDICES,
+        "feature_names": TFD_ALL_FEATURES,
+    }
+
+    print(f"  Features: {len(TFD_NUMERICAL_FEATURES)} numerical, {len(TFD_CATEGORICAL_FEATURES)} categorical")
+    print(f"  Categorical indices for CatBoost: {TFD_CAT_FEATURE_INDICES}")
+
+    return X, y, metadata
+
+
+def process_batch_data_duckdb(
+    project_name: str,
+    sample_frac: float | None = None,
+    max_rows: int | None = None,
+    test_size: float = 0.2,
+    random_state: int = 42,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, dict]:
+    """Process batch data using DuckDB SQL (drop-in replacement for process_batch_data).
+
+    Combines DuckDB SQL preprocessing with sklearn's stratified train/test split.
+    No StandardScaler - CatBoost doesn't need feature scaling.
+
+    Args:
+        project_name: Project name
+        sample_frac: Optional fraction of data to sample (0.0-1.0)
+        max_rows: Optional maximum rows to load
+        test_size: Fraction for test set (default 0.2)
+        random_state: Random seed for reproducibility
+
+    Returns:
+        X_train, X_test, y_train, y_test, metadata
+    """
+    # Load preprocessed data from DuckDB
+    X, y, metadata = load_data_duckdb(project_name, sample_frac, max_rows)
+
+    # Stratified train/test split (keeps class balance)
+    print(f"Splitting data: {1-test_size:.0%} train, {test_size:.0%} test (stratified)...")
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y,
+        test_size=test_size,
+        stratify=y,
+        random_state=random_state,
+    )
+
+    # Free memory
+    del X, y
+
+    print(f"  Training set: {len(X_train)} samples")
+    print(f"  Test set: {len(X_test)} samples")
+
+    # Calculate class balance
+    fraud_rate = y_train.sum() / len(y_train) * 100
+    print(f"  Fraud rate in training set: {fraud_rate:.2f}%")
+
+    return X_train, X_test, y_train, y_test, metadata
+
+
+def process_sklearn_sample_duckdb(x: dict, project_name: str) -> pd.DataFrame:
+    """Process a single sample using DuckDB SQL approach.
+
+    For real-time predictions, we still need to process individual samples.
+    This uses the same feature order as DuckDB training but processes in Python.
+
+    Note: No scaling needed since CatBoost doesn't require it.
+    """
+    if project_name == "Transaction Fraud Detection":
+        # Extract device_info JSON
+        device_info = x.get("device_info", "{}")
+        if isinstance(device_info, str):
+            device_info = orjson.loads(device_info)
+
+        # Extract timestamp components
+        timestamp = pd.to_datetime(x.get("timestamp"))
+
+        # Build feature dict in correct order
+        features = {
+            # Numerical features
+            "amount": x.get("amount"),
+            "account_age_days": x.get("account_age_days"),
+            "cvv_provided": int(x.get("cvv_provided", 0)),
+            "billing_address_match": int(x.get("billing_address_match", 0)),
+            # Categorical from JSON
+            "browser": device_info.get("browser"),
+            "os": device_info.get("os"),
+            # Categorical direct
+            "currency": x.get("currency"),
+            "merchant_id": x.get("merchant_id"),
+            "payment_method": x.get("payment_method"),
+            "product_category": x.get("product_category"),
+            "transaction_type": x.get("transaction_type"),
+            # Timestamp components
+            "year": timestamp.year,
+            "month": timestamp.month,
+            "day": timestamp.day,
+            "hour": timestamp.hour,
+            "minute": timestamp.minute,
+            "second": timestamp.second,
+        }
+
+        df = pd.DataFrame([features])
+
+        # Convert categoricals to category dtype
+        for col in TFD_CATEGORICAL_FEATURES:
+            if col in df.columns:
+                df[col] = df[col].astype("category")
+
+        return df
+    else:
+        raise ValueError(f"Unsupported project: {project_name}")
+
+
+def process_sklearn_sample(x: dict, project_name: str) -> pd.DataFrame:
+    """Process a single sample for CatBoost prediction.
+
+    Loads preprocessor from MLflow (best model's encoders) or creates new if not available.
+    CatBoost handles categorical features natively, so we only scale numerical features.
+
+    Returns:
+        DataFrame with features in correct order for the model.
+    """
+    if project_name == "Transaction Fraud Detection":
+        df = pd.DataFrame([x])
+        df = extract_device_info_sklearn(df)
+        df = extract_timestamp_info_sklearn(df)
+
+        # Load preprocessor from MLflow or create new
+        preprocessor_dict = load_or_create_sklearn_encoders(project_name)
+
+        scaler = preprocessor_dict["scaler"]
+        numerical_features = preprocessor_dict["numerical_features"]
+        feature_names = preprocessor_dict["feature_names"]
+
+        # Scale numerical features (if scaler is fitted)
+        numerical_cols_present = [c for c in numerical_features if c in df.columns]
+        if numerical_cols_present:
+            # Check if scaler is fitted (has mean_ attribute)
+            if hasattr(scaler, 'mean_') and scaler.mean_ is not None:
+                df[numerical_cols_present] = scaler.transform(df[numerical_cols_present])
+            else:
+                # Scaler not fitted - this shouldn't happen in production
+                # (training saves fitted scaler to MLflow)
+                print("Warning: Scaler not fitted, using raw numerical values")
+
+        # Ensure columns are in correct order (match training feature order)
+        available_features = [f for f in feature_names if f in df.columns]
+        df = df[available_features]
+
+        # Convert categorical columns to category dtype for CatBoost
+        categorical_features = preprocessor_dict.get("categorical_features", [])
+        for col in categorical_features:
+            if col in df.columns:
+                df[col] = df[col].astype('category')
+
+        return df
     else:
         raise ValueError(f"Unsupported project for sample processing: {project_name}")
 
@@ -290,27 +784,79 @@ def process_sklearn_sample(x: dict, project_name: str) -> pd.DataFrame:
 # Model Creation
 # =============================================================================
 def create_batch_model(project_name: str, **kwargs):
-    """Create batch ML model (XGBClassifier) for the given project."""
     if project_name == "Transaction Fraud Detection":
+        # Calculate class imbalance ratio for reference
         y_train = kwargs.get("y_train")
-        neg_samples = sum(y_train == 0) if y_train is not None else 1
-        pos_samples = sum(y_train == 1) if y_train is not None else 1
-        calculated_scale_pos_weight = neg_samples / pos_samples if pos_samples > 0 else 1
-
-        model = XGBClassifier(
-            objective='binary:logistic',
-            eval_metric='auc',
-            enable_categorical=True,
-            use_label_encoder=False,
-            random_state=42,
-            n_jobs=-1,
-            n_estimators=200,
-            learning_rate=0.05,
-            max_depth=5,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            gamma=0,
-            scale_pos_weight=calculated_scale_pos_weight
+        if y_train is not None:
+            neg_samples = sum(y_train == 0)
+            pos_samples = sum(y_train == 1)
+            imbalance_ratio = neg_samples / pos_samples if pos_samples > 0 else 1
+            print(f"Class imbalance ratio: {imbalance_ratio:.2f}:1 (negative:positive)")
+            print(f"Fraud rate: {pos_samples / len(y_train) * 100:.2f}%")
+        model = CatBoostClassifier(
+            # =================================================================
+            # CORE PARAMETERS
+            # =================================================================
+            iterations = 1000,              # Number of boosting rounds
+                                          # High value + early stopping finds optimal
+            learning_rate = 0.03,           # Lower = better generalization
+                                          # Range: 0.01-0.3, lower for more data
+            depth = 6,                      # Tree depth (recommended: 6-10)
+                                          # CatBoost default=6, good for most cases
+            # =================================================================
+            # IMBALANCED DATA HANDLING (KEY FOR FRAUD DETECTION)
+            # =================================================================
+            auto_class_weights = 'Balanced', # Automatically balance class weights
+                                           # Options: None, 'Balanced', 'SqrtBalanced'
+                                           # 'Balanced' = weight inversely proportional to frequency
+            # =================================================================
+            # LOSS FUNCTION & EVALUATION
+            # =================================================================
+            loss_function = 'Logloss',      # Binary cross-entropy for classification
+                                          # Options: 'Logloss', 'CrossEntropy'
+            eval_metric = 'AUC',            # Area Under ROC Curve
+                                          # Best metric for imbalanced binary classification
+                                          # Other options: 'F1', 'Precision', 'Recall', 'PRAUC'
+            # =================================================================
+            # REGULARIZATION (PREVENT OVERFITTING)
+            # =================================================================
+            l2_leaf_reg = 3.0,              # L2 regularization coefficient
+                                          # Higher = more regularization
+                                          # Range: 1-10, default=3
+            random_strength = 1.0,          # Randomness for scoring splits
+                                          # Higher = more regularization
+                                          # Range: 0-10, default=1
+            bagging_temperature = 1.0,      # Bayesian bootstrap intensity
+                                          # Higher = more randomness
+                                          # Range: 0-10, default=1
+            # =================================================================
+            # EARLY STOPPING (requires eval_set in fit())
+            # =================================================================
+            # NOTE: early_stopping_rounds and use_best_model require eval_set
+            # Pass eval_set=(X_test, y_test) when calling model.fit()
+            # =================================================================
+            # =================================================================
+            # PERFORMANCE & REPRODUCIBILITY
+            # =================================================================
+            task_type = 'CPU',              # 'CPU' or 'GPU'
+                                          # GPU requires CUDA, much faster for large data
+            thread_count = -1,              # Use all CPU cores
+            random_seed = 42,               # Reproducibility
+            # =================================================================
+            # MEMORY OPTIMIZATION (for containerized environments)
+            # =================================================================
+            max_ctr_complexity = 1,         # Limit categorical feature combinations
+                                          # Default=4, reduces memory significantly
+            used_ram_limit = '6gb',         # Explicit RAM limit for CatBoost
+                                          # Leave 2GB headroom for other processes (8GB limit)
+            boosting_type = 'Plain',        # Plain boosting uses less memory
+                                          # Options: 'Ordered' (default), 'Plain'
+            # =================================================================
+            # OUTPUT
+            # =================================================================
+            verbose = 100,                  # Print every 100 iterations
+                                          # Set to False for silent training
+            allow_writing_files = False,    # Don't write temp files
         )
         return model
     raise ValueError(f"Unknown project: {project_name}")
@@ -525,6 +1071,7 @@ class ModelDataManager:
         self.y_test: pd.Series | None = None
         self.X: pd.DataFrame | None = None
         self.y: pd.Series | None = None
+        self.preprocessor_dict: dict | None = None
         self.project_name: str | None = None
 
     def load_data(self, project_name: str):
@@ -534,9 +1081,8 @@ class ModelDataManager:
             return
 
         print(f"Loading data for project: {project_name}")
-        consumer = create_consumer(project_name)
-        data_df = load_or_create_data(consumer, project_name)
-        self.X_train, self.X_test, self.y_train, self.y_test = process_batch_data(
+        data_df = load_or_create_data(project_name)
+        self.X_train, self.X_test, self.y_train, self.y_test, self.preprocessor_dict = process_batch_data(
             data_df, project_name
         )
         self.X = pd.concat([self.X_train, self.X_test])

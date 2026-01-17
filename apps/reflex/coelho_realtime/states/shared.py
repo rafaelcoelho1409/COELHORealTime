@@ -243,16 +243,23 @@ class SharedState(rx.State):
 
     # Batch ML model names for display
     batch_ml_model_name: dict = {
-        "Transaction Fraud Detection": "XGBoost Classifier (Scikit-Learn)",
-        "Estimated Time of Arrival": "XGBoost Regressor (Scikit-Learn)",
+        "Transaction Fraud Detection": "CatBoost Classifier (Scikit-Learn)",
+        "Estimated Time of Arrival": "CatBoost Regressor (Scikit-Learn)",
         "E-Commerce Customer Interactions": "KMeans Clustering (Scikit-Learn)",
     }
 
     # Batch model name mapping for MLflow
     _batch_model_names: dict = {
-        "Transaction Fraud Detection": "XGBClassifier",
-        "Estimated Time of Arrival": "XGBRegressor",
+        "Transaction Fraud Detection": "CatBoostClassifier",
+        "Estimated Time of Arrival": "CatBoostRegressor",
         "E-Commerce Customer Interactions": "KMeans",
+    }
+
+    # Batch training script mapping (for subprocess-based training)
+    _batch_training_scripts: dict = {
+        "Transaction Fraud Detection": "transaction_fraud_detection_sklearn.py",
+        "Estimated Time of Arrival": "estimated_time_of_arrival_sklearn.py",
+        "E-Commerce Customer Interactions": "e_commerce_customer_interactions_sklearn.py",
     }
 
     # Batch MLflow experiment URLs for each project
@@ -1086,7 +1093,16 @@ class SharedState(rx.State):
     # ==========================================================================
     @rx.event(background=True)
     async def train_batch_model(self, model_key: str, project_name: str):
-        """Train a batch ML model using Scikit-Learn service."""
+        """Train a batch ML model using Scikit-Learn service via subprocess.
+
+        Uses /switch_model to start training script, then polls /batch_status
+        until training completes.
+        """
+        # Get the training script for this project
+        training_script = self._batch_training_scripts.get(
+            project_name, "transaction_fraud_detection_sklearn.py"
+        )
+
         async with self:
             self.batch_training_loading[project_name] = True
 
@@ -1097,31 +1113,61 @@ class SharedState(rx.State):
         )
 
         try:
+            # Start training via /switch_model endpoint
             response = await httpx_client_post(
-                url=f"{SKLEARN_BASE_URL}/train",
-                json={
-                    "project_name": project_name,
-                },
-                timeout=300.0  # 5 minutes timeout for batch training
+                url=f"{SKLEARN_BASE_URL}/switch_model",
+                json={"model_key": training_script},
+                timeout=30.0
             )
             result = response.json()
 
+            if result.get("status") == "error":
+                raise Exception(result.get("message", "Failed to start training"))
+
+            # Poll /batch_status until training completes
+            max_polls = 120  # 10 minutes max (5 second intervals)
+            poll_interval = 5.0
+
+            for _ in range(max_polls):
+                await asyncio.sleep(poll_interval)
+
+                status_response = await httpx_client_get(
+                    url=f"{SKLEARN_BASE_URL}/batch_status",
+                    timeout=10.0
+                )
+                status = status_response.json()
+
+                if status.get("status") == "completed":
+                    # Training completed successfully
+                    async with self:
+                        self.batch_training_loading[project_name] = False
+                        self.batch_model_available[project_name] = True
+
+                    yield rx.toast.success(
+                        "Batch ML training complete",
+                        description=f"Model trained successfully for {project_name}",
+                        duration=5000,
+                        close_button=True,
+                    )
+
+                    # Fetch metrics and check model availability
+                    yield SharedState.check_batch_model_available(project_name)
+                    yield SharedState.get_batch_mlflow_metrics(project_name)
+                    return
+
+                elif status.get("status") == "failed":
+                    error_msg = status.get("error", "Training failed")
+                    raise Exception(error_msg)
+
+                elif status.get("status") != "running":
+                    # Unknown status or idle - training may have finished quickly
+                    break
+
+            # If we exit the loop, check if model is available
             async with self:
                 self.batch_training_loading[project_name] = False
-                self.batch_model_available[project_name] = True
-                # Store experiment URL if available
-                experiment_url = result.get("experiment_url", "")
-                if experiment_url:
-                    self.batch_mlflow_experiment_url[project_name] = experiment_url
 
-            yield rx.toast.success(
-                "Batch ML training complete",
-                description=f"Model trained successfully for {project_name}",
-                duration=5000,
-                close_button=True,
-            )
-
-            # Fetch metrics after training
+            yield SharedState.check_batch_model_available(project_name)
             yield SharedState.get_batch_mlflow_metrics(project_name)
 
         except Exception as e:

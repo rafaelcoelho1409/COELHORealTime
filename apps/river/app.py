@@ -32,11 +32,7 @@ from functions import (
     create_consumer,
     load_or_create_data,
     # Polars optimized functions (lightweight, lazy evaluation)
-    get_unique_values_polars,
     get_sample_polars,
-    precompute_all_unique_values_polars,
-    # Static dropdown options (instant access, mirrors Kafka producer constants)
-    get_static_dropdown_options,
     # Redis live model cache (real-time predictions during training)
     load_live_model_from_redis,
     is_training_active,
@@ -72,8 +68,7 @@ encoders_dict: dict = {name: {} for name in PROJECT_NAMES}
 consumer_dict: dict = {name: None for name in PROJECT_NAMES}
 data_dict: dict = {name: None for name in PROJECT_NAMES}
 # NOTE: initial_sample_dict removed - forms populated locally in Reflex
-# Precomputed unique values cache (populated at startup for instant access)
-unique_values_cache: dict = {name: {} for name in PROJECT_NAMES}
+# NOTE: unique_values_cache removed - Reflex loads dropdown options from local JSON files
 
 
 # =============================================================================
@@ -268,12 +263,7 @@ class SampleRequest(BaseModel):
     project_name: str
 
 
-class UniqueValuesRequest(BaseModel):
-    column_name: str
-    project_name: str
-    limit: int = 100
-
-
+# NOTE: UniqueValuesRequest removed - /unique_values endpoint no longer exists
 # NOTE: InitialSampleRequest removed - endpoint no longer exists
 
 
@@ -464,28 +454,10 @@ async def lifespan(app: FastAPI):
         data_dict, \
         model_dict, \
         encoders_dict, \
-        unique_values_cache, \
         healthcheck
-    # 1. Initialize unique values from static options (instant - no I/O)
     print("Starting River ML service...", flush = True)
-    data_load_status = {}
-    data_message_dict = {}
-    # Load static dropdown options (instant - mirrors Kafka producer constants)
-    # NOTE: These are only used for /unique_values endpoint fallback
-    # Reflex loads dropdown options from local JSON files at startup
-    for project_name in PROJECT_NAMES:
-        static_options = get_static_dropdown_options(project_name)
-        if static_options:
-            unique_values_cache[project_name] = static_options
-            data_load_status[project_name] = "success"
-            data_message_dict[project_name] = f"Static options loaded ({len(static_options)} fields)"
-            print(f"Loaded static dropdown options for {project_name} ({len(static_options)} fields)", flush=True)
-        else:
-            unique_values_cache[project_name] = {}
-            data_load_status[project_name] = "no_static_options"
-            data_message_dict[project_name] = "No static options defined"
-    healthcheck.data_load = data_load_status
-    healthcheck.data_message = data_message_dict
+    # NOTE: Static dropdown options removed - Reflex loads from local JSON files
+    # NOTE: /unique_values endpoint removed - no longer needed
     # 2. Skip Kafka consumers at startup - create on-demand for training scripts
     print("Kafka consumers will be created on-demand for training scripts.", flush = True)
     # consumer_dict is already initialized with None values
@@ -816,49 +788,9 @@ async def get_sample(request: SampleRequest):
             detail = f"Error sampling data: {e}")
 
 
-@app.post("/unique_values")
-async def get_unique_values(request: UniqueValuesRequest):
-    """Get unique values for a column (instant from static options, Polars fallback)."""
-    global unique_values_cache
-    project_cache = unique_values_cache.get(request.project_name, {})
-    column = request.column_name
-    # First try the cache (populated from static options at startup - instant)
-    if column in project_cache:
-        unique_values = project_cache[column]
-        if len(unique_values) > request.limit:
-            unique_values = unique_values[:request.limit]
-        return {"unique_values": unique_values}
-    # Fallback: try static options directly (in case cache was cleared)
-    static_options = get_static_dropdown_options(request.project_name)
-    if column in static_options:
-        unique_values = static_options[column]
-        # Update cache for future requests
-        unique_values_cache[request.project_name][column] = unique_values
-        if len(unique_values) > request.limit:
-            unique_values = unique_values[:request.limit]
-        return {"unique_values": unique_values}
-    # Last resort: query Polars/Delta Lake for columns not in static options
-    try:
-        unique_values = get_unique_values_polars(
-            request.project_name,
-            column,
-            request.limit)
-        if unique_values:
-            # Update cache for future requests
-            unique_values_cache[request.project_name][column] = unique_values
-            return {"unique_values": unique_values}
-        raise HTTPException(
-            status_code = 400,
-            detail = f"Column '{column}' not found or has no values."
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code = 500,
-            detail = f"Error getting unique values for column '{column}': {e}"
-        )
-
+# NOTE: /unique_values endpoint REMOVED
+# Reflex loads dropdown options from local JSON files at startup via orjson
+# This eliminates the need for this endpoint entirely
 
 # NOTE: /initial_sample endpoint REMOVED
 # Forms are now populated via randomize_*_form on page mount in Reflex (local, instant)

@@ -756,7 +756,7 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
 # TFD Batch ML Form
 # =============================================================================
 def transaction_fraud_detection_batch_form(model_key: str = None, project_name: str = None) -> rx.Component:
-    """Batch ML form for Transaction Fraud Detection using XGBClassifier.
+    """Batch ML form for Transaction Fraud Detection using CatBoostClassifier.
 
     Mirrors the Incremental ML form layout with batch_ml_training_box instead of ml_training_switch.
     """
@@ -1041,7 +1041,7 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
         )
     else:
         left_column = rx.vstack(
-            batch_ml_training_box("XGBClassifier", "Transaction Fraud Detection"),
+            batch_ml_training_box("CatBoostClassifier", "Transaction Fraud Detection"),
             form_card,
             spacing="4",
             width="30%"
@@ -1086,7 +1086,7 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
                         rx.badge(
                             rx.hstack(
                                 rx.icon("brain", size=12),
-                                rx.text("XGBoost Classifier (Scikit-Learn)", size="1"),
+                                rx.text("CatBoost Classifier (Scikit-Learn)", size="1"),
                                 spacing="1",
                                 align_items="center"
                             ),
@@ -1228,7 +1228,7 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
                         rx.badge(
                             rx.hstack(
                                 rx.icon("brain", size=12),
-                                rx.text("XGBoost Classifier (Scikit-Learn)", size="1"),
+                                rx.text("CatBoost Classifier (Scikit-Learn)", size="1"),
                                 spacing="1",
                                 align_items="center"
                             ),

@@ -14,7 +14,7 @@ from typing import Optional, Dict
 import subprocess
 import sys
 import mlflow
-import mlflow.sklearn
+import mlflow.catboost
 import os
 import numpy as np
 import pandas as pd
@@ -25,23 +25,11 @@ import matplotlib.pyplot as plt
 import asyncio
 import time
 from datetime import datetime
-from sklearn.metrics import (
-    accuracy_score,
-    precision_score,
-    recall_score,
-    f1_score,
-    roc_auc_score,
-)
-from imblearn.metrics import geometric_mean_score
-
 from functions import (
     ModelDataManager,
     process_sklearn_sample,
     load_or_create_data,
-    create_consumer,
-    load_sklearn_encoders,
-    create_batch_model,
-    process_batch_data,
+    load_or_create_sklearn_encoders,
     yellowbrick_classification_kwargs,
     yellowbrick_classification_visualizers,
     yellowbrick_feature_analysis_kwargs,
@@ -247,103 +235,9 @@ class SklearnHealthcheck(BaseModel):
 sklearn_healthcheck = SklearnHealthcheck()
 
 
-class TrainRequest(BaseModel):
-    project_name: str
-    model_name: str = "XGBClassifier"
-    force_retrain: bool = False
-
-
 class ModelAvailabilityRequest(BaseModel):
     project_name: str
-    model_name: str = "XGBClassifier"
-
-
-# =============================================================================
-# Training State
-# =============================================================================
-training_state: Dict[str, dict] = {}
-
-
-def _sync_train_model(project_name: str, model_name: str) -> dict:
-    """Synchronous model training - to be run in thread pool."""
-    start_time = time.time()
-
-    # Load and process data
-    print(f"Loading data for training: {project_name}")
-    consumer = create_consumer(project_name)
-    data_df = load_or_create_data(consumer, project_name)
-
-    if data_df.empty:
-        raise ValueError(f"No data available for training {project_name}")
-
-    print(f"Processing data for {project_name}...")
-    X_train, X_test, y_train, y_test = process_batch_data(data_df, project_name)
-
-    print(f"Creating model: {model_name}")
-    model = create_batch_model(project_name, y_train=y_train)
-
-    print("Training model...")
-    model.fit(X_train, y_train)
-
-    # Make predictions
-    y_pred = model.predict(X_test)
-    y_pred_proba = model.predict_proba(X_test)[:, 1]
-
-    # Calculate metrics
-    metrics = {
-        "Accuracy": float(accuracy_score(y_test, y_pred)),
-        "Precision": float(precision_score(y_test, y_pred, zero_division=0)),
-        "Recall": float(recall_score(y_test, y_pred, zero_division=0)),
-        "F1": float(f1_score(y_test, y_pred, zero_division=0)),
-        "ROCAUC": float(roc_auc_score(y_test, y_pred_proba)),
-        "GeometricMean": float(geometric_mean_score(y_test, y_pred)),
-    }
-
-    print(f"Metrics calculated: {metrics}")
-
-    # Log to MLflow
-    print("Logging to MLflow...")
-    experiment = mlflow.get_experiment_by_name(project_name)
-    if experiment is None:
-        experiment_id = mlflow.create_experiment(project_name)
-    else:
-        experiment_id = experiment.experiment_id
-
-    with mlflow.start_run(experiment_id=experiment_id, run_name=model_name):
-        # Log parameters
-        mlflow.log_param("model_type", model_name)
-        mlflow.log_param("n_estimators", model.n_estimators)
-        mlflow.log_param("learning_rate", model.learning_rate)
-        mlflow.log_param("max_depth", model.max_depth)
-        mlflow.log_param("train_samples", len(X_train))
-        mlflow.log_param("test_samples", len(X_test))
-
-        # Log metrics
-        for metric_name, metric_value in metrics.items():
-            mlflow.log_metric(metric_name, metric_value)
-
-        # Log model
-        mlflow.sklearn.log_model(model, "model")
-
-        run_id = mlflow.active_run().info.run_id
-
-    training_time = time.time() - start_time
-    print(f"Training completed in {training_time:.2f} seconds")
-
-    # Clear cache to ensure fresh metrics
-    mlflow_cache.clear()
-
-    return {
-        "status": "success",
-        "project_name": project_name,
-        "model_name": model_name,
-        "run_id": run_id,
-        "metrics": metrics,
-        "training_time_seconds": round(training_time, 2),
-        "train_samples": len(X_train),
-        "test_samples": len(X_test),
-        "trained_at": datetime.utcnow().isoformat() + "Z"
-    }
+    model_name: str = "CatBoostClassifier"
 
 
 # =============================================================================
@@ -360,8 +254,7 @@ async def lifespan(app: FastAPI):
     print("Loading data for Batch ML projects...")
     for project_name in PROJECT_NAMES:
         try:
-            consumer = create_consumer(project_name)
-            data_dict[project_name] = load_or_create_data(consumer, project_name)
+            data_dict[project_name] = load_or_create_data(project_name)
             data_load_status[project_name] = "success"
             print(f"Data loaded for {project_name}")
         except Exception as e:
@@ -370,11 +263,11 @@ async def lifespan(app: FastAPI):
 
     sklearn_healthcheck.data_load = data_load_status
 
-    # Load sklearn encoders
+    # Load sklearn encoders from MLflow (or create new if not available)
     print("Loading sklearn encoders...")
     for project_name in PROJECT_NAMES:
         try:
-            encoders_dict[project_name] = load_sklearn_encoders(project_name)
+            encoders_dict[project_name] = load_or_create_sklearn_encoders(project_name)
             encoders_load_status[project_name] = "success"
             print(f"Encoders loaded for {project_name}")
         except Exception as e:
@@ -460,11 +353,11 @@ async def get_sample(request: SampleRequest):
 
 @app.post("/predict")
 async def predict(request: PredictRequest):
-    """Make batch ML prediction using XGBClassifier from MLflow."""
+    """Make batch ML prediction using CatBoostClassifier from MLflow."""
     project_name = request.project_name
     model_name = request.model_name
 
-    if model_name != "XGBClassifier":
+    if model_name != "CatBoostClassifier":
         raise HTTPException(status_code=400, detail=f"Model {model_name} not supported")
 
     if project_name == "Transaction Fraud Detection":
@@ -507,7 +400,7 @@ async def predict(request: PredictRequest):
 
             run_id = runs.iloc[0]["run_id"]
             model_uri = f"runs:/{run_id}/model"
-            model = mlflow.sklearn.load_model(model_uri)
+            model = mlflow.catboost.load_model(model_uri)
 
             prediction = model.predict(X)[0]
             fraud_probability = model.predict_proba(X)[0][1]
@@ -653,82 +546,6 @@ async def yellowbrick_metric(payload: dict):
         raise HTTPException(status_code=500, detail=f"Failed to generate visualization: {str(e)}")
 
 
-@app.post("/train")
-async def train_model(request: TrainRequest):
-    """Train a batch ML model and log to MLflow."""
-    project_name = request.project_name
-    model_name = request.model_name
-    state_key = f"{project_name}:{model_name}"
-
-    # Check if already training
-    if state_key in training_state and training_state[state_key].get("status") == "training":
-        return {
-            "status": "already_training",
-            "message": f"Model {model_name} for {project_name} is already being trained"
-        }
-
-    # Check if model exists and force_retrain is False
-    if not request.force_retrain:
-        try:
-            experiment = mlflow.get_experiment_by_name(project_name)
-            if experiment is not None:
-                runs = mlflow.search_runs(
-                    experiment_ids=[experiment.experiment_id],
-                    filter_string=f"tags.mlflow.runName = '{model_name}'",
-                    max_results=1
-                )
-                if not runs.empty:
-                    return {
-                        "status": "model_exists",
-                        "message": f"Model {model_name} already exists. Set force_retrain=true to retrain.",
-                        "run_id": runs.iloc[0]["run_id"]
-                    }
-        except Exception:
-            pass  # Proceed with training if check fails
-
-    # Update training state
-    training_state[state_key] = {
-        "status": "training",
-        "started_at": datetime.utcnow().isoformat() + "Z"
-    }
-
-    try:
-        # Run training in thread pool to avoid blocking
-        result = await asyncio.wait_for(
-            asyncio.to_thread(_sync_train_model, project_name, model_name),
-            timeout=600.0  # 10 minute timeout for training
-        )
-
-        # Update training state with result
-        training_state[state_key] = {
-            "status": "completed",
-            "completed_at": datetime.utcnow().isoformat() + "Z",
-            "result": result
-        }
-
-        return result
-
-    except asyncio.TimeoutError:
-        training_state[state_key] = {
-            "status": "timeout",
-            "error": "Training timed out after 10 minutes"
-        }
-        raise HTTPException(status_code=504, detail="Training timed out after 10 minutes")
-    except ValueError as e:
-        training_state[state_key] = {
-            "status": "failed",
-            "error": str(e)
-        }
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        training_state[state_key] = {
-            "status": "failed",
-            "error": str(e)
-        }
-        print(f"Error training model: {e}", file=sys.stderr)
-        raise HTTPException(status_code=500, detail=f"Training failed: {str(e)}")
-
-
 @app.post("/model_available")
 async def check_model_available(request: ModelAvailabilityRequest):
     """Check if a trained model is available in MLflow."""
@@ -776,15 +593,6 @@ async def check_model_available(request: ModelAvailabilityRequest):
             "available": False,
             "error": str(e)
         }
-
-
-@app.get("/training_status/{project_name}/{model_name}")
-async def get_training_status(project_name: str, model_name: str):
-    """Get the current training status for a model."""
-    state_key = f"{project_name}:{model_name}"
-    if state_key in training_state:
-        return training_state[state_key]
-    return {"status": "not_started"}
 
 
 # =============================================================================

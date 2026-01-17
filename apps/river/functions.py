@@ -100,65 +100,6 @@ BEST_METRIC_CRITERIA = {
 }
 
 # =============================================================================
-# Static Dropdown Options (mirrors Kafka producer constants for data validity)
-# These ensure form values are always valid for /predict endpoint
-# =============================================================================
-STATIC_DROPDOWN_OPTIONS = {
-    "Transaction Fraud Detection": {
-        # Categorical fields (exact values from transaction_fraud_detection.py producer)
-        "currency": ["USD", "EUR", "GBP", "JPY", "CAD", "AUD", "BRL"],
-        "transaction_type": ["purchase", "withdrawal", "transfer", "payment", "deposit"],
-        "payment_method": ["credit_card", "debit_card", "paypal", "bank_transfer", "crypto"],
-        "product_category": [
-            "electronics", "clothing", "groceries", "travel", "services",
-            "digital_goods", "luxury_items", "gambling", "other"
-        ],
-        "browser": ["Chrome", "Safari", "Firefox", "Edge", "Opera", "Other"],
-        "os": ["iOS", "Android", "Windows", "macOS", "Linux", "Other"],
-        # ID field - bounded range from producer: merchant_{1..200}
-        "merchant_id": [f"merchant_{i}" for i in range(1, 201)],
-    },
-    "Estimated Time of Arrival": {
-        # Categorical fields (exact values from estimated_time_of_arrival.py producer)
-        "weather": ["Clear", "Clouds", "Rain", "Heavy Rain", "Fog", "Thunderstorm"],
-        "vehicle_type": ["Sedan", "SUV", "Hatchback", "Motorcycle", "Van"],
-        # ID fields - bounded ranges from producer
-        "driver_id": [f"driver_{i}" for i in range(1000, 5001)],
-        "vehicle_id": [f"vehicle_{i}" for i in range(100, 1000)],
-    },
-    "E-Commerce Customer Interactions": {
-        # Categorical fields (exact values from e_commerce_customer_interactions.py producer)
-        "event_type": ["page_view", "add_to_cart", "purchase", "search", "leave_review"],
-        "product_category": [
-            "Electronics", "Fashion & Apparel", "Home & Garden", "Beauty & Personal Care",
-            "Sports & Outdoors", "Books", "Grocery & Gourmet Food", "Automotive",
-            "Toys & Games", "Computers", "Pet Supplies", "Health & Household"
-        ],
-        "browser": ["Chrome", "Safari", "Firefox", "Edge", "Opera", "Other"],
-        "device_type": ["Mobile", "Desktop", "Tablet"],
-        "os": ["Android", "iOS", "Windows", "macOS", "Linux", "Other"],
-        "referrer_url": [
-            "direct", "google.com", "facebook.com", "amazon.com", "instagram.com",
-            "twitter.com", "youtube.com", "tiktok.com", "pinterest.com", "reddit.com",
-            "linkedin.com", "bing.com", "yahoo.com", "email_campaign", "affiliate_link"
-        ],
-        # ID field - bounded range from producer: prod_{1000..1100}
-        "product_id": [f"prod_{i}" for i in range(1000, 1101)],
-    },
-}
-
-
-def get_static_dropdown_options(project_name: str) -> Dict[str, List[str]]:
-    """Get static dropdown options for a project.
-
-    These are pre-defined values that mirror the Kafka producer constants,
-    ensuring all form values are valid for the /predict endpoint.
-    Instant access - no I/O or database queries needed.
-    """
-    return STATIC_DROPDOWN_OPTIONS.get(project_name, {})
-
-
-# =============================================================================
 # Redis Live Model Cache (for real-time predictions during training)
 # =============================================================================
 import redis
@@ -634,27 +575,8 @@ def get_delta_lazyframe(project_name: str) -> Optional[pl.LazyFrame]:
         return None
 
 
-def get_unique_values_polars(project_name: str, column_name: str, limit: int = 100) -> List[str]:
-    """Get unique values for a column using Polars (optimized with lazy evaluation).
-    Polars will only read the necessary column and compute distinct values efficiently.
-    """
-    try:
-        lf = get_delta_lazyframe(project_name)
-        if lf is None:
-            return []
-        # Optimized query: select only the column, get unique, limit
-        # Polars pushes this down for efficient execution
-        unique_df = (
-            lf.select(pl.col(column_name).cast(pl.Utf8))
-            .filter(pl.col(column_name).is_not_null())
-            .unique()
-            .limit(limit)
-            .collect()
-        )
-        return unique_df[column_name].to_list()
-    except Exception as e:
-        print(f"Error getting unique values via Polars for {column_name}: {e}")
-        return []
+# NOTE: get_unique_values_polars removed - /unique_values endpoint no longer exists
+# Reflex loads dropdown options from local JSON files at startup via orjson
 
 
 def get_sample_polars(project_name: str, n: int = 1) -> Optional[pd.DataFrame]:
@@ -675,52 +597,8 @@ def get_sample_polars(project_name: str, n: int = 1) -> Optional[pd.DataFrame]:
         return None
 
 
-def precompute_all_unique_values_polars(project_name: str) -> Dict[str, List[str]]:
-    """Precompute unique values for all columns of a project using Polars.
-    This runs once at startup and caches results for instant access.
-    """
-    try:
-        lf = get_delta_lazyframe(project_name)
-        if lf is None:
-            return {}
-        # Get schema to know column names
-        schema = lf.collect_schema()
-        columns = schema.names()
-        unique_values_cache = {}
-        for col_name in columns:
-            try:
-                unique_df = (
-                    lf.select(pl.col(col_name).cast(pl.Utf8))
-                    .filter(pl.col(col_name).is_not_null())
-                    .unique()
-                    .limit(100)
-                    .collect()
-                )
-                unique_values_cache[col_name] = unique_df[col_name].to_list()
-            except Exception as e:
-                print(f"Error getting unique values for column {col_name}: {e}")
-                unique_values_cache[col_name] = []
-        print(f"Precomputed unique values for {project_name}: {len(columns)} columns")
-        return unique_values_cache
-    except Exception as e:
-        print(f"Error precomputing unique values for {project_name}: {e}")
-        return {}
-
-
-def get_initial_sample_polars(project_name: str) -> Optional[dict]:
-    """Get a single sample row as a dictionary using Polars."""
-    try:
-        lf = get_delta_lazyframe(project_name)
-        if lf is None:
-            return None
-        # Get first row - very fast operation
-        row_df = lf.limit(1).collect()
-        if row_df.height > 0:
-            return row_df.row(0, named = True)
-        return None
-    except Exception as e:
-        print(f"Error getting initial sample via Polars: {e}")
-        return None
+# NOTE: precompute_all_unique_values_polars removed - no longer needed
+# NOTE: get_initial_sample_polars removed - Reflex randomizes forms locally on page mount
 
 
 # =============================================================================

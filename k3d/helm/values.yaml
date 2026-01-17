@@ -256,12 +256,14 @@ sklearn:
   image: coelho-realtime-sklearn:latest
   imagePullPolicy: IfNotPresent
   replicas: 1
+  # Higher resources for CatBoost batch training + YellowBrick visualizations
+  # CatBoost is memory-intensive even with memory optimization params
   resources:
     requests:
-      memory: "1Gi"
-      cpu: "500m"
-    limits:
       memory: "4Gi"
+      cpu: "1000m"
+    limits:
+      memory: "8Gi"
       cpu: "2000m"
   portsSettings:
     ports:

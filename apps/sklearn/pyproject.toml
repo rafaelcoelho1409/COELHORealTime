@@ -1,31 +1,35 @@
 [project]
 name = "sklearn-service"
 version = "0.1.0"
-description = "Scikit-Learn Batch ML Service - Batch machine learning with XGBoost and YellowBrick visualizations"
+description = "Scikit-Learn Batch ML Service - Batch machine learning with CatBoost and YellowBrick visualizations"
 requires-python = ">=3.13"
 dependencies = [
-    # HTTP API
+    # HTTP API & CLI
     "fastapi",
     "uvicorn",
     "pydantic",
     "prometheus-fastapi-instrumentator",
     "starlette",
+    "click",
     # Data processing
     "pandas",
     "pyarrow",
+    "duckdb",
+    "deltalake",
+    "orjson",
     # ML & Visualization
     "mlflow",
-    "kafka-python",
     "scikit-learn",
-    "xgboost-cpu",
-    "setuptools",
+    "catboost",
+    "imbalanced-learn",
+    # TODO: Once PR #1319 is merged, replace yellowbrick line with:
+    # "yellowbrick>=1.6",  # or install from git: git+https://github.com/DistrictDataLabs/yellowbrick@refs/pull/1319/head
+    # and remove setuptools (no longer needed for distutils shim)
+    # PR: https://github.com/DistrictDataLabs/yellowbrick/pull/1319
     "yellowbrick",
     "matplotlib",
     "boto3",
-    "imbalanced-learn",
-    # Delta Lake / Polars (lightweight, lazy evaluation, no JVM)
-    "polars",
-    "deltalake",
+    "setuptools",  # Provides distutils compatibility for yellowbrick on Python 3.13 (LooseVersion)
 ]
 
 [build-system]

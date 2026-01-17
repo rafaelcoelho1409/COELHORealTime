@@ -2,7 +2,7 @@
 # River ML Training Service Entrypoint
 # Dependencies are pre-installed in Docker image via multi-stage build
 
-set -e
+set -e  
 
 # Ensure logs directory exists
 mkdir -p /app/logs

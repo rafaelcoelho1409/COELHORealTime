@@ -93,7 +93,8 @@ ordinal_encoders/
 .env
 .claude/
 **/helm/charts/
-Chart.lock
+# Helm - keep Chart.lock but charts/ is now committed for faster builds
+# See docs/helm_dependencies.md for details
 
 cluster_counts.json
 cluster_feature_counts.json

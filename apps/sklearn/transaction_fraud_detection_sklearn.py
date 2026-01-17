@@ -1,19 +1,35 @@
 """
 Transaction Fraud Detection - Batch ML Training Script
 
-This script trains an XGBClassifier model for fraud detection using batch learning.
-Reads data from Delta Lake on MinIO (with Kafka fallback), trains the model,
-logs to MLflow, and saves artifacts. Supports graceful shutdown via SIGTERM/SIGINT.
+Trains a CatBoostClassifier model for fraud detection using batch learning.
+Reads data from Delta Lake on MinIO via DuckDB, trains the model,
+logs to MLflow, and saves artifacts.
+
+Two preprocessing approaches available:
+- DuckDB SQL (default): All transformations in SQL, no StandardScaler (faster, less memory)
+- Pandas/Sklearn: Traditional approach with pandas transforms and StandardScaler
+
+Usage:
+    # DuckDB SQL approach (recommended)
+    python transaction_fraud_detection_sklearn.py
+
+    # With sampling
+    python transaction_fraud_detection_sklearn.py --sample-frac 0.3
+
+    # Traditional pandas approach (for comparison)
+    python transaction_fraud_detection_sklearn.py --use-pandas
+
+Environment variables:
+    MLFLOW_HOST: MLflow server hostname (required)
 """
 import pickle
 import os
-import signal
 import sys
 import time
-from datetime import datetime
-import pandas as pd
+import tempfile
+import click
 import mlflow
-import mlflow.sklearn
+import mlflow.catboost
 from sklearn.metrics import (
     accuracy_score,
     precision_score,
@@ -23,112 +39,118 @@ from sklearn.metrics import (
 )
 from imblearn.metrics import geometric_mean_score
 from functions import (
-    create_consumer,
     load_or_create_data,
     process_batch_data,
+    process_batch_data_duckdb,
     create_batch_model,
+    TFD_CAT_FEATURE_INDICES,
 )
 
 
-MLFLOW_HOST = os.environ.get("MLFLOW_HOST", "localhost")
-
+MLFLOW_HOST = os.environ["MLFLOW_HOST"]
 PROJECT_NAME = "Transaction Fraud Detection"
-MODEL_NAME = "XGBClassifier"
-MODEL_FOLDER = "models/transaction_fraud_detection"
-ENCODERS_PATH = "encoders/sklearn/transaction_fraud_detection.pkl"
-
-os.makedirs(MODEL_FOLDER, exist_ok=True)
-os.makedirs("encoders/sklearn", exist_ok=True)
-
-# Global flag for graceful shutdown
-_shutdown_requested = False
+MODEL_NAME = "CatBoostClassifier"
+ENCODER_ARTIFACT_NAME = "sklearn_encoders.pkl"
 
 
-def signal_handler(signum, frame):
-    """Handle SIGTERM and SIGINT for graceful shutdown."""
-    global _shutdown_requested
-    signal_name = signal.Signals(signum).name
-    print(f"\nReceived {signal_name}, initiating graceful shutdown...")
-    _shutdown_requested = True
+@click.command()
+@click.option(
+    "--sample-frac",
+    type=float,
+    default=None,
+    help="Fraction of data to sample (0.0-1.0). E.g., 0.3 = 30% of data.",
+)
+@click.option(
+    "--max-rows",
+    type=int,
+    default=None,
+    help="Maximum number of rows to load from Delta Lake.",
+)
+@click.option(
+    "--use-pandas",
+    is_flag=True,
+    default=False,
+    help="Use traditional pandas/sklearn preprocessing instead of DuckDB SQL.",
+)
+def main(sample_frac: float | None, max_rows: int | None, use_pandas: bool):
+    """Batch ML Training for Transaction Fraud Detection.
 
-
-# Register signal handlers
-signal.signal(signal.SIGTERM, signal_handler)
-signal.signal(signal.SIGINT, signal_handler)
-
-
-def main():
-    """Main training function."""
-    global _shutdown_requested
-
+    Trains CatBoostClassifier on Delta Lake data and logs to MLflow.
+    """
     start_time = time.time()
-    exit_code = 0
-    consumer = None
-
+    preprocessing_method = "pandas/sklearn" if use_pandas else "DuckDB SQL"
     print(f"Starting batch ML training for {PROJECT_NAME}")
     print(f"Model: {MODEL_NAME}")
+    print(f"Preprocessing: {preprocessing_method}")
     print(f"MLflow host: {MLFLOW_HOST}")
-
+    if sample_frac:
+        print(f"Data sampling: {sample_frac * 100}%")
+    if max_rows:
+        print(f"Max rows: {max_rows}")
     try:
         # Configure MLflow
+        print(f"Connecting to MLflow at http://{MLFLOW_HOST}:5000")
         mlflow.set_tracking_uri(f"http://{MLFLOW_HOST}:5000")
         mlflow.set_experiment(PROJECT_NAME)
+        print(f"MLflow experiment '{PROJECT_NAME}' set successfully")
 
-        # Check for shutdown before loading data
-        if _shutdown_requested:
-            print("Shutdown requested before data loading.")
-            return 1
+        # Load and process data
+        load_start = time.time()
 
-        # Load data
-        print("Loading data...")
-        consumer = create_consumer(PROJECT_NAME)
-        data_df = load_or_create_data(consumer, PROJECT_NAME)
+        if use_pandas:
+            # Traditional pandas/sklearn approach
+            print("\n=== Using Pandas/Sklearn Preprocessing ===")
+            print("Loading data...")
+            data_df = load_or_create_data(
+                PROJECT_NAME,
+                sample_frac=sample_frac,
+                max_rows=max_rows,
+            )
+            if data_df.empty:
+                print("ERROR: No data available for training.", file=sys.stderr)
+                sys.exit(1)
+            print(f"Loaded {len(data_df)} samples")
+            print("Processing data (JSON extract, timestamp extract, StandardScaler)...")
+            X_train, X_test, y_train, y_test, preprocessor_dict = process_batch_data(
+                data_df, PROJECT_NAME
+            )
+            cat_feature_indices = preprocessor_dict.get("cat_feature_indices", [])
+        else:
+            # DuckDB SQL approach (recommended)
+            print("\n=== Using DuckDB SQL Preprocessing ===")
+            print("Loading and preprocessing in single SQL query...")
+            X_train, X_test, y_train, y_test, preprocessor_dict = process_batch_data_duckdb(
+                PROJECT_NAME,
+                sample_frac=sample_frac,
+                max_rows=max_rows,
+            )
+            # Use predefined indices (no StandardScaler needed for CatBoost)
+            cat_feature_indices = TFD_CAT_FEATURE_INDICES
 
-        if consumer is not None:
-            consumer.close()
-            consumer = None
-            print("Kafka consumer closed.")
-
-        if data_df.empty:
-            print("ERROR: No data available for training.", file=sys.stderr)
-            return 1
-
-        print(f"Loaded {len(data_df)} samples")
-
-        # Check for shutdown before processing
-        if _shutdown_requested:
-            print("Shutdown requested before data processing.")
-            return 1
-
-        # Process data
-        print("Processing data...")
-        X_train, X_test, y_train, y_test = process_batch_data(data_df, PROJECT_NAME)
+        load_time = time.time() - load_start
+        print(f"\nData loading/preprocessing completed in {load_time:.2f} seconds")
         print(f"Training set: {len(X_train)} samples")
         print(f"Test set: {len(X_test)} samples")
 
-        # Check for shutdown before training
-        if _shutdown_requested:
-            print("Shutdown requested before model training.")
-            return 1
-
         # Create model
-        print("Creating model...")
+        print("\nCreating model...")
         model = create_batch_model(PROJECT_NAME, y_train=y_train)
-
-        # Train model
+        print(f"Categorical feature indices: {cat_feature_indices}")
+        # Train model with early stopping and native categorical handling
         print("Training model...")
-        model.fit(X_train, y_train)
+        model.fit(
+            X_train, y_train,
+            eval_set=(X_test, y_test),
+            cat_features=cat_feature_indices,  # CatBoost handles categoricals natively
+            early_stopping_rounds=50,
+            use_best_model=True,
+            verbose=True,  # Show all iterations
+        )
         print("Model training complete.")
-
-        # Check for shutdown before evaluation
-        if _shutdown_requested:
-            print("Shutdown requested before evaluation. Saving model anyway...")
-
-        # Make predictions
+        # Evaluate model
         print("Evaluating model...")
         y_pred = model.predict(X_test)
         y_pred_proba = model.predict_proba(X_test)[:, 1]
-
         # Calculate metrics
         metrics = {
             "Accuracy": float(accuracy_score(y_test, y_pred)),
@@ -138,54 +160,54 @@ def main():
             "ROCAUC": float(roc_auc_score(y_test, y_pred_proba)),
             "GeometricMean": float(geometric_mean_score(y_test, y_pred)),
         }
-
         print("Metrics:")
         for name, value in metrics.items():
             print(f"  {name}: {value:.4f}")
-
         # Log to MLflow
-        print("Logging to MLflow...")
+        print("\nLogging to MLflow...")
         with mlflow.start_run(run_name=MODEL_NAME):
+            # Log tags
+            mlflow.set_tag("training_mode", "batch")
+            mlflow.set_tag("preprocessing", preprocessing_method)
             # Log parameters
             mlflow.log_param("model_type", MODEL_NAME)
-            mlflow.log_param("n_estimators", model.n_estimators)
-            mlflow.log_param("learning_rate", model.learning_rate)
-            mlflow.log_param("max_depth", model.max_depth)
+            mlflow.log_param("preprocessing_method", preprocessing_method)
+            mlflow.log_param("iterations", model.get_param("iterations"))
+            mlflow.log_param("learning_rate", model.get_param("learning_rate"))
+            mlflow.log_param("depth", model.get_param("depth"))
             mlflow.log_param("train_samples", len(X_train))
             mlflow.log_param("test_samples", len(X_test))
-
+            if sample_frac:
+                mlflow.log_param("sample_frac", sample_frac)
+            if max_rows:
+                mlflow.log_param("max_rows", max_rows)
+            # Log timing metrics
+            mlflow.log_metric("preprocessing_time_seconds", load_time)
             # Log metrics
             for metric_name, metric_value in metrics.items():
                 mlflow.log_metric(metric_name, metric_value)
-
-            # Log model
-            mlflow.sklearn.log_model(model, "model")
-
+            # Log model and encoders as artifacts
+            with tempfile.TemporaryDirectory() as tmpdir:
+                model_path = os.path.join(tmpdir, f"{MODEL_NAME}.pkl")
+                encoder_path = os.path.join(tmpdir, ENCODER_ARTIFACT_NAME)
+                with open(model_path, 'wb') as f:
+                    pickle.dump(model, f)
+                with open(encoder_path, 'wb') as f:
+                    pickle.dump(preprocessor_dict, f)
+                mlflow.log_artifact(model_path)
+                mlflow.log_artifact(encoder_path)
+            # Log model using MLflow's catboost flavor
+            mlflow.catboost.log_model(model, "model")
             run_id = mlflow.active_run().info.run_id
             print(f"MLflow run ID: {run_id}")
-
-        # Save model locally
-        model_path = f"{MODEL_FOLDER}/{MODEL_NAME}.pkl"
-        print(f"Saving model to {model_path}...")
-        with open(model_path, 'wb') as f:
-            pickle.dump(model, f)
-
         training_time = time.time() - start_time
         print(f"\nTraining completed successfully in {training_time:.2f} seconds")
-
     except Exception as e:
-        print(f"ERROR during training: {e}", file=sys.stderr)
+        print(f"Error during training: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
-        exit_code = 1
-
-    finally:
-        if consumer is not None:
-            consumer.close()
-            print("Kafka consumer closed.")
-
-    return exit_code
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
