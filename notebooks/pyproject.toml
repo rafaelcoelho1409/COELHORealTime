@@ -20,6 +20,10 @@ dependencies = [
     "ipywidgets",
     "scikit-learn",
     "imbalanced-learn",
+    "yellowbrick",
+    #Setuptools is necessary to YellowBrick
+    "setuptools",
+    "xgboost",
 ]
 
 [dependency-groups]

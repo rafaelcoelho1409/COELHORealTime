@@ -228,16 +228,72 @@ def transaction_fraud_detection_metrics() -> rx.Component:
 
 
 def transaction_fraud_detection_batch_metrics() -> rx.Component:
-    """Display batch ML metrics for TFD."""
-    return rx.grid(
-        metric_card("F1", TFDState.tfd_batch_metrics.get("F1", "N/A"), "f1"),
-        metric_card("Accuracy", TFDState.tfd_batch_metrics.get("Accuracy", "N/A"), "accuracy"),
-        metric_card("Recall", TFDState.tfd_batch_metrics.get("Recall", "N/A"), "recall"),
-        metric_card("Precision", TFDState.tfd_batch_metrics.get("Precision", "N/A"), "precision"),
-        metric_card("ROC AUC", TFDState.tfd_batch_metrics.get("ROCAUC", "N/A"), "rocauc"),
-        metric_card("Geo Mean", TFDState.tfd_batch_metrics.get("GeometricMean", "N/A"), "geometric_mean"),
-        columns="6",
-        spacing="2",
+    """Display batch ML metrics for TFD organized by category."""
+    return rx.vstack(
+        # ---------------------------------------------------------------------
+        # PRIMARY METRICS - Most important for fraud detection
+        # ---------------------------------------------------------------------
+        rx.hstack(
+            rx.icon("target", size=16, color="blue"),
+            rx.text("Primary Metrics", size="2", weight="bold"),
+            rx.text("(Most important for fraud detection)", size="1", color="gray"),
+            spacing="2",
+            align_items="center"
+        ),
+        rx.grid(
+            metric_card("Recall", TFDState.tfd_batch_metrics.get("recall_score", "N/A"), "recall"),
+            metric_card("Precision", TFDState.tfd_batch_metrics.get("precision_score", "N/A"), "precision"),
+            metric_card("F1", TFDState.tfd_batch_metrics.get("f1_score", "N/A"), "f1"),
+            metric_card("F2 (beta=2)", TFDState.tfd_batch_metrics.get("fbeta_score", "N/A"), "fbeta"),
+            metric_card("ROC-AUC", TFDState.tfd_batch_metrics.get("roc_auc_score", "N/A"), "rocauc"),
+            metric_card("Avg Precision", TFDState.tfd_batch_metrics.get("average_precision_score", "N/A"), "average_precision"),
+            columns="6",
+            spacing="2",
+            width="100%"
+        ),
+        rx.divider(size="4", width="100%"),
+        # ---------------------------------------------------------------------
+        # SECONDARY METRICS - Additional monitoring insights
+        # ---------------------------------------------------------------------
+        rx.hstack(
+            rx.icon("activity", size=16, color="green"),
+            rx.text("Secondary Metrics", size="2", weight="bold"),
+            rx.text("(Additional monitoring)", size="1", color="gray"),
+            spacing="2",
+            align_items="center"
+        ),
+        rx.grid(
+            metric_card("Accuracy", TFDState.tfd_batch_metrics.get("accuracy_score", "N/A"), "accuracy"),
+            metric_card("Balanced Acc", TFDState.tfd_batch_metrics.get("balanced_accuracy_score", "N/A"), "balanced_accuracy"),
+            metric_card("MCC", TFDState.tfd_batch_metrics.get("matthews_corrcoef", "N/A"), "mcc"),
+            metric_card("Cohen Kappa", TFDState.tfd_batch_metrics.get("cohen_kappa_score", "N/A"), "cohen_kappa"),
+            metric_card("Jaccard", TFDState.tfd_batch_metrics.get("jaccard_score", "N/A"), "jaccard"),
+            metric_card("Geo Mean", TFDState.tfd_batch_metrics.get("geometric_mean_score", "N/A"), "geometric_mean"),
+            columns="6",
+            spacing="2",
+            width="100%"
+        ),
+        rx.divider(size="4", width="100%"),
+        # ---------------------------------------------------------------------
+        # PROBABILISTIC METRICS - Calibration monitoring
+        # ---------------------------------------------------------------------
+        rx.hstack(
+            rx.icon("gauge", size=16, color="purple"),
+            rx.text("Probabilistic Metrics", size="2", weight="bold"),
+            rx.text("(Calibration monitoring)", size="1", color="gray"),
+            spacing="2",
+            align_items="center"
+        ),
+        rx.grid(
+            metric_card("Log Loss", TFDState.tfd_batch_metrics.get("log_loss", "N/A"), "logloss"),
+            metric_card("Brier Score", TFDState.tfd_batch_metrics.get("brier_score_loss", "N/A"), "brier"),
+            metric_card("D2 Log Loss", TFDState.tfd_batch_metrics.get("d2_log_loss_score", "N/A"), "d2_logloss"),
+            metric_card("D2 Brier", TFDState.tfd_batch_metrics.get("d2_brier_score", "N/A"), "d2_brier"),
+            columns="4",
+            spacing="2",
+            width="100%"
+        ),
+        spacing="3",
         width="100%"
     )
 
@@ -695,7 +751,7 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                 ),
                 value="prediction"
             ),
-            # Tab 2: Metrics
+            # Tab 2: Metrics (with subtabs)
             rx.tabs.content(
                 rx.vstack(
                     rx.hstack(
@@ -711,23 +767,47 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                         align_items="center",
                         spacing="2"
                     ),
-                    # Model info row
-                    rx.hstack(
-                        rx.badge(
-                            rx.hstack(
-                                rx.icon("brain", size=12),
-                                rx.text("RandomUnderSampler + ARFClassifier", size="1"),
-                                spacing="1",
-                                align_items="center"
+                    # Metrics subtabs
+                    rx.tabs.root(
+                        rx.tabs.list(
+                            rx.tabs.trigger(
+                                rx.hstack(
+                                    rx.icon("layout-dashboard", size=14),
+                                    rx.text("Overview"),
+                                    spacing="2",
+                                    align_items="center"
+                                ),
+                                value="overview"
                             ),
-                            color_scheme="blue",
-                            variant="soft",
-                            size="1"
                         ),
-                        rx.badge("Imbalanced Learning", color_scheme="purple", variant="soft", size="1"),
-                        spacing="2"
+                        # Subtab 1: Overview (default sklearn metrics)
+                        rx.tabs.content(
+                            rx.vstack(
+                                # Model info row
+                                rx.hstack(
+                                    rx.badge(
+                                        rx.hstack(
+                                            rx.icon("brain", size=12),
+                                            rx.text("RandomUnderSampler + ARFClassifier", size="1"),
+                                            spacing="1",
+                                            align_items="center"
+                                        ),
+                                        color_scheme="blue",
+                                        variant="soft",
+                                        size="1"
+                                    ),
+                                    rx.badge("Imbalanced Learning", color_scheme="purple", variant="soft", size="1"),
+                                    spacing="2"
+                                ),
+                                transaction_fraud_detection_metrics(),
+                                spacing="4",
+                                width="100%",
+                            ),
+                            value="overview"
+                        ),
+                        default_value="overview",
+                        width="100%"
                     ),
-                    transaction_fraud_detection_metrics(),
                     spacing="4",
                     width="100%",
                     padding_top="1em"
@@ -1207,7 +1287,7 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
                 ),
                 value="prediction"
             ),
-            # Tab 2: Metrics
+            # Tab 2: Metrics (with subtabs)
             rx.tabs.content(
                 rx.vstack(
                     rx.hstack(
@@ -1239,72 +1319,275 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
                         rx.badge("Batch ML", color_scheme="blue", variant="soft", size="1"),
                         spacing="2"
                     ),
-                    transaction_fraud_detection_batch_metrics(),
-                    # YellowBrick Visualizations section
-                    rx.divider(),
-                    rx.heading("YellowBrick Visualizations", size="5"),
-                    rx.text("Select a metric type and visualization to display.", size="2", color="gray"),
-                    # YellowBrick metric type selector
-                    rx.hstack(
-                        rx.vstack(
-                            rx.text("Metric Type", size="1", color="gray"),
-                            rx.select(
-                                TFDState.yellowbrick_metric_types,
-                                value=TFDState.yellowbrick_metric_type,
-                                on_change=TFDState.set_yellowbrick_metric_type,
-                                width="100%"
+                    # Metrics subtabs (YellowBrick categories)
+                    rx.tabs.root(
+                        rx.tabs.list(
+                            rx.tabs.trigger(
+                                rx.hstack(
+                                    rx.icon("layout-dashboard", size=14),
+                                    rx.text("Overview"),
+                                    spacing="2",
+                                    align_items="center"
+                                ),
+                                value="overview"
                             ),
-                            spacing="1",
-                            width="50%"
-                        ),
-                        rx.vstack(
-                            rx.text("Visualization", size="1", color="gray"),
-                            rx.select(
-                                TFDState.yellowbrick_metric_options,
-                                value=TFDState.yellowbrick_metric_name,
-                                on_change=TFDState.set_yellowbrick_metric_name,
-                                width="100%"
+                            rx.tabs.trigger(
+                                rx.hstack(
+                                    rx.icon("scatter-chart", size=14),
+                                    rx.text("Feature Analysis"),
+                                    spacing="2",
+                                    align_items="center"
+                                ),
+                                value="feature_analysis"
                             ),
-                            spacing="1",
-                            width="50%"
+                            rx.tabs.trigger(
+                                rx.hstack(
+                                    rx.icon("target", size=14),
+                                    rx.text("Target"),
+                                    spacing="2",
+                                    align_items="center"
+                                ),
+                                value="target"
+                            ),
+                            rx.tabs.trigger(
+                                rx.hstack(
+                                    rx.icon("check-circle", size=14),
+                                    rx.text("Classification"),
+                                    spacing="2",
+                                    align_items="center"
+                                ),
+                                value="classification"
+                            ),
+                            rx.tabs.trigger(
+                                rx.hstack(
+                                    rx.icon("settings-2", size=14),
+                                    rx.text("Model Selection"),
+                                    spacing="2",
+                                    align_items="center"
+                                ),
+                                value="model_selection"
+                            ),
                         ),
-                        spacing="3",
+                        # Subtab 1: Overview (default sklearn metrics)
+                        rx.tabs.content(
+                            rx.vstack(
+                                transaction_fraud_detection_batch_metrics(),
+                                spacing="4",
+                                width="100%",
+                                padding_top="1em",
+                            ),
+                            value="overview"
+                        ),
+                        # Subtab 2: Feature Analysis (YellowBrick)
+                        rx.tabs.content(
+                            rx.vstack(
+                                rx.text("Select a visualization to display.", size="2", color="gray"),
+                                rx.select(
+                                    TFDState.yellowbrick_metrics_options["Feature Analysis"],
+                                    value=TFDState.yellowbrick_metric_name,
+                                    on_change=lambda v: TFDState.set_yellowbrick_visualization("Feature Analysis", v),
+                                    placeholder="Select visualization...",
+                                    width="100%"
+                                ),
+                                # Loading spinner
+                                rx.cond(
+                                    TFDState.yellowbrick_loading,
+                                    rx.hstack(
+                                        rx.spinner(size="3"),
+                                        rx.text("Loading visualization...", size="2", color="gray"),
+                                        spacing="2",
+                                        align_items="center",
+                                        justify="center",
+                                        width="100%",
+                                        padding="4em"
+                                    ),
+                                    rx.fragment()
+                                ),
+                                # Error display
+                                rx.cond(
+                                    TFDState.yellowbrick_error != "",
+                                    rx.callout(
+                                        TFDState.yellowbrick_error,
+                                        icon="triangle-alert",
+                                        color="red",
+                                        width="100%"
+                                    ),
+                                    rx.fragment()
+                                ),
+                                # Image display
+                                rx.cond(
+                                    TFDState.yellowbrick_image_base64 != "",
+                                    rx.image(
+                                        src=f"data:image/png;base64,{TFDState.yellowbrick_image_base64}",
+                                        width="100%",
+                                        alt="YellowBrick visualization"
+                                    ),
+                                    rx.fragment()
+                                ),
+                                spacing="4",
+                                width="100%",
+                                padding_top="1em",
+                            ),
+                            value="feature_analysis"
+                        ),
+                        # Subtab 3: Target (YellowBrick)
+                        rx.tabs.content(
+                            rx.vstack(
+                                rx.text("Select a visualization to display.", size="2", color="gray"),
+                                rx.select(
+                                    TFDState.yellowbrick_metrics_options["Target"],
+                                    value=TFDState.yellowbrick_metric_name,
+                                    on_change=lambda v: TFDState.set_yellowbrick_visualization("Target", v),
+                                    placeholder="Select visualization...",
+                                    width="100%"
+                                ),
+                                # Loading spinner
+                                rx.cond(
+                                    TFDState.yellowbrick_loading,
+                                    rx.hstack(
+                                        rx.spinner(size="3"),
+                                        rx.text("Loading visualization...", size="2", color="gray"),
+                                        spacing="2",
+                                        align_items="center",
+                                        justify="center",
+                                        width="100%",
+                                        padding="4em"
+                                    ),
+                                    rx.fragment()
+                                ),
+                                # Error display
+                                rx.cond(
+                                    TFDState.yellowbrick_error != "",
+                                    rx.callout(
+                                        TFDState.yellowbrick_error,
+                                        icon="triangle-alert",
+                                        color="red",
+                                        width="100%"
+                                    ),
+                                    rx.fragment()
+                                ),
+                                # Image display
+                                rx.cond(
+                                    TFDState.yellowbrick_image_base64 != "",
+                                    rx.image(
+                                        src=f"data:image/png;base64,{TFDState.yellowbrick_image_base64}",
+                                        width="100%",
+                                        alt="YellowBrick visualization"
+                                    ),
+                                    rx.fragment()
+                                ),
+                                spacing="4",
+                                width="100%",
+                                padding_top="1em",
+                            ),
+                            value="target"
+                        ),
+                        # Subtab 4: Classification (YellowBrick)
+                        rx.tabs.content(
+                            rx.vstack(
+                                rx.text("Select a visualization to display.", size="2", color="gray"),
+                                rx.select(
+                                    TFDState.yellowbrick_metrics_options["Classification"],
+                                    value=TFDState.yellowbrick_metric_name,
+                                    on_change=lambda v: TFDState.set_yellowbrick_visualization("Classification", v),
+                                    placeholder="Select visualization...",
+                                    width="100%"
+                                ),
+                                # Loading spinner
+                                rx.cond(
+                                    TFDState.yellowbrick_loading,
+                                    rx.hstack(
+                                        rx.spinner(size="3"),
+                                        rx.text("Loading visualization...", size="2", color="gray"),
+                                        spacing="2",
+                                        align_items="center",
+                                        justify="center",
+                                        width="100%",
+                                        padding="4em"
+                                    ),
+                                    rx.fragment()
+                                ),
+                                # Error display
+                                rx.cond(
+                                    TFDState.yellowbrick_error != "",
+                                    rx.callout(
+                                        TFDState.yellowbrick_error,
+                                        icon="triangle-alert",
+                                        color="red",
+                                        width="100%"
+                                    ),
+                                    rx.fragment()
+                                ),
+                                # Image display
+                                rx.cond(
+                                    TFDState.yellowbrick_image_base64 != "",
+                                    rx.image(
+                                        src=f"data:image/png;base64,{TFDState.yellowbrick_image_base64}",
+                                        width="100%",
+                                        alt="YellowBrick visualization"
+                                    ),
+                                    rx.fragment()
+                                ),
+                                spacing="4",
+                                width="100%",
+                                padding_top="1em",
+                            ),
+                            value="classification"
+                        ),
+                        # Subtab 5: Model Selection (YellowBrick)
+                        rx.tabs.content(
+                            rx.vstack(
+                                rx.text("Select a visualization to display.", size="2", color="gray"),
+                                rx.select(
+                                    TFDState.yellowbrick_metrics_options["Model Selection"],
+                                    value=TFDState.yellowbrick_metric_name,
+                                    on_change=lambda v: TFDState.set_yellowbrick_visualization("Model Selection", v),
+                                    placeholder="Select visualization...",
+                                    width="100%"
+                                ),
+                                # Loading spinner
+                                rx.cond(
+                                    TFDState.yellowbrick_loading,
+                                    rx.hstack(
+                                        rx.spinner(size="3"),
+                                        rx.text("Loading visualization...", size="2", color="gray"),
+                                        spacing="2",
+                                        align_items="center",
+                                        justify="center",
+                                        width="100%",
+                                        padding="4em"
+                                    ),
+                                    rx.fragment()
+                                ),
+                                # Error display
+                                rx.cond(
+                                    TFDState.yellowbrick_error != "",
+                                    rx.callout(
+                                        TFDState.yellowbrick_error,
+                                        icon="triangle-alert",
+                                        color="red",
+                                        width="100%"
+                                    ),
+                                    rx.fragment()
+                                ),
+                                # Image display
+                                rx.cond(
+                                    TFDState.yellowbrick_image_base64 != "",
+                                    rx.image(
+                                        src=f"data:image/png;base64,{TFDState.yellowbrick_image_base64}",
+                                        width="100%",
+                                        alt="YellowBrick visualization"
+                                    ),
+                                    rx.fragment()
+                                ),
+                                spacing="4",
+                                width="100%",
+                                padding_top="1em",
+                            ),
+                            value="model_selection"
+                        ),
+                        default_value="overview",
                         width="100%"
-                    ),
-                    # Loading spinner
-                    rx.cond(
-                        TFDState.yellowbrick_loading,
-                        rx.hstack(
-                            rx.spinner(size="3"),
-                            rx.text("Loading visualization...", size="2", color="gray"),
-                            spacing="2",
-                            align_items="center",
-                            justify="center",
-                            width="100%",
-                            padding="4em"
-                        ),
-                        rx.fragment()
-                    ),
-                    # Error display
-                    rx.cond(
-                        TFDState.yellowbrick_error != "",
-                        rx.callout(
-                            TFDState.yellowbrick_error,
-                            icon="triangle-alert",
-                            color="red",
-                            width="100%"
-                        ),
-                        rx.fragment()
-                    ),
-                    # Image display
-                    rx.cond(
-                        TFDState.yellowbrick_image_base64 != "",
-                        rx.image(
-                            src=f"data:image/png;base64,{TFDState.yellowbrick_image_base64}",
-                            width="100%",
-                            alt="YellowBrick visualization"
-                        ),
-                        rx.fragment()
                     ),
                     spacing="4",
                     width="100%",

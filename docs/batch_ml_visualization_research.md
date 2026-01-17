@@ -104,6 +104,23 @@ According to Snyk security analysis:
 | **PDPBox** | Partial dependence plots | Feature effect isolation |
 | **sklearn-evaluation** | ML model evaluation with reports | HTML reports, experiment tracking |
 
+### Comprehensive XAI/Interpretability Platforms
+
+| Library | Description | Best For |
+|---------|-------------|----------|
+| **InterpretML** | Microsoft's unified interpretability platform | Glass-box models (EBM), LIME, SHAP, PDP combined |
+| **Alibi Explain** | Seldon's ML inspection library (15 algorithms) | Counterfactuals, Anchors, ALE, SHAP |
+| **DALEX** | DrWhy.AI model explainer with Arena dashboard | Interactive dashboards, fairness analysis |
+| **Shapash** | MAIF's user-friendly explainability webapp | Production deployment, SmartPredictor |
+| **ExplainerDashboard** | Ready-made interactive dashboard builder | Quick dashboard setup, What-If analysis |
+
+### Documentation & Model Cards
+
+| Library | Description | Best For |
+|---------|-------------|----------|
+| **Model Card Toolkit** | TensorFlow/Google model documentation | Automated model card generation |
+| **Evidently** | ML monitoring with model cards | Data drift, model monitoring dashboards |
+
 ### For EDA & Data Visualization
 
 | Library | Description |
@@ -173,6 +190,158 @@ For **fraud detection**, SHAP-IQ is particularly valuable because fraud patterns
 | **PDPBox** | Partial dependence | ✅ Good | Generic | ⚠️ Moderate | PNG | 2D interaction plots |
 | **Plotly** | Interactive viz | Via pandas | Generic | ✅ Active | HTML/Interactive | Brushing, interactivity |
 | **sklearn native** | Core metrics | ✅ Native | Generic | ✅ Active | PNG (matplotlib) | Zero dependencies |
+| **InterpretML** | Unified XAI platform | ✅ Excellent | ✅ TreeExplainer | ✅ Active | Interactive/HTML | EBM glass-box models |
+| **Alibi Explain** | 15 explanation algorithms | ✅ Good | ✅ TreeSHAP | ✅ Active | PNG/Interactive | Counterfactuals, Anchors |
+| **DALEX** | Model explainer + dashboard | ✅ Excellent | ✅ Native | ✅ Active | Plotly/Interactive | Arena dashboard, Fairness |
+| **Shapash** | User-friendly webapp | ✅ Excellent | ✅ Native | ✅ Active | Plotly/Webapp | SmartPredictor deployment |
+| **ExplainerDashboard** | Ready-made dashboard | ✅ Excellent | ✅ Native | ✅ Active | Interactive/HTML | What-If analysis |
+| **Evidently** | ML monitoring | ✅ Excellent | Generic | ✅ Active | Plotly/HTML | Data drift, model cards |
+
+---
+
+## New Libraries Deep Dive (January 2025)
+
+### sklearn Native Display Classes (sklearn 1.0+)
+
+sklearn now provides native visualization without external dependencies:
+
+| Display Class | Purpose | Methods |
+|--------------|---------|---------|
+| `ConfusionMatrixDisplay` | Confusion matrix visualization | `from_estimator()`, `from_predictions()` |
+| `RocCurveDisplay` | ROC curve with AUC | `from_estimator()`, `from_predictions()` |
+| `PrecisionRecallDisplay` | Precision-Recall curve | `from_estimator()`, `from_predictions()` |
+| `DetCurveDisplay` | Detection Error Tradeoff curve | `from_estimator()`, `from_predictions()` |
+| `CalibrationDisplay` | Calibration curve (reliability) | `from_estimator()`, `from_predictions()` |
+| `LearningCurveDisplay` | Learning curves (sklearn 1.2+) | `from_estimator()` |
+| `ValidationCurveDisplay` | Validation curves (sklearn 1.3+) | `from_estimator()` |
+| `PartialDependenceDisplay` | PDP and ICE plots | `from_estimator()` |
+| `DecisionBoundaryDisplay` | Decision boundaries | `from_estimator()` |
+| `PredictionErrorDisplay` | Regression error analysis | `from_estimator()`, `from_predictions()` |
+
+**Advantage**: Works with `from_predictions()` for pre-fitted models - no retraining!
+
+### scikit-plots Functions
+
+One-liner plotting library for sklearn metrics:
+
+| Function | Purpose |
+|----------|---------|
+| `skplt.metrics.plot_confusion_matrix` | Confusion matrix heatmap |
+| `skplt.metrics.plot_roc` | Multi-class ROC curves |
+| `skplt.metrics.plot_precision_recall` | Precision-Recall curves |
+| `skplt.metrics.plot_ks_statistic` | KS statistic plot |
+| `skplt.metrics.plot_cumulative_gain` | Cumulative gain chart |
+| `skplt.metrics.plot_lift_curve` | Lift curve |
+| `skplt.metrics.plot_silhouette` | Silhouette analysis |
+| `skplt.estimators.plot_feature_importances` | Feature importance bar |
+| `skplt.estimators.plot_learning_curve` | Learning curves |
+| `skplt.decomposition.plot_pca_component_variance` | PCA variance explained |
+| `skplt.decomposition.plot_pca_2d_projection` | PCA 2D scatter |
+| `skplt.cluster.plot_elbow_curve` | Elbow method |
+
+### SHAP Plot Types (v0.50+)
+
+| Plot | Purpose | Scope |
+|------|---------|-------|
+| `shap.plots.bar` | Mean absolute SHAP values | Global |
+| `shap.plots.beeswarm` | Distribution colored by feature value | Global |
+| `shap.plots.violin` | Violin plot of SHAP values | Global |
+| `shap.plots.heatmap` | Heatmap of SHAP values | Global |
+| `shap.plots.scatter` | Dependence plot (feature vs SHAP) | Global |
+| `shap.plots.waterfall` | Single prediction breakdown | Local |
+| `shap.plots.force` | Compact prediction visualization | Local |
+| `shap.plots.decision` | Cumulative SHAP decision plot | Local |
+| `shap.plots.text` | Text highlighting for NLP | Local |
+| `shap.plots.image` | Image pixel attribution | Local |
+| `shap.plots.partial_dependence` | Partial dependence | Global |
+| `shap.plots.embedding` | 2D projection of SHAP | Global |
+| `shap.plots.monitoring` | Model monitoring over time | Global |
+| `shap.plots.group_difference` | Compare groups | Global |
+
+### InterpretML (Microsoft)
+
+Unified platform combining multiple XAI methods:
+
+| Component | Description |
+|-----------|-------------|
+| **Explainable Boosting Machine (EBM)** | Glass-box model as accurate as boosting but interpretable |
+| **LIME** | Local surrogate explanations |
+| **SHAP** | Shapley value explanations |
+| **PDP** | Partial dependence plots |
+| **Sensitivity Analysis** | Feature sensitivity |
+| **Dashboard** | Interactive visualization dashboard |
+
+**Best For**: When you need an interpretable model that matches XGBoost performance.
+
+### Alibi Explain (Seldon) - 15 Algorithms
+
+| Category | Algorithms |
+|----------|------------|
+| **Global** | ALE, Partial Dependence, Permutation Importance |
+| **Local Feature Attribution** | Integrated Gradients, Kernel SHAP, TreeSHAP |
+| **Local Necessary Features** | Anchors, Pertinent Positives (CEM) |
+| **Counterfactuals** | CFI, CEM Negatives, Prototype-guided, RL-based |
+| **Similarity** | Similarity Explanations |
+
+**Best For**: Counterfactual explanations ("what would need to change for a different prediction?")
+
+### DALEX (DrWhy.AI)
+
+| Feature | Description |
+|---------|-------------|
+| **Explainer wrapper** | Unified API for any model |
+| **Variable Importance** | Permutation-based importance |
+| **Break Down** | Sequential feature contributions |
+| **SHAP** | Native SHAP integration |
+| **PDP/ALE** | Partial dependence & ALE plots |
+| **Ceteris Paribus** | Individual conditional expectation |
+| **Arena Dashboard** | Interactive multi-model comparison |
+| **Fairness Module** | Bias detection & mitigation |
+
+**Best For**: Model comparison dashboards and fairness analysis.
+
+### Shapash (MAIF)
+
+| Feature | Description |
+|---------|-------------|
+| **Webapp** | Interactive local/global exploration |
+| **SmartExplainer** | Main analysis object |
+| **SmartPredictor** | Lightweight deployment object |
+| **Explicit Labels** | Human-readable feature names |
+| **HTML Report** | Standalone audit document |
+| **Explainability Metrics** | Stability, Consistency, Compacity |
+
+**Best For**: Production deployment with user-friendly explanations.
+
+### ExplainerDashboard
+
+| Tab/Component | Description |
+|---------------|-------------|
+| **SHAP Summary** | Global feature importance |
+| **SHAP Dependence** | Feature vs SHAP scatter |
+| **SHAP Interactions** | Pairwise interactions |
+| **Feature Importance** | Permutation importance |
+| **Partial Dependence** | PDP plots |
+| **Decision Trees** | Individual tree inspection |
+| **What-If Analysis** | Modify inputs, see predictions |
+| **Individual Predictions** | Local explanations |
+| **Classification Stats** | Confusion matrix, ROC, PR |
+
+**Best For**: Quick dashboard setup without custom code.
+
+### Evidently
+
+| Feature | Description |
+|---------|-------------|
+| **Data Drift** | Detect distribution changes |
+| **Model Performance** | Track metrics over time |
+| **Data Quality** | Missing values, duplicates |
+| **Target Drift** | Label distribution changes |
+| **Model Cards** | Documentation generation |
+| **Reports** | Interactive HTML reports |
+| **Test Suites** | Automated quality checks |
+
+**Best For**: Production ML monitoring and documentation.
 
 ---
 
@@ -461,7 +630,7 @@ eli5 = "^0.13"
 - [SHAP GitHub](https://github.com/shap/shap)
 - [scikit-learn Visualizations](https://scikit-learn.org/stable/visualizations.html)
 - [scikit-plots Documentation](https://scikit-plot.readthedocs.io/en/stable/)
-- [scikit-plots GitHub](https://github.com/scikit-plots/scikit-plots)
+- [scikit-plots Metrics Module](https://scikit-plot.readthedocs.io/en/stable/metrics.html)
 - [dtreeviz GitHub](https://github.com/parrt/dtreeviz)
 - [ELI5 Documentation](https://eli5.readthedocs.io/en/latest/overview.html)
 - [sklearn-evaluation GitHub](https://github.com/ploomber/sklearn-evaluation)
@@ -472,18 +641,217 @@ eli5 = "^0.13"
 - [SHAP-IQ Documentation](https://shapiq.readthedocs.io/)
 - [SHAP-IQ Tutorial - MarkTechPost](https://www.marktechpost.com/2025/08/03/tutorial-exploring-shap-iq-visualizations/)
 - [SHAP-IQ Paper (NeurIPS 2023)](https://arxiv.org/abs/2303.01179)
-- [SHAP-IQ NeurIPS Poster](https://neurips.cc/virtual/2023/poster/72134)
+
+### XAI Platform Documentation (New)
+- [InterpretML](https://interpret.ml/)
+- [Alibi Explain](https://docs.seldon.ai/alibi-explain/)
+- [DALEX Python](https://dalex.drwhy.ai/python/)
+- [DALEX Arena Dashboard](https://dalex.drwhy.ai/python-dalex-arena.html)
+- [DALEX Fairness](https://dalex.drwhy.ai/python-dalex-fairness.html)
+- [Shapash Documentation](https://shapash.readthedocs.io/)
+- [Shapash GitHub](https://github.com/MAIF/shapash)
+- [ExplainerDashboard](https://explainerdashboard.readthedocs.io/)
+- [Evidently AI](https://www.evidentlyai.com/)
+- [Model Card Toolkit](https://github.com/tensorflow/model-card-toolkit)
 
 ### Analysis & Comparisons
 - [YellowBrick Health Analysis - Snyk](https://snyk.io/advisor/python/yellowbrick)
 - [sklearn TunedThresholdClassifierCV](https://scikit-learn.org/stable/modules/classification_threshold.html)
 - [SHAP Plot Types - DeepWiki](https://deepwiki.com/shap/shap/6.1-plot-types)
+- [Top Python Libraries for ML Interpretability](https://www.nb-data.com/p/top-python-packages-for-machine-learning)
+- [6 Python Libraries to Interpret ML Models](https://www.analyticsvidhya.com/blog/2020/03/6-python-libraries-interpret-machine-learning-models/)
 
 ### Tutorials & Articles
 - [Introduction to SHAP - Towards Data Science](https://towardsdatascience.com/introduction-to-shap-with-python-d27edc23c454/)
 - [Machine Learning Explainability via ELI5](https://towardsdatascience.com/machine-learning-explainability-introduction-via-eli5-99c767f017e2/)
 - [Beautiful Decision Tree Visualizations - KDnuggets](https://www.kdnuggets.com/2021/03/beautiful-decision-tree-visualizations-dtreeviz.html)
 - [Interpreting Black Box Models with SHAP](https://medium.com/@akashanandani.56/interpreting-black-box-models-with-shap-a-beginners-guide-c50f45b3161d)
+- [ML Model Monitoring Dashboard Tutorial](https://www.evidentlyai.com/blog/ml-model-monitoring-dashboard-tutorial)
+- [Scikit-plot Visualization Tutorial](https://coderzcolumn.com/tutorials/machine-learning/scikit-plot-visualizing-machine-learning-algorithm-results-and-performance)
+
+---
+
+## Recommended Reflex TFD Batch ML Metrics Tab Layout
+
+Based on notebook 007 YellowBrick classes tested and comprehensive library research.
+
+### Phase 1: Core Metrics Cards (MVP)
+
+Simple value cards with color-coded status indicators:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  BATCH ML METRICS                                              [Refresh ↻] │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐          │
+│  │ Accuracy │ │Precision │ │  Recall  │ │    F1    │ │ ROC-AUC  │          │
+│  │  0.9888  │ │  0.4687  │ │  0.9337  │ │  0.6241  │ │  0.9932  │          │
+│  │  ✓ Good  │ │  ⚠ Low   │ │ ✓ High   │ │⚠ Moderate│ │ ✓ Great  │          │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘          │
+│                                                                             │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐                       │
+│  │  G-Mean  │ │   MCC    │ │Train Time│ │ Samples  │                       │
+│  │  0.9611  │ │  0.6820  │ │  45.2s   │ │  1.02M   │                       │
+│  │ ✓ Great  │ │  ✓ Good  │ │          │ │          │                       │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘                       │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Metrics from sklearn.metrics:**
+- `accuracy_score` - Overall correctness
+- `precision_score` - When model predicts fraud, how often is it correct?
+- `recall_score` - Of all actual frauds, how many did we catch?
+- `f1_score` - Harmonic mean of precision/recall
+- `roc_auc_score` - Discrimination ability
+- `geometric_mean_score` (imblearn) - Balance between classes
+- `matthews_corrcoef` - Best single metric for imbalanced data
+
+### Phase 2: Classification Visualizations (sklearn native)
+
+Sub-tabs for classification analysis using sklearn Display classes:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  [Confusion Matrix] [ROC Curve] [Precision-Recall] [Classification Report] │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│     ┌─────────────────────────────────────────────────────────────┐        │
+│     │                                                             │        │
+│     │                                                             │        │
+│     │                  sklearn Display Image                      │        │
+│     │              (ConfusionMatrixDisplay.from_predictions)      │        │
+│     │                                                             │        │
+│     │                                                             │        │
+│     └─────────────────────────────────────────────────────────────┘        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Implementation:**
+- `ConfusionMatrixDisplay.from_predictions(y_test, y_pred)`
+- `RocCurveDisplay.from_predictions(y_test, y_pred_proba)`
+- `PrecisionRecallDisplay.from_predictions(y_test, y_pred_proba)`
+- Classification report as Seaborn heatmap
+
+### Phase 3: Feature Importance (SHAP)
+
+SHAP plots for explainability:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  FEATURE IMPORTANCE (SHAP)                                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  [Bar Plot] [Beeswarm] [Waterfall (sample)] [Dependence]                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│     ┌─────────────────────────────────────────────────────────────┐        │
+│     │                                                             │        │
+│     │                  SHAP Bar Plot                              │        │
+│     │              (shap.plots.bar)                               │        │
+│     │                                                             │        │
+│     │  amount            ████████████████████████████████  95.3   │        │
+│     │  billing_match     ███                                1.9   │        │
+│     │  cvv_provided      ██                                 1.3   │        │
+│     │  account_age       █                                  0.9   │        │
+│     │                                                             │        │
+│     └─────────────────────────────────────────────────────────────┘        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Phase 4: Model Selection (from notebook 007)
+
+Based on YellowBrick classes tested:
+
+| YellowBrick Class | Alternative | Implementation |
+|-------------------|-------------|----------------|
+| `ValidationCurve` | `sklearn.model_selection.ValidationCurveDisplay` | Native sklearn 1.3+ |
+| `LearningCurve` | `sklearn.model_selection.LearningCurveDisplay` | Native sklearn 1.2+ |
+| `CVScores` | Custom Plotly bar chart | `cross_val_score()` + `rx.plotly()` |
+| `FeatureImportances` | SHAP bar plot | `shap.plots.bar()` |
+| `DroppingCurve` | Custom matplotlib | Manual RFECV + plot |
+
+### Phase 5: Target Analysis
+
+| YellowBrick Class | Alternative | Implementation |
+|-------------------|-------------|----------------|
+| `ClassBalance` | Plotly bar chart | `rx.plotly()` with `go.Bar` |
+| `BalancedBinningReference` | Plotly histogram | `px.histogram()` with percentile lines |
+
+### Complete Tab Structure
+
+```
+Batch ML Tab
+├── Prediction (left 30%)
+│   ├── Training Box (Train button, spinner, model info)
+│   └── Form Card (input fields)
+│
+└── Metrics (right 70%)
+    ├── Core Metrics (cards row)
+    │   └── Accuracy, Precision, Recall, F1, ROC-AUC, G-Mean, MCC
+    │
+    ├── Classification (sub-tabs)
+    │   ├── Confusion Matrix (sklearn)
+    │   ├── ROC Curve (sklearn)
+    │   ├── Precision-Recall (sklearn)
+    │   └── Classification Report (seaborn heatmap)
+    │
+    ├── Feature Importance (sub-tabs)
+    │   ├── SHAP Bar (global)
+    │   ├── SHAP Beeswarm (global)
+    │   ├── SHAP Waterfall (local - single prediction)
+    │   └── Model Feature Importance (native)
+    │
+    └── Model Analysis (sub-tabs) [Future]
+        ├── Learning Curve (sklearn)
+        ├── Validation Curve (sklearn)
+        ├── Cross-Validation Scores (plotly)
+        └── Class Balance (plotly)
+```
+
+### Implementation Priority
+
+| Priority | Component | Library | Effort |
+|----------|-----------|---------|--------|
+| **P0** | Metrics cards | Pure Reflex | Low |
+| **P1** | Confusion Matrix | sklearn `ConfusionMatrixDisplay` | Low |
+| **P1** | ROC Curve | sklearn `RocCurveDisplay` | Low |
+| **P1** | Precision-Recall | sklearn `PrecisionRecallDisplay` | Low |
+| **P2** | SHAP Bar Plot | shap | Medium |
+| **P2** | Classification Report | seaborn heatmap | Medium |
+| **P3** | SHAP Beeswarm | shap | Medium |
+| **P3** | Learning Curve | sklearn `LearningCurveDisplay` | Medium |
+| **P4** | SHAP Waterfall | shap | Medium |
+| **P4** | Class Balance | plotly | Low |
+| **P5** | SHAP Interactions | SHAP-IQ | High |
+| **P5** | Counterfactuals | Alibi | High |
+
+### Reflex Integration Notes
+
+**For matplotlib-based plots (sklearn, SHAP, seaborn):**
+```python
+import io
+import base64
+
+def fig_to_base64(fig):
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', bbox_inches='tight')
+    buf.seek(0)
+    return base64.b64encode(buf.read()).decode('utf-8')
+
+# In Reflex component
+rx.image(src=f"data:image/png;base64,{base64_str}")
+```
+
+**For Plotly charts:**
+```python
+import plotly.graph_objects as go
+
+# Native Reflex support
+rx.plotly(data=fig)
+```
 
 ---
 

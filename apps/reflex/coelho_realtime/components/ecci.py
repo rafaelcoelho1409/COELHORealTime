@@ -718,7 +718,7 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
                 ),
                 value="prediction"
             ),
-            # Tab 2: Clustering Metrics
+            # Tab 2: Clustering Metrics (with subtabs)
             rx.tabs.content(
                 rx.vstack(
                     rx.hstack(
@@ -734,7 +734,31 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
                         align_items="center",
                         spacing="2"
                     ),
-                    e_commerce_customer_interactions_metrics(),
+                    # Metrics subtabs
+                    rx.tabs.root(
+                        rx.tabs.list(
+                            rx.tabs.trigger(
+                                rx.hstack(
+                                    rx.icon("layout-dashboard", size=14),
+                                    rx.text("Overview"),
+                                    spacing="2",
+                                    align_items="center"
+                                ),
+                                value="overview"
+                            ),
+                        ),
+                        # Subtab 1: Overview (default sklearn metrics)
+                        rx.tabs.content(
+                            rx.vstack(
+                                e_commerce_customer_interactions_metrics(),
+                                spacing="4",
+                                width="100%",
+                            ),
+                            value="overview"
+                        ),
+                        default_value="overview",
+                        width="100%"
+                    ),
                     spacing="4",
                     width="100%",
                     padding_top="1em"
@@ -1344,7 +1368,7 @@ def e_commerce_customer_interactions_batch_form(model_key: str = None, project_n
                 ),
                 value="prediction"
             ),
-            # Tab 2: Clustering Metrics
+            # Tab 2: Clustering Metrics (with subtabs)
             rx.tabs.content(
                 rx.vstack(
                     rx.hstack(
@@ -1360,24 +1384,48 @@ def e_commerce_customer_interactions_batch_form(model_key: str = None, project_n
                         align_items="center",
                         spacing="2"
                     ),
-                    # Model info badge
-                    rx.hstack(
-                        rx.badge(
-                            rx.hstack(
-                                rx.icon("brain", size=12),
-                                rx.text("KMeans Clustering (Scikit-Learn)", size="1"),
-                                spacing="1",
-                                align_items="center"
+                    # Metrics subtabs
+                    rx.tabs.root(
+                        rx.tabs.list(
+                            rx.tabs.trigger(
+                                rx.hstack(
+                                    rx.icon("layout-dashboard", size=14),
+                                    rx.text("Overview"),
+                                    spacing="2",
+                                    align_items="center"
+                                ),
+                                value="overview"
                             ),
-                            color_scheme="purple",
-                            variant="soft",
-                            size="1"
                         ),
-                        rx.badge("Batch ML", color_scheme="blue", variant="soft", size="1"),
-                        spacing="2"
+                        # Subtab 1: Overview (default sklearn metrics)
+                        rx.tabs.content(
+                            rx.vstack(
+                                # Model info badge
+                                rx.hstack(
+                                    rx.badge(
+                                        rx.hstack(
+                                            rx.icon("brain", size=12),
+                                            rx.text("KMeans Clustering (Scikit-Learn)", size="1"),
+                                            spacing="1",
+                                            align_items="center"
+                                        ),
+                                        color_scheme="purple",
+                                        variant="soft",
+                                        size="1"
+                                    ),
+                                    rx.badge("Batch ML", color_scheme="blue", variant="soft", size="1"),
+                                    spacing="2"
+                                ),
+                                # Batch metrics display (reuse the same metrics component for now)
+                                e_commerce_customer_interactions_metrics(),
+                                spacing="4",
+                                width="100%",
+                            ),
+                            value="overview"
+                        ),
+                        default_value="overview",
+                        width="100%"
                     ),
-                    # Batch metrics display (reuse the same metrics component for now)
-                    e_commerce_customer_interactions_metrics(),
                     spacing="4",
                     width="100%",
                     padding_top="1em"

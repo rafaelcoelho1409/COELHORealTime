@@ -39,14 +39,14 @@ class TFDState(SharedState):
     }
     # YellowBrick visualization state
     yellowbrick_metric_type: str = "Classification"
-    yellowbrick_metric_name: str = ""
+    yellowbrick_metric_name: str = "Select visualization..."
     yellowbrick_image_base64: str = ""
     yellowbrick_loading: bool = False
     yellowbrick_error: str = ""
     # Detailed metrics options for YellowBrick
-    yellowbrick_metrics_options: dict = {
+    yellowbrick_metrics_options: dict[str, list[str]] = {
         "Classification": [
-            "",
+            "Select visualization...",
             "ClassificationReport",
             "ConfusionMatrix",
             "ROCAUC",
@@ -54,15 +54,15 @@ class TFDState(SharedState):
             "ClassPredictionError"
         ],
         "Feature Analysis": [
-            "",
+            "Select visualization...",
         ],
         "Target": [
-            "",
+            "Select visualization...",
             "BalancedBinningReference",
             "ClassBalance"
         ],
         "Model Selection": [
-            "",
+            "Select visualization...",
             "ValidationCurve",
             "LearningCurve",
             "CVScores",
@@ -104,6 +104,15 @@ class TFDState(SharedState):
     _tfd_float_fields = {"amount", "lat", "lon"}
     _tfd_int_fields = {"account_age_days"}
     _tfd_bool_fields = {"cvv_provided", "billing_address_match"}
+
+    @staticmethod
+    def _safe_bool(value) -> bool:
+        """Safely convert value to bool, handling string 'false'/'true'."""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.lower() in ("true", "1", "yes", "on")
+        return bool(value)
 
     # ==========================================================================
     # TFD INCREMENTAL ML COMPUTED VARIABLES
@@ -506,7 +515,7 @@ class TFDState(SharedState):
     @rx.var
     def yellowbrick_metric_options(self) -> list[str]:
         """Get available YellowBrick metric names for current metric type."""
-        return self.yellowbrick_metrics_options.get(self.yellowbrick_metric_type, [""])
+        return self.yellowbrick_metrics_options.get(self.yellowbrick_metric_type, ["Select visualization..."])
 
     @rx.var
     def yellowbrick_metric_types(self) -> list[str]:
@@ -609,20 +618,32 @@ class TFDState(SharedState):
 
     @rx.var
     def tfd_batch_metrics(self) -> dict[str, str]:
-        """Get all TFD batch ML metrics as formatted percentage strings."""
-        metrics = self.batch_mlflow_metrics.get("Transaction Fraud Detection", {})
-        if not isinstance(metrics, dict):
+        """Get all TFD batch ML metrics with appropriate formatting.
+
+        - Percentage format (0-100%): classification metrics in [0, 1] range
+        - Decimal format: loss metrics and other unbounded values
+        """
+        raw_metrics = self.batch_mlflow_metrics.get("Transaction Fraud Detection", {})
+        if not isinstance(raw_metrics, dict):
             return {}
-        # Return all metrics dynamically
+        # Metrics that should NOT be formatted as percentages (loss/calibration metrics)
+        non_percentage_metrics = {
+            "log_loss", "brier_score_loss", "d2_log_loss_score", "d2_brier_score",
+            "preprocessing_time_seconds"
+        }
         result = {}
-        for key, value in metrics.items():
+        for key, value in raw_metrics.items():
             if key.startswith("metrics."):
                 metric_name = key.replace("metrics.", "")
-                # Format as percentage for classification metrics
                 if isinstance(value, (int, float)):
-                    result[metric_name] = f"{value * 100:.2f}%"
+                    if metric_name in non_percentage_metrics:
+                        # Format as decimal for loss/calibration metrics
+                        result[metric_name] = f"{value:.4f}"
+                    else:
+                        # Format as percentage for classification metrics
+                        result[metric_name] = f"{value * 100:.2f}%"
                 else:
-                    result[metric_name] = str(value)
+                    result[metric_name] = str(value) if value is not None else "N/A"
         return result
 
     @rx.var
@@ -642,7 +663,7 @@ class TFDState(SharedState):
             elif field in self._tfd_int_fields:
                 value = int(value) if value else 0
             elif field in self._tfd_bool_fields:
-                value = bool(value)
+                value = self._safe_bool(value)
             # str fields need no conversion
         except (ValueError, TypeError):
             return  # Ignore invalid conversions
@@ -681,8 +702,8 @@ class TFDState(SharedState):
             },
             "user_agent": current_form.get("user_agent", ""),
             "account_age_days": int(current_form.get("account_age_days", 0)),
-            "cvv_provided": bool(current_form.get("cvv_provided", False)),
-            "billing_address_match": bool(current_form.get("billing_address_match", False))
+            "cvv_provided": self._safe_bool(current_form.get("cvv_provided", False)),
+            "billing_address_match": self._safe_bool(current_form.get("billing_address_match", False))
         }
         # Make prediction
         try:
@@ -771,7 +792,7 @@ class TFDState(SharedState):
     def set_yellowbrick_metric_type(self, metric_type: str):
         """Set YellowBrick metric type and reset metric name."""
         self.yellowbrick_metric_type = metric_type
-        self.yellowbrick_metric_name = ""
+        self.yellowbrick_metric_name = "Select visualization..."
         self.yellowbrick_image_base64 = ""
         self.yellowbrick_error = ""
 
@@ -779,7 +800,20 @@ class TFDState(SharedState):
     def set_yellowbrick_metric_name(self, metric_name: str):
         """Set YellowBrick metric name."""
         self.yellowbrick_metric_name = metric_name
-        if metric_name:
+        if metric_name and metric_name != "Select visualization...":
+            return TFDState.fetch_yellowbrick_metric("Transaction Fraud Detection")
+
+    @rx.event
+    def set_yellowbrick_visualization(self, category: str, metric_name: str):
+        """Unified handler for all YellowBrick visualization categories.
+
+        Args:
+            category: The YellowBrick category (e.g., "Feature Analysis", "Target", etc.)
+            metric_name: The visualization name to display
+        """
+        self.yellowbrick_metric_type = category
+        self.yellowbrick_metric_name = metric_name
+        if metric_name and metric_name != "Select visualization...":
             return TFDState.fetch_yellowbrick_metric("Transaction Fraud Detection")
 
     @rx.event(background=True)
@@ -788,7 +822,7 @@ class TFDState(SharedState):
         metric_type = self.yellowbrick_metric_type
         metric_name = self.yellowbrick_metric_name
 
-        if not metric_name:
+        if not metric_name or metric_name == "Select visualization...":
             async with self:
                 self.yellowbrick_image_base64 = ""
                 self.yellowbrick_error = ""
@@ -828,7 +862,7 @@ class TFDState(SharedState):
                 url=f"{SKLEARN_BASE_URL}/model_available",
                 json={
                     "project_name": project_name,
-                    "model_name": "XGBoost"
+                    "model_name": "CatBoostClassifier"
                 },
                 timeout=30.0
             )
@@ -852,7 +886,7 @@ class TFDState(SharedState):
         # Prepare request payload from current form state
         payload = {
             "project_name": project_name,
-            "model_name": "XGBoost",
+            "model_name": "CatBoostClassifier",
             "transaction_id": current_form.get("transaction_id", ""),
             "user_id": current_form.get("user_id", ""),
             "timestamp": timestamp,
@@ -873,8 +907,8 @@ class TFDState(SharedState):
             },
             "user_agent": current_form.get("user_agent", ""),
             "account_age_days": int(current_form.get("account_age_days", 0)),
-            "cvv_provided": bool(current_form.get("cvv_provided", False)),
-            "billing_address_match": bool(current_form.get("billing_address_match", False))
+            "cvv_provided": self._safe_bool(current_form.get("cvv_provided", False)),
+            "billing_address_match": self._safe_bool(current_form.get("billing_address_match", False))
         }
         # Make prediction
         try:
@@ -917,7 +951,7 @@ class TFDState(SharedState):
                 url=f"{SKLEARN_BASE_URL}/mlflow_metrics",
                 json={
                     "project_name": project_name,
-                    "model_name": "XGBoost"
+                    "model_name": "CatBoostClassifier"
                 },
                 timeout=60.0
             )

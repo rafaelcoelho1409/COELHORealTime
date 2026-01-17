@@ -107,6 +107,38 @@
       "range": "0 to infinity",
       "optimal": "Lower is better"
     },
+    "average_precision": {
+      "name": "Average Precision (PR-AUC)",
+      "formula": "$$\\text{AP} = \\sum_{n} (R_n - R_{n-1}) P_n = \\int_0^1 P(R) \\, dR$$",
+      "explanation": "Area under the Precision-Recall curve. Summarizes the trade-off between precision and recall across all thresholds.",
+      "context": "**Better than ROC-AUC for imbalanced data** like fraud detection. Focuses on the positive class (fraud) performance. Values: **0.5 = random** for balanced data, but **much lower baseline** for imbalanced data. Target: **> 0.5** is good for rare fraud.",
+      "range": "0 to 1",
+      "optimal": "Higher is better"
+    },
+    "brier": {
+      "name": "Brier Score",
+      "formula": "$$\\text{Brier} = \\frac{1}{N}\\sum_{i=1}^{N}(p_i - y_i)^2$$",
+      "explanation": "Mean squared error between predicted probabilities and actual outcomes. Measures both calibration and discrimination.",
+      "context": "Evaluates **probability accuracy** - how close predicted fraud probabilities are to 0/1 outcomes. **Lower is better**. Perfect = 0, worst = 1. For fraud detection, helps assess if **probability scores are reliable** for risk-based decisions.",
+      "range": "0 to 1",
+      "optimal": "Lower is better"
+    },
+    "d2_logloss": {
+      "name": "D² Log Loss Score",
+      "formula": "$$D^2 = 1 - \\frac{\\text{LogLoss}_{\\text{model}}}{\\text{LogLoss}_{\\text{null}}}$$",
+      "explanation": "Fraction of log loss explained by the model compared to a null model (predicting class frequencies). Similar to R² but for log loss.",
+      "context": "Shows **how much better** the model's probabilities are vs always predicting the fraud rate. **1.0 = perfect**, **0 = no better than null**, **negative = worse than null**. Useful for comparing models on the same dataset.",
+      "range": "-infinity to 1",
+      "optimal": "Higher is better (closer to 1)"
+    },
+    "d2_brier": {
+      "name": "D² Brier Score",
+      "formula": "$$D^2 = 1 - \\frac{\\text{Brier}_{\\text{model}}}{\\text{Brier}_{\\text{null}}}$$",
+      "explanation": "Fraction of Brier score explained by the model compared to a null model. Similar to R² but for Brier score.",
+      "context": "Measures **improvement over baseline** probability predictions. **1.0 = perfect**, **0 = no better than predicting fraud rate**, **negative = worse**. More interpretable than raw Brier score for model comparison.",
+      "range": "-infinity to 1",
+      "optimal": "Higher is better (closer to 1)"
+    },
     "confusion_matrix": {
       "name": "Confusion Matrix",
       "formula": "$$\\begin{bmatrix} TN & FP \\\\ FN & TP \\end{bmatrix} = \\begin{bmatrix} \\text{Correct Legit} & \\text{False Alarm} \\\\ \\text{Missed Fraud} & \\text{Caught Fraud} \\end{bmatrix}$$",

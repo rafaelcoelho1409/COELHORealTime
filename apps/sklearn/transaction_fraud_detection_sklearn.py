@@ -5,19 +5,13 @@ Trains a CatBoostClassifier model for fraud detection using batch learning.
 Reads data from Delta Lake on MinIO via DuckDB, trains the model,
 logs to MLflow, and saves artifacts.
 
-Two preprocessing approaches available:
-- DuckDB SQL (default): All transformations in SQL, no StandardScaler (faster, less memory)
-- Pandas/Sklearn: Traditional approach with pandas transforms and StandardScaler
+Uses DuckDB SQL for all preprocessing (JSON extraction, timestamp parsing).
+No StandardScaler needed - CatBoost handles raw features efficiently.
 
 Usage:
-    # DuckDB SQL approach (recommended)
     python transaction_fraud_detection_sklearn.py
-
-    # With sampling
     python transaction_fraud_detection_sklearn.py --sample-frac 0.3
-
-    # Traditional pandas approach (for comparison)
-    python transaction_fraud_detection_sklearn.py --use-pandas
+    python transaction_fraud_detection_sklearn.py --max-rows 100000
 
 Environment variables:
     MLFLOW_HOST: MLflow server hostname (required)
@@ -30,17 +24,9 @@ import tempfile
 import click
 import mlflow
 import mlflow.catboost
-from sklearn.metrics import (
-    accuracy_score,
-    precision_score,
-    recall_score,
-    f1_score,
-    roc_auc_score,
-)
+from sklearn import metrics
 from imblearn.metrics import geometric_mean_score
 from functions import (
-    load_or_create_data,
-    process_batch_data,
     process_batch_data_duckdb,
     create_batch_model,
     TFD_CAT_FEATURE_INDICES,
@@ -66,22 +52,16 @@ ENCODER_ARTIFACT_NAME = "sklearn_encoders.pkl"
     default=None,
     help="Maximum number of rows to load from Delta Lake.",
 )
-@click.option(
-    "--use-pandas",
-    is_flag=True,
-    default=False,
-    help="Use traditional pandas/sklearn preprocessing instead of DuckDB SQL.",
-)
-def main(sample_frac: float | None, max_rows: int | None, use_pandas: bool):
+def main(sample_frac: float | None, max_rows: int | None):
     """Batch ML Training for Transaction Fraud Detection.
 
     Trains CatBoostClassifier on Delta Lake data and logs to MLflow.
+    Uses DuckDB SQL for all preprocessing (no StandardScaler needed).
     """
     start_time = time.time()
-    preprocessing_method = "pandas/sklearn" if use_pandas else "DuckDB SQL"
     print(f"Starting batch ML training for {PROJECT_NAME}")
     print(f"Model: {MODEL_NAME}")
-    print(f"Preprocessing: {preprocessing_method}")
+    print(f"Preprocessing: DuckDB SQL")
     print(f"MLflow host: {MLFLOW_HOST}")
     if sample_frac:
         print(f"Data sampling: {sample_frac * 100}%")
@@ -93,98 +73,183 @@ def main(sample_frac: float | None, max_rows: int | None, use_pandas: bool):
         mlflow.set_tracking_uri(f"http://{MLFLOW_HOST}:5000")
         mlflow.set_experiment(PROJECT_NAME)
         print(f"MLflow experiment '{PROJECT_NAME}' set successfully")
-
-        # Load and process data
+        # Load and process data using DuckDB SQL
         load_start = time.time()
-
-        if use_pandas:
-            # Traditional pandas/sklearn approach
-            print("\n=== Using Pandas/Sklearn Preprocessing ===")
-            print("Loading data...")
-            data_df = load_or_create_data(
-                PROJECT_NAME,
-                sample_frac=sample_frac,
-                max_rows=max_rows,
-            )
-            if data_df.empty:
-                print("ERROR: No data available for training.", file=sys.stderr)
-                sys.exit(1)
-            print(f"Loaded {len(data_df)} samples")
-            print("Processing data (JSON extract, timestamp extract, StandardScaler)...")
-            X_train, X_test, y_train, y_test, preprocessor_dict = process_batch_data(
-                data_df, PROJECT_NAME
-            )
-            cat_feature_indices = preprocessor_dict.get("cat_feature_indices", [])
-        else:
-            # DuckDB SQL approach (recommended)
-            print("\n=== Using DuckDB SQL Preprocessing ===")
-            print("Loading and preprocessing in single SQL query...")
-            X_train, X_test, y_train, y_test, preprocessor_dict = process_batch_data_duckdb(
-                PROJECT_NAME,
-                sample_frac=sample_frac,
-                max_rows=max_rows,
-            )
-            # Use predefined indices (no StandardScaler needed for CatBoost)
-            cat_feature_indices = TFD_CAT_FEATURE_INDICES
-
+        print("\n=== Loading and Preprocessing Data ===")
+        print("All transformations done in single DuckDB SQL query...")
+        X_train, X_test, y_train, y_test, preprocessor_dict = process_batch_data_duckdb(
+            PROJECT_NAME,
+            sample_frac=sample_frac,
+            max_rows=max_rows,
+        )
+        cat_feature_indices = TFD_CAT_FEATURE_INDICES
         load_time = time.time() - load_start
         print(f"\nData loading/preprocessing completed in {load_time:.2f} seconds")
         print(f"Training set: {len(X_train)} samples")
         print(f"Test set: {len(X_test)} samples")
-
         # Create model
         print("\nCreating model...")
-        model = create_batch_model(PROJECT_NAME, y_train=y_train)
+        model = create_batch_model(PROJECT_NAME, y_train = y_train)
         print(f"Categorical feature indices: {cat_feature_indices}")
         # Train model with early stopping and native categorical handling
         print("Training model...")
         model.fit(
             X_train, y_train,
-            eval_set=(X_test, y_test),
-            cat_features=cat_feature_indices,  # CatBoost handles categoricals natively
-            early_stopping_rounds=50,
-            use_best_model=True,
-            verbose=True,  # Show all iterations
+            eval_set = (X_test, y_test),
+            cat_features = cat_feature_indices,  # CatBoost handles categoricals natively
+            early_stopping_rounds = 50,
+            use_best_model = True,
+            verbose = True,  # Show all iterations
         )
         print("Model training complete.")
         # Evaluate model
-        print("Evaluating model...")
+        print("\nEvaluating model...")
         y_pred = model.predict(X_test)
         y_pred_proba = model.predict_proba(X_test)[:, 1]
-        # Calculate metrics
-        metrics = {
-            "Accuracy": float(accuracy_score(y_test, y_pred)),
-            "Precision": float(precision_score(y_test, y_pred, zero_division=0)),
-            "Recall": float(recall_score(y_test, y_pred, zero_division=0)),
-            "F1": float(f1_score(y_test, y_pred, zero_division=0)),
-            "ROCAUC": float(roc_auc_score(y_test, y_pred_proba)),
-            "GeometricMean": float(geometric_mean_score(y_test, y_pred)),
+
+        # =============================================================================
+        # METRICS - SCIKIT-LEARN
+        # =============================================================================
+        # -----------------------------------------------------------------------------
+        # PRIMARY METRICS - Class-based metrics for fraud detection
+        # These use y_pred (predicted labels), not probabilities
+        # -----------------------------------------------------------------------------
+        primary_metric_functions = {
+            "recall_score": metrics.recall_score,
+            "precision_score": metrics.precision_score,
+            "f1_score": metrics.f1_score,
+            "fbeta_score": metrics.fbeta_score,
         }
-        print("Metrics:")
-        for name, value in metrics.items():
+        primary_metric_args = {
+            "recall_score": {
+                "pos_label": 1,
+                "average": "binary",
+                "zero_division": 0.0,
+            },
+            "precision_score": {
+                "pos_label": 1,
+                "average": "binary",
+                "zero_division": 0.0,
+            },
+            "f1_score": {
+                "pos_label": 1,
+                "average": "binary",
+                "zero_division": 0.0,
+            },
+            "fbeta_score": {
+                "beta": 2.0,
+                "pos_label": 1,
+                "average": "binary",
+                "zero_division": 0.0,
+            },
+        }
+        # -----------------------------------------------------------------------------
+        # SECONDARY METRICS - Good for monitoring and additional insights
+        # These provide complementary information but shouldn't drive model selection
+        # -----------------------------------------------------------------------------
+        secondary_metric_functions = {
+            "accuracy_score": metrics.accuracy_score,
+            "balanced_accuracy_score": metrics.balanced_accuracy_score,
+            "matthews_corrcoef": metrics.matthews_corrcoef,
+            "cohen_kappa_score": metrics.cohen_kappa_score,
+            "jaccard_score": metrics.jaccard_score,
+        }
+        secondary_metric_args = {
+            "accuracy_score": {
+                "normalize": True,
+            },
+            "balanced_accuracy_score": {
+                "adjusted": False,
+            },
+            "matthews_corrcoef": {},
+            "cohen_kappa_score": {
+                "weights": None,
+            },
+            "jaccard_score": {
+                "pos_label": 1,
+                "average": "binary",
+                "zero_division": 0.0,
+            },
+        }
+        # -----------------------------------------------------------------------------
+        # PROBABILISTIC METRICS - Use y_pred_proba (probability scores)
+        # These measure ranking ability and probability calibration
+        # -----------------------------------------------------------------------------
+        probabilistic_metric_functions = {
+            "roc_auc_score": metrics.roc_auc_score,
+            "average_precision_score": metrics.average_precision_score,
+            "log_loss": metrics.log_loss,
+            "brier_score_loss": metrics.brier_score_loss,
+            "d2_log_loss_score": metrics.d2_log_loss_score,
+            "d2_brier_score": metrics.d2_brier_score,
+        }
+        probabilistic_metric_args = {
+            "roc_auc_score": {},
+            "average_precision_score": {
+                "pos_label": 1,
+            },
+            "log_loss": {
+                "normalize": True,
+            },
+            "brier_score_loss": {
+                "pos_label": 1,
+            },
+            "d2_log_loss_score": {},
+            "d2_brier_score": {
+                "pos_label": 1,
+            },
+        }
+        # -----------------------------------------------------------------------------
+        # ANALYSIS/REPORTING METRICS - Handled by YellowBrick visualizers on-demand
+        # Available via /yellowbrick_metric endpoint:
+        #   - ConfusionMatrix, ClassificationReport, ROCAUC, PrecisionRecallCurve
+        #   - DiscriminationThreshold (threshold tuning)
+        # No need to store as artifacts - generated dynamically when requested
+        # -----------------------------------------------------------------------------
+        # COMPUTE ALL METRICS
+        metrics_to_log = {}
+        for name, func in primary_metric_functions.items():
+            metrics_to_log[name] = float(func(y_test, y_pred, **primary_metric_args[name]))
+        for name, func in secondary_metric_functions.items():
+            metrics_to_log[name] = float(func(y_test, y_pred, **secondary_metric_args[name]))
+        for name, func in probabilistic_metric_functions.items():
+            metrics_to_log[name] = float(func(y_test, y_pred_proba, **probabilistic_metric_args[name]))
+        # Add GeometricMean from imblearn (not in sklearn.metrics)
+        metrics_to_log["geometric_mean_score"] = float(geometric_mean_score(y_test, y_pred))
+        print("\nMetrics:")
+        for name, value in metrics_to_log.items():
             print(f"  {name}: {value:.4f}")
         # Log to MLflow
         print("\nLogging to MLflow...")
         with mlflow.start_run(run_name=MODEL_NAME):
             # Log tags
             mlflow.set_tag("training_mode", "batch")
-            mlflow.set_tag("preprocessing", preprocessing_method)
-            # Log parameters
-            mlflow.log_param("model_type", MODEL_NAME)
-            mlflow.log_param("preprocessing_method", preprocessing_method)
-            mlflow.log_param("iterations", model.get_param("iterations"))
-            mlflow.log_param("learning_rate", model.get_param("learning_rate"))
-            mlflow.log_param("depth", model.get_param("depth"))
+            mlflow.set_tag("preprocessing", "DuckDB SQL")
+            # Log data parameters
             mlflow.log_param("train_samples", len(X_train))
             mlflow.log_param("test_samples", len(X_test))
+            mlflow.log_param("preprocessing_method", "DuckDB SQL")
             if sample_frac:
                 mlflow.log_param("sample_frac", sample_frac)
             if max_rows:
                 mlflow.log_param("max_rows", max_rows)
+            # Log all CatBoost model parameters
+            all_params = model.get_all_params()
+            print(f"Logging {len(all_params)} CatBoost parameters...")
+            for param_name, param_value in all_params.items():
+                # Skip complex objects that MLflow can't serialize
+                if isinstance(param_value, (str, int, float, bool)):
+                    mlflow.log_param(param_name, param_value)
+                elif isinstance(param_value, list) and len(param_value) <= 10:
+                    # Log short lists as string
+                    mlflow.log_param(param_name, str(param_value))
+                elif isinstance(param_value, dict) and len(param_value) <= 5:
+                    # Log small dicts as string
+                    mlflow.log_param(param_name, str(param_value))
             # Log timing metrics
             mlflow.log_metric("preprocessing_time_seconds", load_time)
             # Log metrics
-            for metric_name, metric_value in metrics.items():
+            for metric_name, metric_value in metrics_to_log.items():
                 mlflow.log_metric(metric_name, metric_value)
             # Log model and encoders as artifacts
             with tempfile.TemporaryDirectory() as tmpdir:

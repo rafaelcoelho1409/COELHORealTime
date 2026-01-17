@@ -575,7 +575,7 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
                 ),
                 value="prediction"
             ),
-            # Tab 2: Metrics
+            # Tab 2: Metrics (with subtabs)
             rx.tabs.content(
                 rx.vstack(
                     rx.hstack(
@@ -591,7 +591,31 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
                         align_items="center",
                         spacing="2"
                     ),
-                    estimated_time_of_arrival_metrics(),
+                    # Metrics subtabs
+                    rx.tabs.root(
+                        rx.tabs.list(
+                            rx.tabs.trigger(
+                                rx.hstack(
+                                    rx.icon("layout-dashboard", size=14),
+                                    rx.text("Overview"),
+                                    spacing="2",
+                                    align_items="center"
+                                ),
+                                value="overview"
+                            ),
+                        ),
+                        # Subtab 1: Overview (default sklearn metrics)
+                        rx.tabs.content(
+                            rx.vstack(
+                                estimated_time_of_arrival_metrics(),
+                                spacing="4",
+                                width="100%",
+                            ),
+                            value="overview"
+                        ),
+                        default_value="overview",
+                        width="100%"
+                    ),
                     spacing="4",
                     width="100%",
                     padding_top="1em"
@@ -1019,7 +1043,7 @@ def estimated_time_of_arrival_batch_form(model_key: str = None, project_name: st
                 ),
                 value="prediction"
             ),
-            # Tab 2: Metrics
+            # Tab 2: Metrics (with subtabs)
             rx.tabs.content(
                 rx.vstack(
                     rx.hstack(
@@ -1035,24 +1059,48 @@ def estimated_time_of_arrival_batch_form(model_key: str = None, project_name: st
                         align_items="center",
                         spacing="2"
                     ),
-                    # Model info badge
-                    rx.hstack(
-                        rx.badge(
-                            rx.hstack(
-                                rx.icon("brain", size=12),
-                                rx.text("XGBoost Regressor (Scikit-Learn)", size="1"),
-                                spacing="1",
-                                align_items="center"
+                    # Metrics subtabs
+                    rx.tabs.root(
+                        rx.tabs.list(
+                            rx.tabs.trigger(
+                                rx.hstack(
+                                    rx.icon("layout-dashboard", size=14),
+                                    rx.text("Overview"),
+                                    spacing="2",
+                                    align_items="center"
+                                ),
+                                value="overview"
                             ),
-                            color_scheme="purple",
-                            variant="soft",
-                            size="1"
                         ),
-                        rx.badge("Batch ML", color_scheme="blue", variant="soft", size="1"),
-                        spacing="2"
+                        # Subtab 1: Overview (default sklearn metrics)
+                        rx.tabs.content(
+                            rx.vstack(
+                                # Model info badge
+                                rx.hstack(
+                                    rx.badge(
+                                        rx.hstack(
+                                            rx.icon("brain", size=12),
+                                            rx.text("XGBoost Regressor (Scikit-Learn)", size="1"),
+                                            spacing="1",
+                                            align_items="center"
+                                        ),
+                                        color_scheme="purple",
+                                        variant="soft",
+                                        size="1"
+                                    ),
+                                    rx.badge("Batch ML", color_scheme="blue", variant="soft", size="1"),
+                                    spacing="2"
+                                ),
+                                # Batch metrics display (reuse the same metrics component for now)
+                                estimated_time_of_arrival_metrics(),
+                                spacing="4",
+                                width="100%",
+                            ),
+                            value="overview"
+                        ),
+                        default_value="overview",
+                        width="100%"
                     ),
-                    # Batch metrics display (reuse the same metrics component for now)
-                    estimated_time_of_arrival_metrics(),
                     spacing="4",
                     width="100%",
                     padding_top="1em"

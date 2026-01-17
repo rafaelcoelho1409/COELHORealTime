@@ -28,7 +28,6 @@ from datetime import datetime
 from functions import (
     ModelDataManager,
     process_sklearn_sample,
-    load_or_create_data,
     load_or_create_sklearn_encoders,
     yellowbrick_classification_kwargs,
     yellowbrick_classification_visualizers,
@@ -37,7 +36,12 @@ from functions import (
     yellowbrick_target_kwargs,
     yellowbrick_target_visualizers,
     yellowbrick_model_selection_kwargs,
-    yellowbrick_model_selection_visualizers
+    yellowbrick_model_selection_visualizers,
+    TFD_CAT_FEATURE_INDICES,
+    MLFLOW_MODEL_NAMES,
+    load_model_from_mlflow,
+    load_encoders_from_mlflow,
+    get_best_mlflow_run,
 )
 
 
@@ -68,6 +72,76 @@ class BatchTrainingState:
 
 
 batch_state = BatchTrainingState()
+
+
+# =============================================================================
+# Model Cache (for predictions using best model from MLflow)
+# =============================================================================
+class ModelCache:
+    """Cache for loaded models and encoders from MLflow."""
+    def __init__(self, ttl_seconds: int = 300):
+        self.models: Dict[str, any] = {}
+        self.encoders: Dict[str, any] = {}
+        self.run_ids: Dict[str, str] = {}
+        self.timestamps: Dict[str, float] = {}
+        self.ttl_seconds = ttl_seconds
+
+    def _is_expired(self, project_name: str) -> bool:
+        """Check if cache entry has expired."""
+        if project_name not in self.timestamps:
+            return True
+        return (time.time() - self.timestamps[project_name]) > self.ttl_seconds
+
+    def get_model(self, project_name: str):
+        """Get cached model or load from MLflow if expired/missing."""
+        if project_name in self.models and not self._is_expired(project_name):
+            return self.models[project_name], self.run_ids.get(project_name)
+
+        # Load from MLflow
+        model_name = MLFLOW_MODEL_NAMES.get(project_name)
+        if not model_name:
+            return None, None
+
+        run_id = get_best_mlflow_run(project_name, model_name)
+        if run_id is None:
+            return None, None
+
+        model = load_model_from_mlflow(project_name, model_name)
+        if model is not None:
+            self.models[project_name] = model
+            self.run_ids[project_name] = run_id
+            self.timestamps[project_name] = time.time()
+            print(f"Model cached for {project_name} (run_id={run_id})")
+
+        return model, run_id
+
+    def get_encoders(self, project_name: str):
+        """Get cached encoders or load from MLflow if expired/missing."""
+        if project_name in self.encoders and not self._is_expired(project_name):
+            return self.encoders[project_name]
+
+        encoders = load_encoders_from_mlflow(project_name)
+        if encoders is not None:
+            self.encoders[project_name] = encoders
+            print(f"Encoders cached for {project_name}")
+
+        return encoders
+
+    def invalidate(self, project_name: str = None):
+        """Invalidate cache for a project or all projects."""
+        if project_name:
+            self.models.pop(project_name, None)
+            self.encoders.pop(project_name, None)
+            self.run_ids.pop(project_name, None)
+            self.timestamps.pop(project_name, None)
+        else:
+            self.models.clear()
+            self.encoders.clear()
+            self.run_ids.clear()
+            self.timestamps.clear()
+
+
+model_cache = ModelCache(ttl_seconds=300)  # 5 minute cache
 
 
 def stop_current_training() -> bool:
@@ -167,7 +241,6 @@ PROJECT_NAMES = [
 
 # Global data manager
 data_manager = ModelDataManager()
-data_dict = {x: None for x in PROJECT_NAMES}
 encoders_dict = {x: None for x in PROJECT_NAMES}
 
 
@@ -220,14 +293,9 @@ class MLflowMetricsRequest(BaseModel):
     force_refresh: bool = False
 
 
-class SampleRequest(BaseModel):
-    project_name: str
-
-
 class SklearnHealthcheck(BaseModel):
     """Healthcheck for sklearn batch ML service."""
     model_available: dict[str, bool] = {}
-    data_load: dict[str, str] = {}
     encoders_load: dict[str, str] = {}
 
 
@@ -245,23 +313,9 @@ class ModelAvailabilityRequest(BaseModel):
 # =============================================================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global data_dict, encoders_dict, sklearn_healthcheck
+    global encoders_dict, sklearn_healthcheck
 
-    data_load_status = {}
     encoders_load_status = {}
-
-    # Load data for batch ML projects
-    print("Loading data for Batch ML projects...")
-    for project_name in PROJECT_NAMES:
-        try:
-            data_dict[project_name] = load_or_create_data(project_name)
-            data_load_status[project_name] = "success"
-            print(f"Data loaded for {project_name}")
-        except Exception as e:
-            data_load_status[project_name] = f"failed: {e}"
-            print(f"Error loading data for {project_name}: {e}", file=sys.stderr)
-
-    sklearn_healthcheck.data_load = data_load_status
 
     # Load sklearn encoders from MLflow (or create new if not available)
     print("Loading sklearn encoders...")
@@ -339,21 +393,13 @@ async def update_healthcheck(update_data: SklearnHealthcheck):
     return sklearn_healthcheck
 
 
-@app.post("/sample")
-async def get_sample(request: SampleRequest):
-    """Get a random sample from the dataset."""
-    if data_dict.get(request.project_name) is None:
-        raise HTTPException(status_code=503, detail="Data is not loaded.")
-    try:
-        sample = data_dict[request.project_name].sample(1).to_dict(orient='records')[0]
-        return sample
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error sampling data: {e}")
-
-
 @app.post("/predict")
 async def predict(request: PredictRequest):
-    """Make batch ML prediction using CatBoostClassifier from MLflow."""
+    """Make batch ML prediction using best CatBoostClassifier from MLflow.
+
+    Uses model cache to avoid loading model on every request.
+    Selects best model based on fbeta_score (beta=2.0) for fraud detection.
+    """
     project_name = request.project_name
     model_name = request.model_name
 
@@ -383,24 +429,13 @@ async def predict(request: PredictRequest):
         try:
             X = process_sklearn_sample(sample, project_name)
 
-            # Load model from MLflow
-            experiment = mlflow.get_experiment_by_name(project_name)
-            if experiment is None:
-                raise HTTPException(status_code=404, detail=f"MLflow experiment not found")
-
-            runs = mlflow.search_runs(
-                experiment_ids=[experiment.experiment_id],
-                filter_string=f"tags.mlflow.runName = '{model_name}'",
-                order_by=["start_time DESC"],
-                max_results=1
-            )
-
-            if runs.empty:
-                raise HTTPException(status_code=404, detail=f"No MLflow runs found for {model_name}")
-
-            run_id = runs.iloc[0]["run_id"]
-            model_uri = f"runs:/{run_id}/model"
-            model = mlflow.catboost.load_model(model_uri)
+            # Get best model from cache (loads from MLflow if expired/missing)
+            model, run_id = model_cache.get_model(project_name)
+            if model is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No trained model found for {project_name}. Train a model first."
+                )
 
             prediction = model.predict(X)[0]
             fraud_probability = model.predict_proba(X)[0][1]
@@ -409,7 +444,8 @@ async def predict(request: PredictRequest):
                 "prediction": int(prediction),
                 "fraud_probability": float(fraud_probability),
                 "model_name": model_name,
-                "run_id": run_id
+                "run_id": run_id,
+                "best_model": True  # Indicates this is from best model selection
             }
         except HTTPException:
             raise
@@ -417,6 +453,46 @@ async def predict(request: PredictRequest):
             raise HTTPException(status_code=500, detail=str(e))
     else:
         raise HTTPException(status_code=400, detail=f"Project {project_name} not supported")
+
+
+@app.get("/best_model/{project_name}")
+async def get_best_model_info(project_name: str):
+    """Get information about the current best model for a project.
+
+    Returns model info from cache or loads from MLflow if needed.
+    """
+    model_name = MLFLOW_MODEL_NAMES.get(project_name)
+    if not model_name:
+        raise HTTPException(status_code=400, detail=f"Unknown project: {project_name}")
+
+    model, run_id = model_cache.get_model(project_name)
+    if model is None:
+        return {
+            "project_name": project_name,
+            "model_name": model_name,
+            "status": "no_model",
+            "message": "No trained model found. Train a model first."
+        }
+
+    return {
+        "project_name": project_name,
+        "model_name": model_name,
+        "run_id": run_id,
+        "status": "available",
+        "cached": project_name in model_cache.models
+    }
+
+
+@app.post("/invalidate_cache")
+async def invalidate_model_cache(project_name: str = None):
+    """Invalidate model cache for a project or all projects.
+
+    Use this to force reload of models from MLflow.
+    """
+    model_cache.invalidate(project_name)
+    if project_name:
+        return {"message": f"Cache invalidated for {project_name}"}
+    return {"message": "All caches invalidated"}
 
 
 @app.post("/mlflow_metrics")
@@ -622,6 +698,11 @@ async def get_batch_status():
 
             if exit_code == 0:
                 batch_state.status = "completed"
+                # Invalidate model cache so next prediction uses the new best model
+                project_name = MODEL_SCRIPTS.get(model_name)
+                if project_name:
+                    model_cache.invalidate(project_name)
+                    print(f"Model cache invalidated for {project_name} after training completed")
                 return {
                     "current_model": model_name,
                     "status": "completed",
@@ -657,8 +738,10 @@ async def switch_batch_model(payload: dict):
     Payload:
         model_key: str - Script filename (e.g., "transaction_fraud_detection_sklearn.py")
                         or "none" to stop training
+        sample_frac: float (optional) - Fraction of data to use (0.0-1.0)
     """
     model_key = payload.get("model_key")
+    sample_frac = payload.get("sample_frac")  # Optional: 0.0-1.0
 
     # If requesting to stop
     if model_key == "none":
@@ -686,9 +769,12 @@ async def switch_batch_model(payload: dict):
         )
 
     command = ["/app/.venv/bin/python3", "-u", model_key]
+    # Add --sample-frac if provided
+    if sample_frac is not None and 0.0 < sample_frac <= 1.0:
+        command.extend(["--sample-frac", str(sample_frac)])
 
     try:
-        print(f"Starting batch training: {model_key}")
+        print(f"Starting batch training: {model_key}" + (f" with sample_frac={sample_frac}" if sample_frac else ""))
 
         log_dir = "/app/logs"
         os.makedirs(log_dir, exist_ok=True)

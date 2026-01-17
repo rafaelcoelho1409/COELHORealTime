@@ -302,6 +302,33 @@ def batch_ml_training_box(model_key: str, project_name: str) -> rx.Component:
                 align_items="center",
                 width="100%"
             ),
+            # Training data percentage input
+            rx.hstack(
+                rx.icon("database", size=14, color="gray"),
+                rx.text("Data %", size="1", color="gray"),
+                rx.input(
+                    value=SharedState.batch_training_data_percentage[project_name],
+                    on_change=lambda v: SharedState.set_batch_training_percentage(project_name, v),
+                    type="number",
+                    min=1,
+                    max=100,
+                    size="1",
+                    width="60px",
+                    disabled=SharedState.batch_training_loading[project_name],
+                ),
+                rx.text(
+                    rx.cond(
+                        SharedState.batch_training_data_percentage[project_name] < 100,
+                        "faster",
+                        "full"
+                    ),
+                    size="1",
+                    color="gray"
+                ),
+                align_items="center",
+                spacing="2",
+                width="100%"
+            ),
             rx.divider(size="4", width="100%"),
             # Model name badge and MLflow button
             rx.hstack(

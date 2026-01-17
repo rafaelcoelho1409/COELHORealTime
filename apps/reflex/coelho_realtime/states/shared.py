@@ -283,6 +283,13 @@ class SharedState(rx.State):
         "E-Commerce Customer Interactions": {}
     }
 
+    # Batch training data percentage (0-100, where 100 = use all data)
+    batch_training_data_percentage: dict[str, int] = {
+        "Transaction Fraud Detection": 100,
+        "Estimated Time of Arrival": 100,
+        "E-Commerce Customer Interactions": 100
+    }
+
     # ==========================================================================
     # SQL / DELTA LAKE STATE VARIABLES
     # ==========================================================================
@@ -879,6 +886,22 @@ class SharedState(rx.State):
             async with self:
                 self.incremental_model_available[project_name] = False
 
+        # Also fetch batch ML metrics from sklearn service
+        batch_model_name = self._batch_model_names.get(project_name, "CatBoostClassifier")
+        try:
+            batch_response = await httpx_client_post(
+                url=f"{SKLEARN_BASE_URL}/mlflow_metrics",
+                json={
+                    "project_name": project_name,
+                    "model_name": batch_model_name
+                },
+                timeout=10.0
+            )
+            async with self:
+                self.batch_mlflow_metrics[project_name] = batch_response.json()
+        except Exception as e:
+            print(f"Error fetching batch MLflow metrics for {project_name}: {e}")
+
     def _update_form_from_sample(self, project_name: str, sample: dict):
         """Update form_data from sample values (helper method)."""
         if project_name == "Transaction Fraud Detection":
@@ -1091,6 +1114,16 @@ class SharedState(rx.State):
     # ==========================================================================
     # BATCH ML EVENT HANDLERS (Scikit-Learn)
     # ==========================================================================
+    @rx.event
+    def set_batch_training_percentage(self, project_name: str, value: str):
+        """Set the training data percentage for a project (1-100)."""
+        try:
+            percentage = int(value)
+            if 1 <= percentage <= 100:
+                self.batch_training_data_percentage[project_name] = percentage
+        except (ValueError, TypeError):
+            pass  # Ignore invalid values
+
     @rx.event(background=True)
     async def train_batch_model(self, model_key: str, project_name: str):
         """Train a batch ML model using Scikit-Learn service via subprocess.
@@ -1102,21 +1135,28 @@ class SharedState(rx.State):
         training_script = self._batch_training_scripts.get(
             project_name, "transaction_fraud_detection_sklearn.py"
         )
+        # Get the training data percentage (convert to fraction for --sample-frac)
+        data_percentage = self.batch_training_data_percentage.get(project_name, 100)
 
         async with self:
             self.batch_training_loading[project_name] = True
 
+        # Show toast with percentage info
+        pct_info = f" using {data_percentage}% of data" if data_percentage < 100 else ""
         yield rx.toast.info(
             "Batch ML training started",
-            description=f"Training {self.batch_ml_model_name.get(project_name, 'model')}...",
+            description=f"Training {self.batch_ml_model_name.get(project_name, 'model')}{pct_info}...",
             duration=5000,
         )
 
         try:
-            # Start training via /switch_model endpoint
+            # Start training via /switch_model endpoint with data percentage
+            payload = {"model_key": training_script}
+            if data_percentage < 100:
+                payload["sample_frac"] = data_percentage / 100.0  # Convert to 0.0-1.0
             response = await httpx_client_post(
                 url=f"{SKLEARN_BASE_URL}/switch_model",
-                json={"model_key": training_script},
+                json=payload,
                 timeout=30.0
             )
             result = response.json()

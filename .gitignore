@@ -105,3 +105,4 @@ data/minio/*
 !data/minio/.gitkeep
 data/postgresql/*
 !data/postgresql/.gitkeep
+catboost_info/

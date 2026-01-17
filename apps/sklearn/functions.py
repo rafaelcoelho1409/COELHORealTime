@@ -13,7 +13,6 @@ from typing import Optional, Dict, Any
 import pandas as pd
 import numpy as np
 import mlflow
-from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import (
     train_test_split,
     StratifiedKFold,
@@ -56,12 +55,33 @@ ENCODER_ARTIFACT_NAMES = {
     "E-Commerce Customer Interactions": "sklearn_encoders.pkl",
 }
 
+# Best metric criteria for each project (used to select best model from MLflow)
+# Similar to River's BEST_METRIC_CRITERIA
+BEST_METRIC_CRITERIA = {
+    # TFD: Use fbeta_score (beta=2.0) - prioritizes recall for fraud detection
+    "Transaction Fraud Detection": {"metric_name": "fbeta_score", "maximize": True},
+    # ETA: Use MAE (lower is better) for regression
+    "Estimated Time of Arrival": {"metric_name": "mae", "maximize": False},
+    # ECCI: Use Silhouette score (higher is better) for clustering
+    "E-Commerce Customer Interactions": {"metric_name": "silhouette", "maximize": True},
+}
+
 # Delta Lake paths (S3 paths for DuckDB delta_scan)
 DELTA_PATHS = {
     "Transaction Fraud Detection": "s3://lakehouse/delta/transaction_fraud_detection",
     "Estimated Time of Arrival": "s3://lakehouse/delta/estimated_time_of_arrival",
     "E-Commerce Customer Interactions": "s3://lakehouse/delta/e_commerce_customer_interactions",
 }
+
+# Feature definitions for Transaction Fraud Detection (DuckDB SQL approach)
+TFD_NUMERICAL_FEATURES = ["amount", "account_age_days", "cvv_provided", "billing_address_match"]
+TFD_CATEGORICAL_FEATURES = [
+    "currency", "merchant_id", "payment_method", "product_category",
+    "transaction_type", "browser", "os",
+    "year", "month", "day", "hour", "minute", "second",
+]
+TFD_ALL_FEATURES = TFD_NUMERICAL_FEATURES + TFD_CATEGORICAL_FEATURES
+TFD_CAT_FEATURE_INDICES = list(range(len(TFD_NUMERICAL_FEATURES), len(TFD_ALL_FEATURES)))
 
 
 # Persistent DuckDB connection for Delta Lake queries
@@ -124,54 +144,171 @@ except Exception as e:
 
 
 # =============================================================================
-# MLflow Encoder Functions
+# MLflow Experiment Caching (like River)
 # =============================================================================
+_experiment_cache: Dict[str, tuple] = {}
+_EXPERIMENT_CACHE_TTL = 300  # 5 minutes
+
+
+def get_cached_experiment(project_name: str) -> Optional[Any]:
+    """Get MLflow experiment with caching (5 minute TTL).
+
+    Experiment names/IDs rarely change, so caching avoids repeated API calls.
+    Returns the experiment object or None if not found.
+    """
+    import time as _time
+    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+    cache_entry = _experiment_cache.get(project_name)
+    if cache_entry:
+        timestamp, experiment = cache_entry
+        if _time.time() - timestamp < _EXPERIMENT_CACHE_TTL:
+            return experiment
+    # Cache miss or expired - fetch from MLflow
+    try:
+        experiment = mlflow.get_experiment_by_name(project_name)
+        _experiment_cache[project_name] = (_time.time(), experiment)
+        return experiment
+    except Exception as e:
+        print(f"Error getting MLflow experiment for {project_name}: {e}")
+        return None
+
+
+# =============================================================================
+# MLflow Model Functions
+# =============================================================================
+def _run_has_model_artifact(run_id: str, model_name: str) -> bool:
+    """Check if a run has the model artifact."""
+    try:
+        client = mlflow.MlflowClient()
+        artifacts = client.list_artifacts(run_id)
+        artifact_names = [a.path for a in artifacts]
+        return f"{model_name}.pkl" in artifact_names or "model" in artifact_names
+    except Exception:
+        return False
+
+
 def get_best_mlflow_run(project_name: str, model_name: str) -> Optional[str]:
     """Get the best MLflow run ID based on metrics for a project.
 
-    For classification (TFD): Uses F1 score (higher is better)
-    For regression (ETA): Uses RMSE (lower is better)
-    For clustering (ECCI): Uses Silhouette score (higher is better)
+    Uses BEST_METRIC_CRITERIA to determine which metric to optimize:
+    - For fraud detection (TFD): maximize fbeta_score (beta=2.0, prioritizes recall)
+    - For regression (ETA): minimize MAE
+    - For clustering (ECCI): maximize Silhouette score
 
-    Returns:
-        run_id of the best run, or None if no runs found.
+    Only selects runs that have the model artifact saved.
+    Returns None if no runs exist.
     """
     try:
-        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-        experiment = mlflow.get_experiment_by_name(project_name)
+        experiment = get_cached_experiment(project_name)
         if experiment is None:
             print(f"No MLflow experiment found for {project_name}")
             return None
 
-        # Define metric and order based on project type
-        if project_name == "Transaction Fraud Detection":
-            metric_key = "metrics.F1"
-            ascending = False  # Higher F1 is better
-        elif project_name == "Estimated Time of Arrival":
-            metric_key = "metrics.RMSE"
-            ascending = True  # Lower RMSE is better
-        else:
-            metric_key = "metrics.F1"
-            ascending = False
-
-        # Search for completed runs with the model name
-        runs = mlflow.search_runs(
+        # Search for completed runs
+        runs_df = mlflow.search_runs(
             experiment_ids=[experiment.experiment_id],
-            filter_string=f"tags.mlflow.runName = '{model_name}' and status = 'FINISHED'",
-            order_by=[f"{metric_key} {'ASC' if ascending else 'DESC'}"],
-            max_results=1,
+            filter_string="status = 'FINISHED'",
+            order_by=["start_time DESC"],
+            max_results=50,
         )
 
-        if runs.empty:
-            print(f"No completed runs found for {project_name}/{model_name}")
+        if runs_df.empty:
+            print(f"No FINISHED runs found in MLflow for {project_name}")
             return None
 
-        run_id = runs.iloc[0]["run_id"]
-        print(f"Best MLflow run for {project_name}: {run_id}")
-        return run_id
+        # Filter by model name
+        filtered_runs = runs_df[runs_df["tags.mlflow.runName"] == model_name]
+        if filtered_runs.empty:
+            print(f"No runs found for model {model_name} in {project_name}")
+            return None
+
+        # Get metric criteria for this project
+        criteria = BEST_METRIC_CRITERIA.get(project_name)
+        if criteria is None:
+            # No metric criteria - use latest run with artifacts
+            print(f"No metric criteria for {project_name}, using latest run with artifacts")
+            for _, row in filtered_runs.iterrows():
+                if _run_has_model_artifact(row["run_id"], model_name):
+                    return row["run_id"]
+            return None
+
+        metric_name = criteria["metric_name"]
+        maximize = criteria["maximize"]
+        metric_column = f"metrics.{metric_name}"
+
+        # Check if metric column exists
+        if metric_column not in filtered_runs.columns:
+            print(f"Metric {metric_name} not found, using latest run with artifacts")
+            for _, row in filtered_runs.iterrows():
+                if _run_has_model_artifact(row["run_id"], model_name):
+                    return row["run_id"]
+            return None
+
+        # Filter runs with the metric and sort
+        runs_with_metric = filtered_runs[filtered_runs[metric_column].notna()]
+        if runs_with_metric.empty:
+            print(f"No runs with metric {metric_name}, using latest run with artifacts")
+            for _, row in filtered_runs.iterrows():
+                if _run_has_model_artifact(row["run_id"], model_name):
+                    return row["run_id"]
+            return None
+
+        # Sort by metric (best first)
+        ascending = not maximize
+        sorted_runs = runs_with_metric.sort_values(by=metric_column, ascending=ascending)
+
+        # Find the best run with model artifacts
+        for _, row in sorted_runs.iterrows():
+            run_id = row["run_id"]
+            metric_value = row[metric_column]
+            if _run_has_model_artifact(run_id, model_name):
+                print(f"Best run for {project_name}/{model_name}: {run_id} "
+                      f"({metric_name} = {metric_value:.4f}, maximize = {maximize})")
+                return run_id
+
+        print(f"No runs with model artifact found for {project_name}/{model_name}")
+        return None
 
     except Exception as e:
         print(f"Error finding best MLflow run: {e}")
+        return None
+
+
+def load_model_from_mlflow(project_name: str, model_name: str):
+    """Load model from the best MLflow run based on metrics.
+
+    Uses get_best_mlflow_run to find the run with optimal metrics.
+
+    Returns:
+        Loaded model, or None if not found.
+    """
+    try:
+        run_id = get_best_mlflow_run(project_name, model_name)
+        if run_id is None:
+            return None
+
+        # Try loading via MLflow's catboost flavor first (preferred)
+        try:
+            model_uri = f"runs:/{run_id}/model"
+            model = mlflow.catboost.load_model(model_uri)
+            print(f"Model loaded from MLflow (catboost flavor): {project_name}/{model_name}")
+            return model
+        except Exception:
+            pass
+
+        # Fallback: load from pickle artifact
+        artifact_path = f"{model_name}.pkl"
+        local_path = mlflow.artifacts.download_artifacts(
+            run_id=run_id,
+            artifact_path=artifact_path,
+        )
+        with open(local_path, 'rb') as f:
+            model = pickle.load(f)
+        print(f"Model loaded from MLflow (pickle): {project_name}/{model_name} (run_id={run_id})")
+        return model
+
+    except Exception as e:
+        print(f"Error loading model from MLflow: {e}")
         return None
 
 
@@ -217,292 +354,32 @@ def load_encoders_from_mlflow(project_name: str) -> Optional[Dict[str, Any]]:
 
 
 def load_or_create_sklearn_encoders(project_name: str) -> Dict[str, Any]:
-    """Load encoders from MLflow artifacts or create new ones.
+    """Load encoders from MLflow artifacts.
 
-    Tries to load from MLflow first (best model's encoders).
-    Falls back to creating default encoders if not available.
+    Tries to load from MLflow (best model's encoders).
+    Returns default metadata if not available (no encoders needed for DuckDB approach).
 
     Returns:
-        Dict with preprocessor/encoders.
+        Dict with feature info for CatBoost.
     """
     # Try loading from MLflow first
     encoders = load_encoders_from_mlflow(project_name)
     if encoders is not None:
         return encoders
 
-    # No encoders in MLflow, create new ones
-    print(f"No sklearn encoders in MLflow for {project_name}, creating new ones.")
-    return _create_default_encoders(project_name)
+    # No encoders in MLflow - return default metadata (DuckDB approach)
+    print(f"No sklearn encoders in MLflow for {project_name}, using DuckDB defaults.")
+    return {
+        "numerical_features": TFD_NUMERICAL_FEATURES,
+        "categorical_features": TFD_CATEGORICAL_FEATURES,
+        "cat_feature_indices": TFD_CAT_FEATURE_INDICES,
+        "feature_names": TFD_ALL_FEATURES,
+    }
 
 
 # =============================================================================
-# Data Processing Functions (Sklearn)
+# DuckDB SQL-Based Data Loading and Preprocessing
 # =============================================================================
-def extract_device_info_sklearn(data):
-    data = data.copy()
-    # Parse JSON strings to dictionaries
-    # Using orjson for speed (already imported)
-    device_dicts = data["device_info"].apply(
-        lambda x: orjson.loads(x) if isinstance(x, str) else x
-    )
-    data_to_join = pd.json_normalize(device_dicts)
-    data = data.drop("device_info", axis = 1)
-    data = data.join(data_to_join)
-    return data
-
-
-def extract_timestamp_info_sklearn(data):
-    """Extract timestamp components to separate columns."""
-    data = data.copy()
-    data["timestamp"] = pd.to_datetime(data["timestamp"], format = 'ISO8601')
-    data["year"] = data["timestamp"].dt.year
-    data["month"] = data["timestamp"].dt.month
-    data["day"] = data["timestamp"].dt.day
-    data["hour"] = data["timestamp"].dt.hour
-    data["minute"] = data["timestamp"].dt.minute
-    data["second"] = data["timestamp"].dt.second
-    data = data.drop("timestamp", axis=1)
-    return data
-
-
-def extract_coordinates_sklearn(data):
-    data = data.copy()
-    location_dicts = data["location"].apply(
-        lambda x: orjson.loads(x) if isinstance(x, str) else x
-    )
-    data_to_join = pd.json_normalize(location_dicts)
-    data = data.drop("location", axis = 1)
-    data = data.join(data_to_join)
-    return data
-
-
-def _create_default_encoders(project_name: str) -> dict:
-    """Create default encoders for CatBoost (no OneHotEncoder needed).
-
-    Used as fallback for fresh starts when no pre-trained encoders exist.
-    CatBoost handles categorical features natively, so we only need StandardScaler.
-
-    Returns:
-        Dict with scaler, feature lists, and categorical indices.
-    """
-    if project_name == "Transaction Fraud Detection":
-        numerical_features = [
-            "amount",
-            "account_age_days",
-            "cvv_provided",
-            "billing_address_match",
-        ]
-        categorical_features = [
-            "currency",
-            "merchant_id",
-            "payment_method",
-            "product_category",
-            "transaction_type",
-            "browser",
-            "os",
-            "year",
-            "month",
-            "day",
-            "hour",
-            "minute",
-            "second",
-        ]
-        # Full feature order: numerical first, then categorical
-        all_features = numerical_features + categorical_features
-
-        # Categorical feature indices (relative to all_features)
-        cat_feature_indices = list(range(
-            len(numerical_features),
-            len(all_features)
-        ))
-
-        return {
-            "scaler": StandardScaler(),  # Unfitted - will be fitted on first use
-            "numerical_features": numerical_features,
-            "categorical_features": categorical_features,
-            "cat_feature_indices": cat_feature_indices,
-            "feature_names": all_features,
-        }
-    else:
-        raise ValueError(f"Unknown project: {project_name}")
-
-
-def load_or_create_data(
-    project_name: str,
-    sample_frac: Optional[float] = None,
-    max_rows: Optional[int] = None,
-) -> pd.DataFrame:
-    """Load data from Delta Lake on MinIO via DuckDB.
-
-    Uses persistent DuckDB connection with Delta extension.
-    Retries with reconnection on failure.
-
-    Args:
-        project_name: Project name to load data for.
-        sample_frac: Optional fraction of data to sample (0.0-1.0).
-                     E.g., 0.3 = 30% of data.
-        max_rows: Optional maximum number of rows to load.
-                  Applied after sampling if both specified.
-
-    Returns:
-        DataFrame with loaded data.
-    """
-    delta_path = DELTA_PATHS.get(project_name, "")
-    if not delta_path:
-        raise ValueError(f"Unknown project: {project_name}")
-
-    # Build query with optional sampling
-    query = f"SELECT * FROM delta_scan('{delta_path}')"
-    if sample_frac is not None and 0 < sample_frac < 1:
-        query += f" USING SAMPLE {sample_frac * 100}%"
-    if max_rows is not None:
-        query += f" LIMIT {max_rows}"
-
-    try:
-        print(f"Loading data from Delta Lake via DuckDB: {delta_path}")
-        if sample_frac:
-            print(f"  Sampling: {sample_frac * 100}%")
-        if max_rows:
-            print(f"  Max rows: {max_rows}")
-        conn = _get_duckdb_connection()
-        result = conn.execute(query).df()
-        print(f"Data loaded from Delta Lake for {project_name}: {len(result)} rows")
-        return result
-    except Exception as e:
-        # Retry with reconnection on failure
-        print(f"DuckDB query failed, attempting reconnect: {e}")
-        conn = _get_duckdb_connection(force_reconnect=True)
-        result = conn.execute(query).df()
-        print(f"Data loaded from Delta Lake for {project_name}: {len(result)} rows")
-        return result
-
-
-def process_batch_data(data: pd.DataFrame, project_name: str):
-    """Process batch data for CatBoost training.
-
-    Memory-optimized version that leverages CatBoost's native categorical handling.
-    No OneHotEncoder needed - CatBoost handles categoricals internally.
-
-    Returns:
-        X_train, X_test, y_train, y_test, preprocessor_dict
-        preprocessor_dict contains:
-          - 'scaler': fitted StandardScaler for numerical features
-          - 'numerical_features': list of numerical feature names
-          - 'categorical_features': list of categorical feature names
-          - 'cat_feature_indices': indices of categorical features in final X
-    """
-    if project_name == "Transaction Fraud Detection":
-        # Extract nested JSON fields (modifies in place where possible)
-        data = extract_device_info_sklearn(data)
-        data = extract_timestamp_info_sklearn(data)
-
-        # Define feature groups
-        numerical_features = [
-            "amount",
-            "account_age_days",
-        ]
-        binary_features = [
-            "cvv_provided",
-            "billing_address_match",
-        ]
-        categorical_features = [
-            "currency",
-            "merchant_id",
-            "payment_method",
-            "product_category",
-            "transaction_type",
-            "browser",
-            "os",
-            "year",
-            "month",
-            "day",
-            "hour",
-            "minute",
-            "second",
-        ]
-
-        # Memory optimization: convert categoricals to category dtype
-        # This reduces memory significantly for high-cardinality columns
-        print("Optimizing memory with categorical dtypes...")
-        for col in categorical_features:
-            if col in data.columns:
-                data[col] = data[col].astype('category')
-
-        # Downcast numerical columns
-        for col in numerical_features + binary_features:
-            if col in data.columns:
-                data[col] = pd.to_numeric(data[col], downcast='float')
-
-        # Prepare features and target
-        all_features = numerical_features + binary_features + categorical_features
-        available_features = [f for f in all_features if f in data.columns]
-
-        X = data[available_features]
-        y = data['is_fraud']
-
-        # Free memory from original data
-        del data
-
-        print(f"Features: {len(available_features)} ({len(numerical_features)} numerical, "
-              f"{len(binary_features)} binary, {len(categorical_features)} categorical)")
-
-        # Train/test split
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y,
-            test_size=0.2,
-            stratify=y,
-            random_state=42,
-        )
-
-        # Free memory
-        del X, y
-
-        # Scale only numerical features (CatBoost handles categoricals natively)
-        scaler = StandardScaler()
-        numerical_cols_present = [c for c in numerical_features + binary_features if c in X_train.columns]
-
-        if numerical_cols_present:
-            X_train[numerical_cols_present] = scaler.fit_transform(X_train[numerical_cols_present])
-            X_test[numerical_cols_present] = scaler.transform(X_test[numerical_cols_present])
-
-        # Get categorical feature indices for CatBoost
-        cat_feature_indices = [
-            X_train.columns.get_loc(col)
-            for col in categorical_features
-            if col in X_train.columns
-        ]
-
-        # Preprocessor dict for saving to MLflow
-        preprocessor_dict = {
-            "scaler": scaler,
-            "numerical_features": numerical_cols_present,
-            "categorical_features": categorical_features,
-            "cat_feature_indices": cat_feature_indices,
-            "feature_names": list(X_train.columns),
-        }
-
-        print(f"Training set: {len(X_train)} samples, Test set: {len(X_test)} samples")
-        print(f"Categorical feature indices for CatBoost: {cat_feature_indices}")
-
-        return X_train, X_test, y_train, y_test, preprocessor_dict
-    else:
-        raise ValueError(f"Unsupported project for batch processing: {project_name}")
-
-
-# =============================================================================
-# DuckDB SQL-Based Preprocessing (Optimized - No Sklearn Transformations)
-# =============================================================================
-# Feature definitions for Transaction Fraud Detection
-TFD_NUMERICAL_FEATURES = ["amount", "account_age_days", "cvv_provided", "billing_address_match"]
-TFD_CATEGORICAL_FEATURES = [
-    "currency", "merchant_id", "payment_method", "product_category",
-    "transaction_type", "browser", "os",
-    "year", "month", "day", "hour", "minute", "second",
-]
-TFD_ALL_FEATURES = TFD_NUMERICAL_FEATURES + TFD_CATEGORICAL_FEATURES
-TFD_CAT_FEATURE_INDICES = list(range(len(TFD_NUMERICAL_FEATURES), len(TFD_ALL_FEATURES)))
-
-
 def load_data_duckdb(
     project_name: str,
     sample_frac: float | None = None,
@@ -541,14 +418,16 @@ def _load_tfd_data_duckdb(
     Single SQL query does:
     - JSON extraction (device_info → browser, os)
     - Timestamp extraction (→ year, month, day, hour, minute, second)
-    - Column selection and ordering
+    - Column selection and ordering (matches TFD_ALL_FEATURES order)
     - Sampling (if requested)
 
     No pandas transformations, no StandardScaler (tree models don't need it).
+    CatBoost handles categorical features natively - no label encoding needed.
     """
     delta_path = DELTA_PATHS["Transaction Fraud Detection"]
 
     # Build the SQL query - all preprocessing in one pass
+    # Column order MUST match TFD_ALL_FEATURES for correct cat_feature_indices
     query = f"""
     SELECT
         -- Numerical features (no scaling needed for CatBoost)
@@ -557,16 +436,16 @@ def _load_tfd_data_duckdb(
         CAST(cvv_provided AS INTEGER) AS cvv_provided,
         CAST(billing_address_match AS INTEGER) AS billing_address_match,
 
-        -- Categorical features from JSON (extracted in SQL)
-        json_extract_string(device_info, '$.browser') AS browser,
-        json_extract_string(device_info, '$.os') AS os,
-
-        -- Categorical features (direct columns)
+        -- Categorical features (order matches TFD_CATEGORICAL_FEATURES)
         currency,
         merchant_id,
         payment_method,
         product_category,
         transaction_type,
+
+        -- Categorical features from JSON (extracted in SQL)
+        json_extract_string(device_info, '$.browser') AS browser,
+        json_extract_string(device_info, '$.os') AS os,
 
         -- Timestamp components (extracted in SQL, cast VARCHAR to TIMESTAMP first)
         CAST(date_part('year', CAST(timestamp AS TIMESTAMP)) AS INTEGER) AS year,
@@ -679,13 +558,14 @@ def process_batch_data_duckdb(
     return X_train, X_test, y_train, y_test, metadata
 
 
-def process_sklearn_sample_duckdb(x: dict, project_name: str) -> pd.DataFrame:
-    """Process a single sample using DuckDB SQL approach.
+def process_sklearn_sample(x: dict, project_name: str) -> pd.DataFrame:
+    """Process a single sample for CatBoost prediction.
 
-    For real-time predictions, we still need to process individual samples.
-    This uses the same feature order as DuckDB training but processes in Python.
+    For real-time predictions, we process individual samples in Python
+    using the same feature order as DuckDB batch training.
 
-    Note: No scaling needed since CatBoost doesn't require it.
+    Note: No StandardScaler needed since CatBoost (tree-based) doesn't require it.
+    Feature order MUST match TFD_ALL_FEATURES for correct predictions.
     """
     if project_name == "Transaction Fraud Detection":
         # Extract device_info JSON
@@ -696,22 +576,22 @@ def process_sklearn_sample_duckdb(x: dict, project_name: str) -> pd.DataFrame:
         # Extract timestamp components
         timestamp = pd.to_datetime(x.get("timestamp"))
 
-        # Build feature dict in correct order
+        # Build feature dict in correct order (matches TFD_ALL_FEATURES)
         features = {
             # Numerical features
             "amount": x.get("amount"),
             "account_age_days": x.get("account_age_days"),
             "cvv_provided": int(x.get("cvv_provided", 0)),
             "billing_address_match": int(x.get("billing_address_match", 0)),
-            # Categorical from JSON
-            "browser": device_info.get("browser"),
-            "os": device_info.get("os"),
-            # Categorical direct
+            # Categorical direct (order matches TFD_CATEGORICAL_FEATURES)
             "currency": x.get("currency"),
             "merchant_id": x.get("merchant_id"),
             "payment_method": x.get("payment_method"),
             "product_category": x.get("product_category"),
             "transaction_type": x.get("transaction_type"),
+            # Categorical from JSON
+            "browser": device_info.get("browser"),
+            "os": device_info.get("os"),
             # Timestamp components
             "year": timestamp.year,
             "month": timestamp.month,
@@ -733,53 +613,6 @@ def process_sklearn_sample_duckdb(x: dict, project_name: str) -> pd.DataFrame:
         raise ValueError(f"Unsupported project: {project_name}")
 
 
-def process_sklearn_sample(x: dict, project_name: str) -> pd.DataFrame:
-    """Process a single sample for CatBoost prediction.
-
-    Loads preprocessor from MLflow (best model's encoders) or creates new if not available.
-    CatBoost handles categorical features natively, so we only scale numerical features.
-
-    Returns:
-        DataFrame with features in correct order for the model.
-    """
-    if project_name == "Transaction Fraud Detection":
-        df = pd.DataFrame([x])
-        df = extract_device_info_sklearn(df)
-        df = extract_timestamp_info_sklearn(df)
-
-        # Load preprocessor from MLflow or create new
-        preprocessor_dict = load_or_create_sklearn_encoders(project_name)
-
-        scaler = preprocessor_dict["scaler"]
-        numerical_features = preprocessor_dict["numerical_features"]
-        feature_names = preprocessor_dict["feature_names"]
-
-        # Scale numerical features (if scaler is fitted)
-        numerical_cols_present = [c for c in numerical_features if c in df.columns]
-        if numerical_cols_present:
-            # Check if scaler is fitted (has mean_ attribute)
-            if hasattr(scaler, 'mean_') and scaler.mean_ is not None:
-                df[numerical_cols_present] = scaler.transform(df[numerical_cols_present])
-            else:
-                # Scaler not fitted - this shouldn't happen in production
-                # (training saves fitted scaler to MLflow)
-                print("Warning: Scaler not fitted, using raw numerical values")
-
-        # Ensure columns are in correct order (match training feature order)
-        available_features = [f for f in feature_names if f in df.columns]
-        df = df[available_features]
-
-        # Convert categorical columns to category dtype for CatBoost
-        categorical_features = preprocessor_dict.get("categorical_features", [])
-        for col in categorical_features:
-            if col in df.columns:
-                df[col] = df[col].astype('category')
-
-        return df
-    else:
-        raise ValueError(f"Unsupported project for sample processing: {project_name}")
-
-
 # =============================================================================
 # Model Creation
 # =============================================================================
@@ -793,70 +626,38 @@ def create_batch_model(project_name: str, **kwargs):
             imbalance_ratio = neg_samples / pos_samples if pos_samples > 0 else 1
             print(f"Class imbalance ratio: {imbalance_ratio:.2f}:1 (negative:positive)")
             print(f"Fraud rate: {pos_samples / len(y_train) * 100:.2f}%")
+            print("Using auto_class_weights='Balanced' for imbalanced data")
+
+        # Optimized CatBoost parameters for fraud detection (1M+ rows, ~1% fraud)
+        # Based on: https://catboost.ai/docs/en/references/training-parameters/common
+        # Research: CatBoost achieves F1=0.92, AUC=0.99 on fraud detection benchmarks
         model = CatBoostClassifier(
-            # =================================================================
-            # CORE PARAMETERS
-            # =================================================================
-            iterations = 1000,              # Number of boosting rounds
-                                          # High value + early stopping finds optimal
-            learning_rate = 0.03,           # Lower = better generalization
-                                          # Range: 0.01-0.3, lower for more data
-            depth = 6,                      # Tree depth (recommended: 6-10)
-                                          # CatBoost default=6, good for most cases
-            # =================================================================
-            # IMBALANCED DATA HANDLING (KEY FOR FRAUD DETECTION)
-            # =================================================================
-            auto_class_weights = 'Balanced', # Automatically balance class weights
-                                           # Options: None, 'Balanced', 'SqrtBalanced'
-                                           # 'Balanced' = weight inversely proportional to frequency
-            # =================================================================
-            # LOSS FUNCTION & EVALUATION
-            # =================================================================
-            loss_function = 'Logloss',      # Binary cross-entropy for classification
-                                          # Options: 'Logloss', 'CrossEntropy'
-            eval_metric = 'AUC',            # Area Under ROC Curve
-                                          # Best metric for imbalanced binary classification
-                                          # Other options: 'F1', 'Precision', 'Recall', 'PRAUC'
-            # =================================================================
-            # REGULARIZATION (PREVENT OVERFITTING)
-            # =================================================================
-            l2_leaf_reg = 3.0,              # L2 regularization coefficient
-                                          # Higher = more regularization
-                                          # Range: 1-10, default=3
-            random_strength = 1.0,          # Randomness for scoring splits
-                                          # Higher = more regularization
-                                          # Range: 0-10, default=1
-            bagging_temperature = 1.0,      # Bayesian bootstrap intensity
-                                          # Higher = more randomness
-                                          # Range: 0-10, default=1
-            # =================================================================
-            # EARLY STOPPING (requires eval_set in fit())
-            # =================================================================
-            # NOTE: early_stopping_rounds and use_best_model require eval_set
-            # Pass eval_set=(X_test, y_test) when calling model.fit()
-            # =================================================================
-            # =================================================================
-            # PERFORMANCE & REPRODUCIBILITY
-            # =================================================================
-            task_type = 'CPU',              # 'CPU' or 'GPU'
-                                          # GPU requires CUDA, much faster for large data
-            thread_count = -1,              # Use all CPU cores
-            random_seed = 42,               # Reproducibility
-            # =================================================================
-            # MEMORY OPTIMIZATION (for containerized environments)
-            # =================================================================
-            max_ctr_complexity = 1,         # Limit categorical feature combinations
-                                          # Default=4, reduces memory significantly
-            used_ram_limit = '6gb',         # Explicit RAM limit for CatBoost
-                                          # Leave 2GB headroom for other processes (8GB limit)
-            boosting_type = 'Plain',        # Plain boosting uses less memory
-                                          # Options: 'Ordered' (default), 'Plain'
-            # =================================================================
-            # OUTPUT
-            # =================================================================
-            verbose = 100,                  # Print every 100 iterations
-                                          # Set to False for silent training
-            allow_writing_files = False,    # Don't write temp files
+            # Core parameters
+            iterations=1000,                # Max trees; early stopping finds optimal
+            learning_rate=0.05,             # Good balance for 1M+ rows
+            depth=6,                        # CatBoost default, good for most cases
+
+            # Imbalanced data handling (critical for fraud detection)
+            auto_class_weights='Balanced',  # Weights positive class by neg/pos ratio
+
+            # Loss function & evaluation
+            loss_function='Logloss',        # Binary cross-entropy
+            eval_metric='AUC',              # Best for imbalanced binary classification
+
+            # Regularization
+            l2_leaf_reg=3,                  # L2 regularization (default=3)
+
+            # Boosting type: 'Plain' for large datasets (1M+), 'Ordered' for <100K
+            boosting_type='Plain',
+
+            # Performance
+            task_type='CPU',
+            thread_count=-1,                # Use all CPU cores
+            random_seed=42,
+
+            # Output
+            verbose=100,                    # Print every 100 iterations
+            allow_writing_files=False,
         )
         return model
     raise ValueError(f"Unknown project: {project_name}")
@@ -1075,15 +876,14 @@ class ModelDataManager:
         self.project_name: str | None = None
 
     def load_data(self, project_name: str):
-        """Load and process data for a project."""
+        """Load and process data for a project using DuckDB SQL."""
         if self.project_name == project_name and self.y_train is not None:
             print(f"Data for {project_name} is already loaded.")
             return
 
         print(f"Loading data for project: {project_name}")
-        data_df = load_or_create_data(project_name)
-        self.X_train, self.X_test, self.y_train, self.y_test, self.preprocessor_dict = process_batch_data(
-            data_df, project_name
+        self.X_train, self.X_test, self.y_train, self.y_test, self.preprocessor_dict = process_batch_data_duckdb(
+            project_name
         )
         self.X = pd.concat([self.X_train, self.X_test])
         self.y = pd.concat([self.y_train, self.y_test])
