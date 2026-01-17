@@ -340,6 +340,26 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
   - [x] Notebook 009: Pandas/Sklearn approach
   - [x] Notebook 010: DuckDB SQL approach (better performance)
   - [ ] Compare with River incremental model (side-by-side metrics)
+- [ ] **Optimize DuckDB Delta Lake Reading** (Priority: MEDIUM)
+  - Problem: DuckDB reads entire Delta Lake table on every batch training trigger
+  - Current behavior: ~60+ seconds loading time for 1M+ rows
+  - Impact: Slow training startup, repeated full scans
+  - Potential solutions:
+    - [ ] Implement incremental loading (only new partitions since last training)
+    - [ ] Add timestamp-based filtering (e.g., last 7 days of data)
+    - [ ] Cache Delta Lake metadata to speed up subsequent reads
+    - [ ] Explore DuckDB Delta Lake extension optimizations
+    - [ ] Consider pre-aggregated feature tables for faster loading
+  - Affected files: `apps/sklearn/functions.py`, training scripts
+- [ ] **Enhance Batch ML Training Status Explanations** (Priority: LOW)
+  - Current: Real-time status shows CatBoost iteration metrics (Test, Best, Total, Remaining)
+  - Enhancement ideas:
+    - [ ] Add tooltips/info icons explaining what each metric means
+    - [ ] Add brief description for each training stage (init, loading_data, training, evaluating, logging_mlflow)
+    - [ ] Show early stopping info (e.g., "Best iteration: 22, patience: 28/50")
+    - [ ] Display learning curve trend (improving/plateauing/overfitting)
+    - [ ] Add estimated completion percentage based on early stopping patience
+  - Affected files: `apps/reflex/coelho_realtime/components/shared.py`, `apps/sklearn/app.py`
 - [ ] YellowBrick visualizations:
   - [x] Classification visualizers (ClassificationReport, ConfusionMatrix, ROCAUC, PrecisionRecallCurve)
   - [x] Feature analysis visualizers (ParallelCoordinates, PCA)

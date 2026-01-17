@@ -69,11 +69,21 @@ class BatchTrainingState:
         self.started_at: str | None = None
         self.completed_at: str | None = None
         self.exit_code: int | None = None
+        self.log_file = None  # Log file handle for subprocess output
         # Live training status (updated by training script via POST)
         self.status_message: str = ""
         self.progress_percent: int = 0
         self.current_stage: str = ""
         self.metrics_preview: Dict[str, float] = {}
+
+    def close_log_file(self):
+        """Close the log file handle if open."""
+        if self.log_file:
+            try:
+                self.log_file.close()
+            except Exception:
+                pass
+            self.log_file = None
 
     def update_status(self, message: str, progress: int = None, stage: str = None, metrics: Dict[str, float] = None):
         """Update training status from training script."""
@@ -203,6 +213,7 @@ def stop_current_training() -> bool:
         print(f"Error stopping training: {e}")
         batch_state.status = f"Error stopping training: {e}"
     finally:
+        batch_state.close_log_file()
         batch_state.current_process = None
         batch_state.current_model_name = None
         batch_state.completed_at = datetime.utcnow().isoformat() + "Z"
@@ -702,15 +713,77 @@ async def check_model_available(request: ModelAvailabilityRequest):
 # =============================================================================
 # Subprocess-based Training Endpoints (like River service)
 # =============================================================================
+def get_latest_catboost_log_line(model_name: str) -> Dict[str, str]:
+    """Read and parse the latest CatBoost iteration line from the training log file.
+
+    Returns a dict with parsed fields: iteration, test/learn, best, total, remaining
+    """
+    empty_result = {}
+    if not model_name:
+        return empty_result
+    log_file_path = f"/app/logs/{model_name}.log"
+    try:
+        with open(log_file_path, "rb") as f:
+            # Seek to end and read last 8KB (enough for many log lines)
+            f.seek(0, 2)  # End of file
+            file_size = f.tell()
+            read_size = min(8192, file_size)
+            f.seek(max(0, file_size - read_size))
+            content = f.read().decode("utf-8", errors="ignore")
+
+        # Split into lines and find the latest CatBoost iteration line
+        # CatBoost format: "67:\ttest: 0.9947585\tbest: 0.9949188 (22)\ttotal: 25.7s\tremaining: 5m 52s"
+        lines = content.strip().split("\n")
+        for line in reversed(lines):
+            line = line.strip()
+            if not line:
+                continue
+            # CatBoost iteration lines start with a number followed by colon
+            if line and line[0].isdigit() and ("test:" in line or "learn:" in line) and "total:" in line:
+                # Parse the line into structured data
+                result = {}
+                # Split by tabs
+                parts = line.replace("\t", "  ").split("  ")
+                parts = [p.strip() for p in parts if p.strip()]
+
+                for part in parts:
+                    if part and part[0].isdigit() and ":" in part and "test" not in part and "learn" not in part:
+                        # This is the iteration number (e.g., "67:")
+                        result["iteration"] = part.rstrip(":")
+                    elif "test:" in part:
+                        result["test"] = part.replace("test:", "").strip()
+                    elif "learn:" in part:
+                        result["learn"] = part.replace("learn:", "").strip()
+                    elif "best:" in part:
+                        result["best"] = part.replace("best:", "").strip()
+                    elif "total:" in part:
+                        result["total"] = part.replace("total:", "").strip()
+                    elif "remaining:" in part:
+                        result["remaining"] = part.replace("remaining:", "").strip()
+
+                return result
+        return empty_result
+    except Exception as e:
+        print(f"Error reading catboost log: {e}")
+        return empty_result
+
+
 @app.get("/batch_status")
 async def get_batch_status():
     """Get current batch training status including live progress updates."""
+    # Get latest CatBoost log line if training
+    catboost_log = ""
+    # Read log during training stage (30-70% progress)
+    if batch_state.current_model_name and batch_state.progress_percent >= 30 and batch_state.progress_percent < 70:
+        catboost_log = get_latest_catboost_log_line(batch_state.current_model_name)
+
     # Common status fields
     live_status = {
         "status_message": batch_state.status_message,
         "progress_percent": batch_state.progress_percent,
         "current_stage": batch_state.current_stage,
         "metrics_preview": batch_state.metrics_preview,
+        "catboost_log": catboost_log,
     }
 
     if batch_state.current_model_name and batch_state.current_process:
@@ -730,6 +803,7 @@ async def get_batch_status():
             model_name = batch_state.current_model_name
             batch_state.exit_code = exit_code
             batch_state.completed_at = datetime.utcnow().isoformat() + "Z"
+            batch_state.close_log_file()
             batch_state.current_process = None
             batch_state.current_model_name = None
 
@@ -840,13 +914,17 @@ async def switch_batch_model(payload: dict):
         os.makedirs(log_dir, exist_ok=True)
         log_file_path = f"{log_dir}/{model_key}.log"
 
-        with open(log_file_path, "ab") as log_file:
-            process = subprocess.Popen(
-                command,
-                stdout=log_file,
-                stderr=subprocess.STDOUT,
-                cwd="/app"
-            )
+        # Open log file without context manager - subprocess will inherit the handle
+        # Use line buffering (buffering=1) for real-time log output
+        log_file = open(log_file_path, "a", buffering=1)
+        process = subprocess.Popen(
+            command,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            cwd="/app"
+        )
+        # Store log file handle to close later
+        batch_state.log_file = log_file
 
         batch_state.current_process = process
         batch_state.current_model_name = model_key
@@ -862,6 +940,7 @@ async def switch_batch_model(payload: dict):
 
     except Exception as e:
         print(f"Failed to start training {model_key}: {e}")
+        batch_state.close_log_file()
         batch_state.current_process = None
         batch_state.current_model_name = None
         batch_state.status = f"Failed to start: {e}"

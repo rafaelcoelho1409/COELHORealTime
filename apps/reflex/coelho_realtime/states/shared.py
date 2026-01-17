@@ -311,6 +311,12 @@ class SharedState(rx.State):
         "Estimated Time of Arrival": {},
         "E-Commerce Customer Interactions": {}
     }
+    # CatBoost training log (parsed fields from latest iteration)
+    batch_training_catboost_log: dict[str, dict] = {
+        "Transaction Fraud Detection": {},
+        "Estimated Time of Arrival": {},
+        "E-Commerce Customer Interactions": {}
+    }
 
     # ==========================================================================
     # SQL / DELTA LAKE STATE VARIABLES
@@ -1184,6 +1190,7 @@ class SharedState(rx.State):
             self.batch_training_progress[project_name] = 0
             self.batch_training_stage[project_name] = "init"
             self.batch_training_metrics_preview[project_name] = {}
+            self.batch_training_catboost_log[project_name] = {}
 
         # Show toast with percentage info
         pct_info = f" using {data_percentage}% of data" if data_percentage < 100 else ""
@@ -1231,6 +1238,8 @@ class SharedState(rx.State):
                         self.batch_training_stage[project_name] = status.get("current_stage", "")
                     if status.get("metrics_preview"):
                         self.batch_training_metrics_preview[project_name] = status.get("metrics_preview", {})
+                    # CatBoost training log (parsed dict)
+                    self.batch_training_catboost_log[project_name] = status.get("catboost_log", {})
 
                 if status.get("status") == "completed":
                     # Training completed successfully

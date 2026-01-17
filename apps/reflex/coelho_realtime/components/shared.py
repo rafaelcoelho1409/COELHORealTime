@@ -349,6 +349,92 @@ def batch_ml_training_box(model_key: str, project_name: str) -> rx.Component:
                         align_items="center",
                         width="100%"
                     ),
+                    # CatBoost training log (shown only during training stage)
+                    rx.cond(
+                        SharedState.batch_training_catboost_log[project_name].length() > 0,
+                        rx.box(
+                            rx.vstack(
+                                # Iteration
+                                rx.hstack(
+                                    rx.text("Iteration", size="1", color="gray", width="70px"),
+                                    rx.text(
+                                        SharedState.batch_training_catboost_log[project_name]["iteration"],
+                                        size="1",
+                                        weight="bold",
+                                        color="blue"
+                                    ),
+                                    spacing="2",
+                                    align_items="center",
+                                    width="100%",
+                                ),
+                                # Test score
+                                rx.hstack(
+                                    rx.text("Test", size="1", color="gray", width="70px"),
+                                    rx.text(
+                                        SharedState.batch_training_catboost_log[project_name]["test"],
+                                        size="1",
+                                        weight="bold",
+                                        color="green"
+                                    ),
+                                    spacing="2",
+                                    align_items="center",
+                                    width="100%",
+                                ),
+                                # Best score
+                                rx.hstack(
+                                    rx.text("Best", size="1", color="gray", width="70px"),
+                                    rx.text(
+                                        SharedState.batch_training_catboost_log[project_name]["best"],
+                                        size="1",
+                                        weight="bold",
+                                        color="purple"
+                                    ),
+                                    spacing="2",
+                                    align_items="center",
+                                    width="100%",
+                                ),
+                                # Total time
+                                rx.hstack(
+                                    rx.text("Total", size="1", color="gray", width="70px"),
+                                    rx.text(
+                                        SharedState.batch_training_catboost_log[project_name]["total"],
+                                        size="1",
+                                        weight="medium",
+                                        color="cyan"
+                                    ),
+                                    spacing="2",
+                                    align_items="center",
+                                    width="100%",
+                                ),
+                                # Time remaining
+                                rx.hstack(
+                                    rx.text("Remaining", size="1", color="gray", width="70px"),
+                                    rx.hstack(
+                                        rx.icon("clock", size=10, color="orange"),
+                                        rx.text(
+                                            SharedState.batch_training_catboost_log[project_name]["remaining"],
+                                            size="1",
+                                            weight="medium",
+                                            color="orange"
+                                        ),
+                                        spacing="1",
+                                        align_items="center",
+                                    ),
+                                    spacing="2",
+                                    align_items="center",
+                                    width="100%",
+                                ),
+                                spacing="1",
+                                align_items="start",
+                                width="100%",
+                            ),
+                            padding="2",
+                            background=rx.color("gray", 2),
+                            border_radius="4px",
+                            width="100%",
+                        ),
+                        rx.fragment()
+                    ),
                     spacing="1",
                     width="100%"
                 ),
