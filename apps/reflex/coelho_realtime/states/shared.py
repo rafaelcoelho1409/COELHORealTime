@@ -290,6 +290,28 @@ class SharedState(rx.State):
         "E-Commerce Customer Interactions": 100
     }
 
+    # Live training status (updated during batch training)
+    batch_training_status: dict[str, str] = {
+        "Transaction Fraud Detection": "",
+        "Estimated Time of Arrival": "",
+        "E-Commerce Customer Interactions": ""
+    }
+    batch_training_progress: dict[str, int] = {
+        "Transaction Fraud Detection": 0,
+        "Estimated Time of Arrival": 0,
+        "E-Commerce Customer Interactions": 0
+    }
+    batch_training_stage: dict[str, str] = {
+        "Transaction Fraud Detection": "",
+        "Estimated Time of Arrival": "",
+        "E-Commerce Customer Interactions": ""
+    }
+    batch_training_metrics_preview: dict[str, dict] = {
+        "Transaction Fraud Detection": {},
+        "Estimated Time of Arrival": {},
+        "E-Commerce Customer Interactions": {}
+    }
+
     # ==========================================================================
     # SQL / DELTA LAKE STATE VARIABLES
     # ==========================================================================
@@ -886,9 +908,26 @@ class SharedState(rx.State):
             async with self:
                 self.incremental_model_available[project_name] = False
 
-        # Also fetch batch ML metrics from sklearn service
+        # Also fetch batch ML model availability and metrics from sklearn service
         batch_model_name = self._batch_model_names.get(project_name, "CatBoostClassifier")
         try:
+            # Check batch model availability (also returns experiment_url)
+            avail_response = await httpx_client_post(
+                url=f"{SKLEARN_BASE_URL}/model_available",
+                json={
+                    "project_name": project_name,
+                    "model_name": batch_model_name
+                },
+                timeout=10.0
+            )
+            avail_result = avail_response.json()
+            async with self:
+                self.batch_model_available[project_name] = avail_result.get("available", False)
+                experiment_url = avail_result.get("experiment_url", "")
+                if experiment_url:
+                    self.batch_mlflow_experiment_url[project_name] = experiment_url
+
+            # Fetch batch MLflow metrics
             batch_response = await httpx_client_post(
                 url=f"{SKLEARN_BASE_URL}/mlflow_metrics",
                 json={
@@ -900,7 +939,7 @@ class SharedState(rx.State):
             async with self:
                 self.batch_mlflow_metrics[project_name] = batch_response.json()
         except Exception as e:
-            print(f"Error fetching batch MLflow metrics for {project_name}: {e}")
+            print(f"Error fetching batch ML data for {project_name}: {e}")
 
     def _update_form_from_sample(self, project_name: str, sample: dict):
         """Update form_data from sample values (helper method)."""
@@ -1129,7 +1168,7 @@ class SharedState(rx.State):
         """Train a batch ML model using Scikit-Learn service via subprocess.
 
         Uses /switch_model to start training script, then polls /batch_status
-        until training completes.
+        until training completes. Updates live status for UI display.
         """
         # Get the training script for this project
         training_script = self._batch_training_scripts.get(
@@ -1140,6 +1179,11 @@ class SharedState(rx.State):
 
         async with self:
             self.batch_training_loading[project_name] = True
+            # Reset live status
+            self.batch_training_status[project_name] = "Starting training..."
+            self.batch_training_progress[project_name] = 0
+            self.batch_training_stage[project_name] = "init"
+            self.batch_training_metrics_preview[project_name] = {}
 
         # Show toast with percentage info
         pct_info = f" using {data_percentage}% of data" if data_percentage < 100 else ""
@@ -1164,9 +1208,9 @@ class SharedState(rx.State):
             if result.get("status") == "error":
                 raise Exception(result.get("message", "Failed to start training"))
 
-            # Poll /batch_status until training completes
-            max_polls = 120  # 10 minutes max (5 second intervals)
-            poll_interval = 5.0
+            # Poll /batch_status until training completes (faster interval for live updates)
+            max_polls = 300  # 10 minutes max (2 second intervals)
+            poll_interval = 2.0
 
             for _ in range(max_polls):
                 await asyncio.sleep(poll_interval)
@@ -1177,11 +1221,25 @@ class SharedState(rx.State):
                 )
                 status = status_response.json()
 
+                # Update live status from response
+                async with self:
+                    if status.get("status_message"):
+                        self.batch_training_status[project_name] = status.get("status_message", "")
+                    if status.get("progress_percent") is not None:
+                        self.batch_training_progress[project_name] = status.get("progress_percent", 0)
+                    if status.get("current_stage"):
+                        self.batch_training_stage[project_name] = status.get("current_stage", "")
+                    if status.get("metrics_preview"):
+                        self.batch_training_metrics_preview[project_name] = status.get("metrics_preview", {})
+
                 if status.get("status") == "completed":
                     # Training completed successfully
                     async with self:
                         self.batch_training_loading[project_name] = False
                         self.batch_model_available[project_name] = True
+                        self.batch_training_status[project_name] = "Training complete!"
+                        self.batch_training_progress[project_name] = 100
+                        self.batch_training_stage[project_name] = "complete"
 
                     yield rx.toast.success(
                         "Batch ML training complete",
@@ -1197,6 +1255,9 @@ class SharedState(rx.State):
 
                 elif status.get("status") == "failed":
                     error_msg = status.get("error", "Training failed")
+                    async with self:
+                        self.batch_training_status[project_name] = f"Failed: {error_msg}"
+                        self.batch_training_stage[project_name] = "error"
                     raise Exception(error_msg)
 
                 elif status.get("status") != "running":
@@ -1206,6 +1267,7 @@ class SharedState(rx.State):
             # If we exit the loop, check if model is available
             async with self:
                 self.batch_training_loading[project_name] = False
+                self.batch_training_status[project_name] = ""
 
             yield SharedState.check_batch_model_available(project_name)
             yield SharedState.get_batch_mlflow_metrics(project_name)
@@ -1215,6 +1277,8 @@ class SharedState(rx.State):
             print(f"Error training batch model: {error_msg}")
             async with self:
                 self.batch_training_loading[project_name] = False
+                self.batch_training_status[project_name] = f"Error: {error_msg}"
+                self.batch_training_stage[project_name] = "error"
 
             yield rx.toast.error(
                 "Batch ML training failed",
@@ -1252,8 +1316,8 @@ class SharedState(rx.State):
 
     @rx.event(background=True)
     async def get_batch_mlflow_metrics(self, project_name: str):
-        """Fetch MLflow metrics for a batch model."""
-        model_name = self._batch_model_names.get(project_name, "XGBClassifier")
+        """Fetch MLflow metrics for a batch model (no toast - for background fetches)."""
+        model_name = self._batch_model_names.get(project_name, "CatBoostClassifier")
         try:
             response = await httpx_client_post(
                 url=f"{SKLEARN_BASE_URL}/mlflow_metrics",
@@ -1270,6 +1334,36 @@ class SharedState(rx.State):
             print(f"Error fetching batch MLflow metrics: {e}")
             async with self:
                 self.batch_mlflow_metrics[project_name] = {}
+
+    @rx.event(background=True)
+    async def refresh_batch_mlflow_metrics(self, project_name: str):
+        """Force refresh batch MLflow metrics with toast notification."""
+        model_name = self._batch_model_names.get(project_name, "CatBoostClassifier")
+        try:
+            response = await httpx_client_post(
+                url=f"{SKLEARN_BASE_URL}/mlflow_metrics",
+                json={
+                    "project_name": project_name,
+                    "model_name": model_name,
+                    "force_refresh": True
+                },
+                timeout=60.0
+            )
+            async with self:
+                self.batch_mlflow_metrics[project_name] = response.json()
+
+            yield rx.toast.success(
+                "Batch metrics refreshed",
+                description=f"Latest metrics loaded for {project_name}",
+                duration=2000
+            )
+        except Exception as e:
+            print(f"Error refreshing batch MLflow metrics: {e}")
+            yield rx.toast.error(
+                "Refresh failed",
+                description=str(e),
+                duration=3000
+            )
 
     @rx.event(background=True)
     async def init_batch_page(self, project_name: str):

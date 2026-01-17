@@ -69,6 +69,28 @@ class BatchTrainingState:
         self.started_at: str | None = None
         self.completed_at: str | None = None
         self.exit_code: int | None = None
+        # Live training status (updated by training script via POST)
+        self.status_message: str = ""
+        self.progress_percent: int = 0
+        self.current_stage: str = ""
+        self.metrics_preview: Dict[str, float] = {}
+
+    def update_status(self, message: str, progress: int = None, stage: str = None, metrics: Dict[str, float] = None):
+        """Update training status from training script."""
+        self.status_message = message
+        if progress is not None:
+            self.progress_percent = progress
+        if stage is not None:
+            self.current_stage = stage
+        if metrics is not None:
+            self.metrics_preview = metrics
+
+    def reset_status(self):
+        """Reset status for new training run."""
+        self.status_message = ""
+        self.progress_percent = 0
+        self.current_stage = ""
+        self.metrics_preview = {}
 
 
 batch_state = BatchTrainingState()
@@ -633,8 +655,11 @@ async def check_model_available(request: ModelAvailabilityRequest):
         if experiment is None:
             return {
                 "available": False,
-                "message": f"No experiment found for {project_name}"
+                "message": f"No experiment found for {project_name}",
+                "experiment_url": None
             }
+
+        experiment_url = f"http://localhost:5001/#/experiments/{experiment.experiment_id}"
 
         runs = mlflow.search_runs(
             experiment_ids=[experiment.experiment_id],
@@ -646,7 +671,8 @@ async def check_model_available(request: ModelAvailabilityRequest):
         if runs.empty:
             return {
                 "available": False,
-                "message": f"No trained model found for {model_name}"
+                "message": f"No trained model found for {model_name}",
+                "experiment_url": experiment_url
             }
 
         run = runs.iloc[0]
@@ -654,6 +680,7 @@ async def check_model_available(request: ModelAvailabilityRequest):
             "available": True,
             "run_id": run["run_id"],
             "trained_at": run["start_time"].isoformat() if pd.notna(run["start_time"]) else None,
+            "experiment_url": experiment_url,
             "metrics": {
                 "Accuracy": run.get("metrics.Accuracy"),
                 "Precision": run.get("metrics.Precision"),
@@ -667,7 +694,8 @@ async def check_model_available(request: ModelAvailabilityRequest):
         print(f"Error checking model availability: {e}", file=sys.stderr)
         return {
             "available": False,
-            "error": str(e)
+            "error": str(e),
+            "experiment_url": None
         }
 
 
@@ -676,7 +704,15 @@ async def check_model_available(request: ModelAvailabilityRequest):
 # =============================================================================
 @app.get("/batch_status")
 async def get_batch_status():
-    """Get current batch training status."""
+    """Get current batch training status including live progress updates."""
+    # Common status fields
+    live_status = {
+        "status_message": batch_state.status_message,
+        "progress_percent": batch_state.progress_percent,
+        "current_stage": batch_state.current_stage,
+        "metrics_preview": batch_state.metrics_preview,
+    }
+
     if batch_state.current_model_name and batch_state.current_process:
         poll_result = batch_state.current_process.poll()
         if poll_result is None:
@@ -685,7 +721,8 @@ async def get_batch_status():
                 "current_model": batch_state.current_model_name,
                 "status": "running",
                 "pid": batch_state.current_process.pid,
-                "started_at": batch_state.started_at
+                "started_at": batch_state.started_at,
+                **live_status
             }
         else:
             # Process has finished
@@ -708,7 +745,8 @@ async def get_batch_status():
                     "status": "completed",
                     "exit_code": exit_code,
                     "started_at": batch_state.started_at,
-                    "completed_at": batch_state.completed_at
+                    "completed_at": batch_state.completed_at,
+                    **live_status
                 }
             else:
                 batch_state.status = "failed"
@@ -717,7 +755,8 @@ async def get_batch_status():
                     "status": "failed",
                     "exit_code": exit_code,
                     "started_at": batch_state.started_at,
-                    "completed_at": batch_state.completed_at
+                    "completed_at": batch_state.completed_at,
+                    **live_status
                 }
 
     # No process running - return last known state
@@ -726,8 +765,29 @@ async def get_batch_status():
         "status": batch_state.status,
         "exit_code": batch_state.exit_code,
         "started_at": batch_state.started_at,
-        "completed_at": batch_state.completed_at
+        "completed_at": batch_state.completed_at,
+        **live_status
     }
+
+
+class TrainingStatusUpdate(BaseModel):
+    """Request body for training status updates."""
+    message: str
+    progress: Optional[int] = None
+    stage: Optional[str] = None
+    metrics: Optional[Dict[str, float]] = None
+
+
+@app.post("/training_status")
+async def update_training_status(update: TrainingStatusUpdate):
+    """Receive live training status updates from training script."""
+    batch_state.update_status(
+        message=update.message,
+        progress=update.progress,
+        stage=update.stage,
+        metrics=update.metrics
+    )
+    return {"status": "ok"}
 
 
 @app.post("/switch_model")
@@ -790,10 +850,12 @@ async def switch_batch_model(payload: dict):
 
         batch_state.current_process = process
         batch_state.current_model_name = model_key
-        batch_state.status = f"Running {model_key}"
+        batch_state.status = "running"
         batch_state.started_at = datetime.utcnow().isoformat() + "Z"
         batch_state.completed_at = None
         batch_state.exit_code = None
+        batch_state.reset_status()  # Clear previous training status
+        batch_state.update_status("Starting training...", progress=0, stage="initializing")
 
         print(f"Batch training {model_key} started with PID: {process.pid}")
         return {"message": f"Started training: {model_key}", "pid": process.pid}

@@ -1294,7 +1294,7 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
                         rx.heading("Classification Metrics", size="5"),
                         rx.button(
                             rx.icon("refresh-cw", size=16),
-                            on_click=SharedState.get_batch_mlflow_metrics("Transaction Fraud Detection"),
+                            on_click=SharedState.refresh_batch_mlflow_metrics("Transaction Fraud Detection"),
                             size="1",
                             variant="ghost",
                             cursor="pointer",

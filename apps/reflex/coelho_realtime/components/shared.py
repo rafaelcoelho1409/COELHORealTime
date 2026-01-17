@@ -246,7 +246,7 @@ def batch_ml_training_box(model_key: str, project_name: str) -> rx.Component:
     """
     A training box component for Batch ML (Scikit-Learn).
     Unlike Incremental ML's switch, this uses a button to trigger one-time training.
-    Shows spinner during training and model info when available.
+    Shows spinner during training, live status updates, and model info when available.
     """
     return rx.card(
         rx.vstack(
@@ -302,32 +302,87 @@ def batch_ml_training_box(model_key: str, project_name: str) -> rx.Component:
                 align_items="center",
                 width="100%"
             ),
-            # Training data percentage input
-            rx.hstack(
-                rx.icon("database", size=14, color="gray"),
-                rx.text("Data %", size="1", color="gray"),
-                rx.input(
-                    value=SharedState.batch_training_data_percentage[project_name],
-                    on_change=lambda v: SharedState.set_batch_training_percentage(project_name, v),
-                    type="number",
-                    min=1,
-                    max=100,
-                    size="1",
-                    width="60px",
-                    disabled=SharedState.batch_training_loading[project_name],
-                ),
-                rx.text(
-                    rx.cond(
-                        SharedState.batch_training_data_percentage[project_name] < 100,
-                        "faster",
-                        "full"
+            # Live training status (shown only during training)
+            rx.cond(
+                SharedState.batch_training_loading[project_name],
+                rx.vstack(
+                    # Progress bar
+                    rx.progress(
+                        value=SharedState.batch_training_progress[project_name],
+                        max=100,
+                        width="100%",
+                        size="1",
+                        color_scheme="blue",
                     ),
-                    size="1",
-                    color="gray"
+                    # Status message with stage icon
+                    rx.hstack(
+                        rx.cond(
+                            SharedState.batch_training_stage[project_name] == "loading_data",
+                            rx.icon("database", size=12, color=rx.color("blue", 9)),
+                            rx.cond(
+                                SharedState.batch_training_stage[project_name] == "training",
+                                rx.icon("brain", size=12, color=rx.color("purple", 9)),
+                                rx.cond(
+                                    SharedState.batch_training_stage[project_name] == "evaluating",
+                                    rx.icon("bar-chart-2", size=12, color=rx.color("green", 9)),
+                                    rx.cond(
+                                        SharedState.batch_training_stage[project_name] == "logging_mlflow",
+                                        rx.icon("cloud-upload", size=12, color=rx.color("cyan", 9)),
+                                        rx.icon("loader", size=12, color=rx.color("gray", 9)),
+                                    )
+                                )
+                            )
+                        ),
+                        rx.text(
+                            SharedState.batch_training_status[project_name],
+                            size="1",
+                            color="gray",
+                            style={"font_style": "italic"}
+                        ),
+                        rx.text(
+                            f"{SharedState.batch_training_progress[project_name]}%",
+                            size="1",
+                            color="blue",
+                            weight="medium"
+                        ),
+                        spacing="2",
+                        align_items="center",
+                        width="100%"
+                    ),
+                    spacing="1",
+                    width="100%"
                 ),
-                align_items="center",
-                spacing="2",
-                width="100%"
+                rx.fragment()
+            ),
+            # Training data percentage input (hidden during training)
+            rx.cond(
+                SharedState.batch_training_loading[project_name],
+                rx.fragment(),
+                rx.hstack(
+                    rx.icon("database", size=14, color="gray"),
+                    rx.text("Data %", size="1", color="gray"),
+                    rx.input(
+                        value=SharedState.batch_training_data_percentage[project_name],
+                        on_change=lambda v: SharedState.set_batch_training_percentage(project_name, v),
+                        type="number",
+                        min=1,
+                        max=100,
+                        size="1",
+                        width="60px",
+                    ),
+                    rx.text(
+                        rx.cond(
+                            SharedState.batch_training_data_percentage[project_name] < 100,
+                            "faster",
+                            "full"
+                        ),
+                        size="1",
+                        color="gray"
+                    ),
+                    align_items="center",
+                    spacing="2",
+                    width="100%"
+                ),
             ),
             rx.divider(size="4", width="100%"),
             # Model name badge and MLflow button

@@ -24,6 +24,7 @@ import tempfile
 import click
 import mlflow
 import mlflow.catboost
+import requests
 from sklearn import metrics
 from imblearn.metrics import geometric_mean_score
 from functions import (
@@ -34,6 +35,24 @@ from functions import (
 
 
 MLFLOW_HOST = os.environ["MLFLOW_HOST"]
+SKLEARN_STATUS_URL = "http://localhost:8003/training_status"
+
+
+def update_status(message: str, progress: int = None, stage: str = None, metrics: dict = None):
+    """Post training status update to sklearn service."""
+    try:
+        payload = {"message": message}
+        if progress is not None:
+            payload["progress"] = progress
+        if stage is not None:
+            payload["stage"] = stage
+        if metrics is not None:
+            payload["metrics"] = metrics
+        requests.post(SKLEARN_STATUS_URL, json=payload, timeout=2)
+    except Exception:
+        pass  # Don't fail training if status update fails
+
+
 PROJECT_NAME = "Transaction Fraud Detection"
 MODEL_NAME = "CatBoostClassifier"
 ENCODER_ARTIFACT_NAME = "sklearn_encoders.pkl"
@@ -67,12 +86,18 @@ def main(sample_frac: float | None, max_rows: int | None):
         print(f"Data sampling: {sample_frac * 100}%")
     if max_rows:
         print(f"Max rows: {max_rows}")
+
+    update_status("Initializing training...", progress=5, stage="init")
+
     try:
         # Configure MLflow
         print(f"Connecting to MLflow at http://{MLFLOW_HOST}:5000")
         mlflow.set_tracking_uri(f"http://{MLFLOW_HOST}:5000")
         mlflow.set_experiment(PROJECT_NAME)
         print(f"MLflow experiment '{PROJECT_NAME}' set successfully")
+
+        update_status("Loading data from Delta Lake...", progress=10, stage="loading_data")
+
         # Load and process data using DuckDB SQL
         load_start = time.time()
         print("\n=== Loading and Preprocessing Data ===")
@@ -87,10 +112,20 @@ def main(sample_frac: float | None, max_rows: int | None):
         print(f"\nData loading/preprocessing completed in {load_time:.2f} seconds")
         print(f"Training set: {len(X_train)} samples")
         print(f"Test set: {len(X_test)} samples")
+
+        update_status(
+            f"Data loaded: {len(X_train):,} train, {len(X_test):,} test samples",
+            progress=25,
+            stage="data_loaded"
+        )
+
         # Create model
         print("\nCreating model...")
         model = create_batch_model(PROJECT_NAME, y_train = y_train)
         print(f"Categorical feature indices: {cat_feature_indices}")
+
+        update_status("Training CatBoost model...", progress=30, stage="training")
+
         # Train model with early stopping and native categorical handling
         print("Training model...")
         model.fit(
@@ -102,6 +137,9 @@ def main(sample_frac: float | None, max_rows: int | None):
             verbose = True,  # Show all iterations
         )
         print("Model training complete.")
+
+        update_status("Evaluating model performance...", progress=70, stage="evaluating")
+
         # Evaluate model
         print("\nEvaluating model...")
         y_pred = model.predict(X_test)
@@ -219,6 +257,20 @@ def main(sample_frac: float | None, max_rows: int | None):
         print("\nMetrics:")
         for name, value in metrics_to_log.items():
             print(f"  {name}: {value:.4f}")
+
+        # Send metrics preview to status
+        update_status(
+            "Logging to MLflow...",
+            progress=85,
+            stage="logging_mlflow",
+            metrics={
+                "recall": metrics_to_log["recall_score"],
+                "precision": metrics_to_log["precision_score"],
+                "f1": metrics_to_log["f1_score"],
+                "roc_auc": metrics_to_log["roc_auc_score"],
+            }
+        )
+
         # Log to MLflow
         print("\nLogging to MLflow...")
         with mlflow.start_run(run_name=MODEL_NAME):
@@ -267,7 +319,21 @@ def main(sample_frac: float | None, max_rows: int | None):
             print(f"MLflow run ID: {run_id}")
         training_time = time.time() - start_time
         print(f"\nTraining completed successfully in {training_time:.2f} seconds")
+
+        update_status(
+            f"Training complete! Time: {training_time:.1f}s",
+            progress=100,
+            stage="complete",
+            metrics={
+                "recall": metrics_to_log["recall_score"],
+                "precision": metrics_to_log["precision_score"],
+                "f1": metrics_to_log["f1_score"],
+                "roc_auc": metrics_to_log["roc_auc_score"],
+                "fbeta": metrics_to_log["fbeta_score"],
+            }
+        )
     except Exception as e:
+        update_status(f"Training failed: {str(e)}", progress=0, stage="error")
         print(f"Error during training: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()

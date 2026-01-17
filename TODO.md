@@ -107,6 +107,15 @@ Kafka → River ML Training Scripts → MLflow
 - [ ] Add model info to Reflex UI:
   - [ ] Display current model version on each page
   - [ ] Show last model update timestamp
+- [ ] **MLflow Model Selector Dropdown** (Priority: MEDIUM)
+  - [ ] Allow user to choose which MLflow model run to use for predictions
+  - [ ] Applies to both River (Incremental ML) and Scikit-Learn (Batch ML)
+  - [ ] Dropdown shows all available runs from the project's MLflow experiment
+  - [ ] Best model (based on `BEST_METRIC_CRITERIA`) flagged with visual indicator (e.g., "⭐ Best" badge)
+  - [ ] Best model set as default selected option
+  - [ ] Display key metrics alongside each run option (run_id, metric value, timestamp)
+  - [ ] Selection updates the model used for `/predict` endpoint
+  - [ ] Implement for all pages: TFD, ETA, ECCI
 - [ ] **Persist River ML Metrics Across Training Runs** (Priority: MEDIUM)
   - Problem: When training continues from best model, metrics (FBeta, Recall, etc.) reset to zero
   - Current behavior: Model loads correctly, but metric objects are created fresh each run
@@ -435,6 +444,18 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
   - [ ] Update Helm ConfigMaps/Secrets to provide all necessary env vars
 
 ### Cleanup Tasks
+- [ ] **Remove Polars - Migrate to DuckDB Only** (Priority: HIGH)
+  - [ ] Remove Polars from `apps/river/pyproject.toml`
+  - [ ] Remove Polars from `apps/sklearn/pyproject.toml`
+  - [ ] Remove Polars from `apps/reflex/pyproject.toml` (if present)
+  - [ ] Refactor `apps/river/functions.py` - replace `pl.scan_delta()` with DuckDB Delta queries
+  - [ ] Refactor `apps/sklearn/functions.py` - ensure all queries use DuckDB
+  - [ ] Update Delta Lake SQL tab - remove Polars engine option, DuckDB only
+  - [ ] Update `apps/river/app.py` - remove any Polars imports/usage
+  - [ ] Remove Polars references from documentation and comments
+  - [ ] Test all endpoints after migration
+  - **Rationale:** DuckDB handles all use cases (Delta Lake queries, SQL tab, preprocessing), Polars is redundant
+
 - [ ] Update historical documentation in `docs/` folder:
   - [ ] `docs/DEPLOYMENT.md` - Remove FastAPI/Streamlit references
   - [ ] `docs/ARGOCD_INTEGRATION_ROADMAP.md` - Update CI/CD examples
@@ -986,4 +1007,4 @@ Services Removed:
 
 ---
 
-*Last updated: 2026-01-16 (DuckDB SQL Preprocessing - Removed Pandas/Sklearn preprocessing, pure SQL transformations for batch ML)*
+*Last updated: 2026-01-17 (Added MLflow Model Selector Dropdown idea; Added Polars removal task - migrating to DuckDB only)*
