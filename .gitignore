@@ -106,3 +106,4 @@ data/minio/*
 data/postgresql/*
 !data/postgresql/.gitkeep
 catboost_info/
+notebooks/models/
