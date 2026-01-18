@@ -43,6 +43,7 @@ from functions import (
     load_encoders_from_mlflow,
     get_best_mlflow_run,
 )
+from resource_pool import resource_pool
 
 
 MLFLOW_HOST = os.getenv("MLFLOW_HOST", "localhost")
@@ -948,3 +949,42 @@ async def switch_batch_model(payload: dict):
             status_code=500,
             detail=f"Failed to start training {model_key}: {str(e)}"
         )
+
+
+# =============================================================================
+# Resource Pool Endpoints
+# =============================================================================
+@app.get("/resource_pool/status")
+async def get_resource_pool_status():
+    """Get status of the resource pool (training data availability).
+
+    Returns information about the latest training session data,
+    which is used by YellowBrick visualizations.
+
+    Note: Model is loaded from MLflow on-demand, not stored in resource pool.
+    """
+    status = resource_pool.status()
+
+    # If session exists, also include best model info from MLflow
+    if status.get("has_session"):
+        project_name = status.get("project_name")
+        model_name = MLFLOW_MODEL_NAMES.get(project_name)
+        if model_name:
+            model, run_id = model_cache.get_model(project_name)
+            status["best_model"] = {
+                "available": model is not None,
+                "model_name": model_name,
+                "run_id": run_id,
+            }
+
+    return status
+
+
+@app.post("/resource_pool/clear")
+async def clear_resource_pool():
+    """Clear the resource pool, freeing memory.
+
+    Use this if you want to force a fresh data load on next training.
+    """
+    resource_pool.clear()
+    return {"message": "Resource pool cleared"}

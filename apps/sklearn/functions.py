@@ -24,6 +24,7 @@ from yellowbrick import (
     target,
     model_selection,
 )
+from resource_pool import resource_pool, SessionResources
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -554,6 +555,19 @@ def process_batch_data_duckdb(
     # Calculate class balance
     fraud_rate = y_train.sum() / len(y_train) * 100
     print(f"  Fraud rate in training set: {fraud_rate:.2f}%")
+
+    # Store in resource pool for YellowBrick visualizations
+    session = SessionResources(
+        X_train=X_train,
+        X_test=X_test,
+        y_train=y_train,
+        y_test=y_test,
+        feature_names=metadata["feature_names"],
+        cat_feature_indices=metadata["cat_feature_indices"],
+        project_name=project_name,
+    )
+    resource_pool.store(session)
+    print("  Data stored in resource pool for YellowBrick visualizations")
 
     return X_train, X_test, y_train, y_test, metadata
 
