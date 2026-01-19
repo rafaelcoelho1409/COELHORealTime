@@ -11,7 +11,7 @@ All components use TFDState for TFD-specific state.
 """
 import reflex as rx
 from ..states import TFDState, SharedState, METRIC_INFO
-from .shared import metric_info_dialog, ml_training_switch, batch_ml_training_box, mlflow_run_selector
+from .shared import metric_info_dialog, ml_training_switch, batch_ml_run_and_training_box
 
 
 # =============================================================================
@@ -863,7 +863,8 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
 def transaction_fraud_detection_batch_form(model_key: str = None, project_name: str = None) -> rx.Component:
     """Batch ML form for Transaction Fraud Detection using CatBoostClassifier.
 
-    Mirrors the Incremental ML form layout with batch_ml_training_box instead of ml_training_switch.
+    Mirrors the Incremental ML form layout with batch_ml_run_and_training_box
+    (unified MLflow run selector + training box) instead of ml_training_switch.
     """
     # Build form card with 3-column layout (same as incremental ML)
     form_card = rx.card(
@@ -1136,19 +1137,17 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
         width="100%"
     )
 
-    # Build left column with run selector, batch ML training box, and form
+    # Build left column with unified run selector + training box, and form
     if model_key and project_name:
         left_column = rx.vstack(
-            mlflow_run_selector(project_name),  # Run selector at top
-            batch_ml_training_box(model_key, project_name),
+            batch_ml_run_and_training_box(model_key, project_name),
             form_card,
             spacing="4",
             width="30%"
         )
     else:
         left_column = rx.vstack(
-            mlflow_run_selector("Transaction Fraud Detection"),  # Run selector at top
-            batch_ml_training_box("CatBoostClassifier", "Transaction Fraud Detection"),
+            batch_ml_run_and_training_box("CatBoostClassifier", "Transaction Fraud Detection"),
             form_card,
             spacing="4",
             width="30%"

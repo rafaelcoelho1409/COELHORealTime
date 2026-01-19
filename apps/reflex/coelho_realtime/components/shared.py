@@ -255,19 +255,14 @@ def _run_select_item(run) -> rx.Component:
     )
 
 
-def mlflow_run_selector(project_name: str) -> rx.Component:
+def batch_ml_run_and_training_box(model_key: str, project_name: str) -> rx.Component:
     """
-    Dropdown selector for MLflow runs, ordered by metric criteria (best first).
-
-    Allows users to select which MLflow run to use for:
-    - Metrics display
-    - YellowBrick visualizations
-    - Model predictions
-
-    First option is always the best run based on project criteria.
+    Unified box for Batch ML with MLflow Run selector and Training controls.
+    Combines MLflow run selection with training functionality, separated by a divider.
     """
     return rx.card(
         rx.vstack(
+            # === MLflow Run Section ===
             rx.hstack(
                 rx.icon("git-branch", size=16, color=rx.color("blue", 9)),
                 rx.text("MLflow Run", size="2", weight="medium"),
@@ -332,11 +327,270 @@ def mlflow_run_selector(project_name: str) -> rx.Component:
                 ),
                 rx.fragment()
             ),
+            # === Divider between MLflow Run and Training ===
+            rx.divider(size="4", width="100%"),
+            # === Batch ML Training Section ===
+            rx.hstack(
+                rx.vstack(
+                    rx.hstack(
+                        rx.icon("layers", size=18, color=rx.cond(
+                            SharedState.batch_model_available[project_name],
+                            rx.color("blue", 9),
+                            rx.color("gray", 9)
+                        )),
+                        rx.text(
+                            "Batch ML Training",
+                            size="3",
+                            weight="medium"
+                        ),
+                        spacing="2",
+                        align_items="center"
+                    ),
+                    rx.text(
+                        rx.cond(
+                            SharedState.batch_training_loading[project_name],
+                            "Training in progress...",
+                            rx.cond(
+                                SharedState.batch_model_available[project_name],
+                                "Model trained and ready",
+                                "Click Train to create model"
+                            )
+                        ),
+                        size="1",
+                        color="gray"
+                    ),
+                    spacing="1",
+                    align_items="start"
+                ),
+                rx.cond(
+                    SharedState.batch_training_loading[project_name],
+                    # Training in progress: show spinner + stop button
+                    rx.hstack(
+                        rx.spinner(size="3"),
+                        rx.button(
+                            rx.hstack(
+                                rx.icon("square", size=12),
+                                rx.text("Stop", size="1"),
+                                spacing="1",
+                                align_items="center"
+                            ),
+                            on_click=SharedState.stop_batch_training(project_name),
+                            size="1",
+                            color_scheme="red",
+                            variant="soft"
+                        ),
+                        spacing="2",
+                        align_items="center"
+                    ),
+                    # Not training: show Train button
+                    rx.button(
+                        rx.hstack(
+                            rx.icon("play", size=14),
+                            rx.text("Train", size="2"),
+                            spacing="1",
+                            align_items="center"
+                        ),
+                        on_click=SharedState.train_batch_model(model_key, project_name),
+                        size="2",
+                        color_scheme="blue",
+                        variant="solid"
+                    )
+                ),
+                justify="between",
+                align_items="center",
+                width="100%"
+            ),
+            # Live training status (shown only during training)
+            rx.cond(
+                SharedState.batch_training_loading[project_name],
+                rx.vstack(
+                    # Progress bar
+                    rx.progress(
+                        value=SharedState.batch_training_progress[project_name],
+                        max=100,
+                        width="100%",
+                        size="1",
+                        color_scheme="blue",
+                    ),
+                    # Status message with stage icon
+                    rx.hstack(
+                        rx.cond(
+                            SharedState.batch_training_stage[project_name] == "loading_data",
+                            rx.icon("database", size=12, color=rx.color("blue", 9)),
+                            rx.cond(
+                                SharedState.batch_training_stage[project_name] == "training",
+                                rx.icon("brain", size=12, color=rx.color("purple", 9)),
+                                rx.cond(
+                                    SharedState.batch_training_stage[project_name] == "evaluating",
+                                    rx.icon("bar-chart-2", size=12, color=rx.color("green", 9)),
+                                    rx.cond(
+                                        SharedState.batch_training_stage[project_name] == "logging_mlflow",
+                                        rx.icon("cloud-upload", size=12, color=rx.color("cyan", 9)),
+                                        rx.icon("loader", size=12, color=rx.color("gray", 9)),
+                                    )
+                                )
+                            )
+                        ),
+                        rx.text(
+                            SharedState.batch_training_status[project_name],
+                            size="1",
+                            color="gray",
+                            style={"font_style": "italic"}
+                        ),
+                        rx.text(
+                            f"{SharedState.batch_training_progress[project_name]}%",
+                            size="1",
+                            color="blue",
+                            weight="medium"
+                        ),
+                        spacing="2",
+                        align_items="center",
+                        width="100%"
+                    ),
+                    # CatBoost training log (shown only during training stage)
+                    rx.cond(
+                        SharedState.batch_training_catboost_log[project_name].length() > 0,
+                        rx.box(
+                            rx.vstack(
+                                # Iteration
+                                rx.hstack(
+                                    rx.text("Iteration", size="1", color="gray", width="70px"),
+                                    rx.text(
+                                        SharedState.batch_training_catboost_log[project_name]["iteration"],
+                                        size="1",
+                                        weight="bold",
+                                        color="blue"
+                                    ),
+                                    spacing="2",
+                                    align_items="center",
+                                    width="100%",
+                                ),
+                                # Test score
+                                rx.hstack(
+                                    rx.text("Test", size="1", color="gray", width="70px"),
+                                    rx.text(
+                                        SharedState.batch_training_catboost_log[project_name]["test"],
+                                        size="1",
+                                        weight="bold",
+                                        color="green"
+                                    ),
+                                    spacing="2",
+                                    align_items="center",
+                                    width="100%",
+                                ),
+                                # Best score
+                                rx.hstack(
+                                    rx.text("Best", size="1", color="gray", width="70px"),
+                                    rx.text(
+                                        SharedState.batch_training_catboost_log[project_name]["best"],
+                                        size="1",
+                                        weight="bold",
+                                        color="purple"
+                                    ),
+                                    spacing="2",
+                                    align_items="center",
+                                    width="100%",
+                                ),
+                                # Total time
+                                rx.hstack(
+                                    rx.text("Total", size="1", color="gray", width="70px"),
+                                    rx.text(
+                                        SharedState.batch_training_catboost_log[project_name]["total"],
+                                        size="1",
+                                        weight="medium",
+                                        color="cyan"
+                                    ),
+                                    spacing="2",
+                                    align_items="center",
+                                    width="100%",
+                                ),
+                                # Time remaining
+                                rx.hstack(
+                                    rx.text("Remaining", size="1", color="gray", width="70px"),
+                                    rx.hstack(
+                                        rx.icon("clock", size=10, color="orange"),
+                                        rx.text(
+                                            SharedState.batch_training_catboost_log[project_name]["remaining"],
+                                            size="1",
+                                            weight="medium",
+                                            color="orange"
+                                        ),
+                                        spacing="1",
+                                        align_items="center",
+                                    ),
+                                    spacing="2",
+                                    align_items="center",
+                                    width="100%",
+                                ),
+                                spacing="1",
+                                align_items="start",
+                                width="100%",
+                            ),
+                            padding="2",
+                            background=rx.color("gray", 2),
+                            border_radius="4px",
+                            width="100%",
+                        ),
+                        rx.fragment()
+                    ),
+                    spacing="1",
+                    width="100%"
+                ),
+                rx.fragment()
+            ),
+            # Training data percentage input (hidden during training)
+            rx.cond(
+                SharedState.batch_training_loading[project_name],
+                rx.fragment(),
+                rx.hstack(
+                    rx.icon("database", size=14, color="gray"),
+                    rx.text("Data %", size="1", color="gray"),
+                    rx.input(
+                        value=SharedState.batch_training_data_percentage[project_name],
+                        on_change=lambda v: SharedState.set_batch_training_percentage(project_name, v),
+                        type="number",
+                        min=1,
+                        max=100,
+                        size="1",
+                        width="60px",
+                    ),
+                    rx.text(
+                        rx.cond(
+                            SharedState.batch_training_data_percentage[project_name] < 100,
+                            "faster",
+                            "full"
+                        ),
+                        size="1",
+                        color="gray"
+                    ),
+                    align_items="center",
+                    spacing="2",
+                    width="100%"
+                ),
+            ),
+            rx.divider(size="4", width="100%"),
+            # Model name and Batch ML badges
+            rx.hstack(
+                rx.badge(
+                    rx.hstack(
+                        rx.icon("brain", size=12),
+                        rx.text(SharedState.batch_ml_model_name[project_name], size="1"),
+                        spacing="1",
+                        align_items="center"
+                    ),
+                    color_scheme="purple",
+                    variant="soft",
+                    size="1"
+                ),
+                rx.badge("Batch ML", color_scheme="blue", variant="soft", size="1"),
+                spacing="2"
+            ),
             spacing="2",
             align_items="start",
             width="100%"
         ),
-        size="1",
+        variant="surface",
+        size="2",
         width="100%"
     )
 
@@ -346,6 +600,9 @@ def batch_ml_training_box(model_key: str, project_name: str) -> rx.Component:
     A training box component for Batch ML (Scikit-Learn).
     Unlike Incremental ML's switch, this uses a button to trigger one-time training.
     Shows spinner during training, live status updates, and model info when available.
+
+    Note: For TFD page, use batch_ml_run_and_training_box() which includes MLflow run selector.
+    This standalone function is kept for ETA and ECCI pages.
     """
     return rx.card(
         rx.vstack(
