@@ -1,0 +1,214 @@
+{
+  "project": "Transaction Fraud Detection",
+  "model": "CatBoostClassifier (Batch ML)",
+  "task": "Binary Classification",
+  "visualizers": {
+    "ConfusionMatrix": {
+      "name": "Confusion Matrix",
+      "category": "Classification",
+      "description": "A heatmap showing the distribution of actual vs predicted class labels. Displays True Positives (TP), True Negatives (TN), False Positives (FP), and False Negatives (FN) as a 2x2 matrix.",
+      "interpretation": "The diagonal (top-left and bottom-right) shows correct predictions. Off-diagonal cells show errors: **FP** (top-right) = false alarms, **FN** (bottom-left) = missed cases.",
+      "fraud_context": "For fraud detection, **False Negatives are critical** - these are frauds the model missed, causing direct financial loss. False Positives (blocked legitimate transactions) are annoying but recoverable. Focus on minimizing FN while keeping FP acceptable.",
+      "when_to_use": "Always start here. The confusion matrix is the foundation for understanding model performance and calculating all other classification metrics.",
+      "parameters": "`classes`: Class names to display, `cmap`: Color scheme, `percent`: Show percentages instead of counts"
+    },
+    "ClassificationReport": {
+      "name": "Classification Report",
+      "category": "Classification",
+      "description": "A heatmap showing precision, recall, and F1-score for each class. Includes support (number of samples) per class.",
+      "interpretation": "Each row is a class, each column is a metric. Darker colors = higher values. Look at the **Fraud class row** for the metrics that matter most in fraud detection.",
+      "fraud_context": "Focus on **Class 1 (Fraud)** metrics: High **Recall** = catch more fraud, High **Precision** = fewer false alarms. The Support column reveals class imbalance (typically 95-99% legitimate).",
+      "when_to_use": "Use after confusion matrix to get a quick summary of per-class performance. Essential for imbalanced datasets where overall accuracy is misleading.",
+      "parameters": "`classes`: Class names, `cmap`: Color scheme (YlOrRd recommended), `support`: Show support values, `colorbar`: Show color scale"
+    },
+    "ROCAUC": {
+      "name": "ROC-AUC Curve",
+      "category": "Classification",
+      "description": "Receiver Operating Characteristic curve plotting True Positive Rate (Recall) vs False Positive Rate across all classification thresholds. Area Under Curve (AUC) summarizes overall performance.",
+      "interpretation": "The curve shows the trade-off between catching fraud (TPR) and false alarms (FPR). A curve hugging the top-left corner is ideal. The diagonal line represents random guessing (AUC = 0.5).",
+      "fraud_context": "**AUC > 0.90** is industry standard for fraud detection. However, ROC-AUC can be overly optimistic with severe class imbalance - consider Precision-Recall curve as well.",
+      "when_to_use": "Use for comparing models and understanding threshold trade-offs. Best when you need to tune the classification threshold for your specific FP/FN cost ratio.",
+      "parameters": "`binary`: Set True for binary classification, `classes`: Class names for legend"
+    },
+    "PrecisionRecallCurve": {
+      "name": "Precision-Recall Curve",
+      "category": "Classification",
+      "description": "Plots Precision vs Recall across all classification thresholds. Includes Average Precision (AP) score and optional iso-F1 curves showing constant F1 values.",
+      "interpretation": "A curve hugging the top-right corner (high precision AND high recall) is ideal. The baseline is a horizontal line at the fraud rate. AP (area under curve) summarizes performance.",
+      "fraud_context": "**BEST metric for imbalanced fraud detection!** Unlike ROC-AUC, PR curves focus on the minority class (fraud). AP score is more meaningful than AUC when fraud is rare (1-5%).",
+      "when_to_use": "Always use for imbalanced classification. The iso-F1 curves help visualize the precision-recall trade-off at different F1 targets.",
+      "parameters": "`fill_area`: Shade area under curve, `ap_score`: Show Average Precision, `iso_f1_curves`: Show constant F1 contours"
+    },
+    "ClassPredictionError": {
+      "name": "Class Prediction Error",
+      "category": "Classification",
+      "description": "A stacked bar chart showing actual class distribution and how predictions are distributed within each actual class. An alternative view to the confusion matrix.",
+      "interpretation": "Each bar represents an actual class. Colors within each bar show where those samples were predicted. Ideally, most of each bar should be the correct prediction color.",
+      "fraud_context": "Quickly see how fraud samples are split: correctly identified vs missed. For legitimate transactions, see how many were incorrectly flagged as fraud.",
+      "when_to_use": "Use when you want a more intuitive visualization of prediction errors than the confusion matrix, especially when presenting to non-technical stakeholders.",
+      "parameters": "`classes`: Class names for legend and axis labels"
+    },
+    "DiscriminationThreshold": {
+      "name": "Discrimination Threshold",
+      "category": "Classification",
+      "description": "Shows how precision, recall, F1-score, and queue rate change as the classification threshold varies from 0 to 1. Helps find the optimal threshold for your use case.",
+      "interpretation": "The x-axis is the probability threshold. Lines show each metric. The vertical line marks the optimal threshold (by default, maximizing F1). Queue rate shows what fraction of transactions would be flagged.",
+      "fraud_context": "For fraud detection, you might want to **lower the threshold** to catch more fraud (higher recall) at the cost of more false alarms. Find the threshold that balances your fraud loss vs customer friction costs.",
+      "when_to_use": "Use when the default 0.5 threshold isn't optimal. Essential for production deployment to tune the balance between catching fraud and customer experience.",
+      "parameters": "`n_trials`: Number of CV trials, `cv`: Cross-validation fraction, `argmax`: Metric to optimize (fscore, precision, recall)"
+    },
+    "Rank1D": {
+      "name": "Rank 1D (Feature Ranking)",
+      "category": "Feature Analysis",
+      "description": "Ranks individual features using a statistical test. By default uses Shapiro-Wilk test to measure how normally distributed each feature is.",
+      "interpretation": "Higher scores indicate features that deviate more from normal distribution. Features with non-normal distributions might benefit from transformation or may indicate interesting patterns.",
+      "fraud_context": "Features with unusual distributions (highly skewed, bimodal) might be important fraud indicators. For example, transaction amounts often have heavy right tails due to high-value fraud attempts.",
+      "when_to_use": "Use during feature engineering to understand individual feature characteristics. Helps identify features that might need transformation (log, sqrt, etc.).",
+      "parameters": "`algorithm`: Ranking algorithm (shapiro, variance), `orient`: Horizontal or vertical bars"
+    },
+    "Rank2D": {
+      "name": "Rank 2D (Feature Correlation Matrix)",
+      "category": "Feature Analysis",
+      "description": "A heatmap showing pairwise relationships between features. Supports Pearson correlation, Spearman rank correlation, covariance, and Kendall tau.",
+      "interpretation": "Red = positive correlation, Blue = negative correlation, White = no correlation. Look for: (1) highly correlated feature pairs (redundancy), (2) unexpected correlations that might indicate feature interactions.",
+      "fraud_context": "Identify redundant features (correlation > 0.9) that can be removed. Check if derived features (hour, day, month) are correlated as expected. Unusual correlations might indicate data quality issues.",
+      "when_to_use": "Use for multicollinearity detection before model training. Helps select features and understand feature relationships.",
+      "parameters": "`algorithm`: Correlation method (pearson, spearman, covariance, kendalltau), `colormap`: Color scheme"
+    },
+    "PCA": {
+      "name": "PCA (Principal Component Analysis)",
+      "category": "Feature Analysis",
+      "description": "Projects high-dimensional data onto 2 principal components for visualization. Each point is a transaction, colored by class (fraud/legitimate).",
+      "interpretation": "If fraud points cluster separately from legitimate points, the model has good separability. Overlapping clusters indicate the classification problem is harder.",
+      "fraud_context": "Shows whether fraud transactions have fundamentally different feature patterns than legitimate ones. Clear separation = easier problem. Heavy overlap = model needs to find subtle patterns.",
+      "when_to_use": "Use as a quick sanity check for class separability. Fast to compute and gives immediate visual feedback on data structure.",
+      "parameters": "`scale`: Standardize features before PCA, `projection`: Number of components (2 or 3), `classes`: Class names for legend"
+    },
+    "Manifold": {
+      "name": "Manifold (t-SNE/UMAP)",
+      "category": "Feature Analysis",
+      "description": "Non-linear dimensionality reduction that preserves local structure. t-SNE is effective at revealing clusters that linear methods (PCA) might miss.",
+      "interpretation": "Points close together are similar in the original high-dimensional space. Look for: (1) fraud forming distinct clusters, (2) fraud scattered throughout (harder to detect), (3) sub-groups within fraud (different fraud types).",
+      "fraud_context": "Can reveal **fraud subclusters** - different fraud patterns (card testing, account takeover, friendly fraud) might form separate groups. More powerful than PCA but SLOW (30-120 seconds).",
+      "when_to_use": "Use for deep exploration of data structure when PCA doesn't show clear patterns. Run on sampled data first due to computational cost.",
+      "parameters": "`manifold`: Algorithm (tsne, umap, isomap, mds), `n_neighbors`: Neighborhood size, `random_state`: Reproducibility seed"
+    },
+    "ParallelCoordinates": {
+      "name": "Parallel Coordinates",
+      "category": "Feature Analysis",
+      "description": "Each feature is a vertical axis. Each transaction is a line connecting its values across all features. Lines are colored by class.",
+      "interpretation": "Look for feature ranges where fraud lines (one color) separate from legitimate lines (another color). If lines cross similarly for both classes, that feature doesn't help discrimination.",
+      "fraud_context": "Identify **feature ranges that distinguish fraud**: e.g., high amounts, certain hours, specific payment methods. Features where lines separate clearly are good predictors.",
+      "when_to_use": "Use to understand multi-dimensional patterns and feature interactions. Best with normalized features and sampling (too many lines = visual noise).",
+      "parameters": "`normalize`: Scaling method (minmax, standard), `sample`: Fraction of data to plot, `alpha`: Line transparency"
+    },
+    "RadViz": {
+      "name": "RadViz (Radial Visualization)",
+      "category": "Feature Analysis",
+      "description": "Features are arranged as points on a circle. Each transaction is positioned based on its feature values - pulled toward features with high values.",
+      "interpretation": "If fraud points cluster in a specific region, those nearby features are fraud indicators. Points near the center have balanced feature values. Points near edges are dominated by specific features.",
+      "fraud_context": "Quickly identifies which features 'pull' fraud transactions to specific regions. Good for discovering feature combinations that characterize fraud.",
+      "when_to_use": "Use for quick visual class separability check. Works best with normalized features and moderate number of features (5-15).",
+      "parameters": "`alpha`: Point transparency, `classes`: Class names for legend"
+    },
+    "JointPlot": {
+      "name": "Joint Plot (2D Feature Correlation)",
+      "category": "Feature Analysis",
+      "description": "Scatter plot showing relationship between two features with marginal histograms. Includes correlation coefficient.",
+      "interpretation": "The scatter plot shows feature co-occurrence patterns. Marginal histograms show individual distributions. Correlation coefficient quantifies linear relationship.",
+      "fraud_context": "Explore specific feature pairs suspected to interact: e.g., amount vs account_age (new accounts with high amounts = suspicious), hour vs payment_method (unusual combinations).",
+      "when_to_use": "Use for deep-dive into specific feature pairs after Rank2D identifies interesting correlations. Good for hypothesis testing about feature interactions.",
+      "parameters": "`columns`: Two feature names to plot, `correlation`: Method (pearson, spearman), `kind`: Plot type (scatter, hex)"
+    },
+    "ClassBalance": {
+      "name": "Class Balance",
+      "category": "Target",
+      "description": "Bar chart showing the count (or proportion) of samples in each class. The most basic but critical visualization for classification.",
+      "interpretation": "Equal-height bars = balanced classes. Severely unequal bars = imbalanced problem requiring special handling (resampling, class weights, threshold tuning).",
+      "fraud_context": "**CRITICAL for fraud detection!** Typical fraud rates are 1-5%. This imbalance explains why accuracy is misleading (99% accuracy = predicting all legitimate) and why metrics like F-beta, PR-AUC matter.",
+      "when_to_use": "Always visualize first. Understanding class imbalance is fundamental to choosing the right metrics, sampling strategies, and model configurations.",
+      "parameters": "`labels`: Class names for x-axis, `colors`: Bar colors per class"
+    },
+    "FeatureCorrelation": {
+      "name": "Feature Correlation (Mutual Information)",
+      "category": "Target",
+      "description": "Bar chart showing correlation between each feature and the target variable. Uses mutual information which captures non-linear relationships.",
+      "interpretation": "Higher bars = stronger predictors of the target. Unlike Pearson correlation, mutual information captures any statistical dependency, not just linear relationships.",
+      "fraud_context": "Identifies which features have the most predictive power for fraud detection. Features with near-zero mutual information might be candidates for removal. Top features guide feature engineering.",
+      "when_to_use": "Use for feature selection and importance understanding before modeling. Mutual information is model-agnostic - shows intrinsic predictive power.",
+      "parameters": "`method`: mutual_info-classification (for classification), `labels`: Feature names, `sort`: Order by importance"
+    },
+    "FeatureCorrelation_Pearson": {
+      "name": "Feature Correlation (Pearson)",
+      "category": "Target",
+      "description": "Bar chart showing linear correlation between each feature and the target. Faster than mutual information but only captures linear relationships.",
+      "interpretation": "Positive values = feature increases with fraud, Negative = feature decreases with fraud. Values near zero = no linear relationship (but non-linear relationship might exist).",
+      "fraud_context": "Quick linear analysis - which features directly correlate with fraud? Compare with Mutual Information results: features with low Pearson but high MI have non-linear relationships worth exploring.",
+      "when_to_use": "Use as a fast complement to Mutual Information. Useful when you suspect linear relationships or want quick feature screening.",
+      "parameters": "`method`: pearson, `labels`: Feature names, `sort`: Order by absolute correlation"
+    },
+    "BalancedBinningReference": {
+      "name": "Balanced Binning Reference",
+      "category": "Target",
+      "description": "Histogram of the target variable with vertical lines showing optimal bin boundaries for balanced binning. Primarily useful for regression targets.",
+      "interpretation": "Shows target distribution and suggested quantile-based bins. For continuous targets, helps decide how to discretize for stratification or binning.",
+      "fraud_context": "**Less useful for fraud detection** since is_fraud is already binary (0/1). More applicable to ETA (continuous delivery time) if you want to bin delivery times into categories.",
+      "when_to_use": "Use for regression tasks when you need to convert continuous targets to categories, or for understanding continuous feature distributions.",
+      "parameters": "`bins`: Number of bins to create, `target`: Target column name"
+    },
+    "FeatureImportances": {
+      "name": "Feature Importances",
+      "category": "Model Selection",
+      "description": "Horizontal bar chart ranking features by their importance in the trained model. For tree-based models like CatBoost, this is based on how much each feature reduces impurity.",
+      "interpretation": "Longer bars = more important features. The model relies more heavily on top features for predictions. Bottom features might be removable without performance loss.",
+      "fraud_context": "Reveals what CatBoost learned: which features drive fraud predictions? Top features should make business sense (amount, account_age, cvv_provided). Unexpected top features might indicate data leakage.",
+      "when_to_use": "Use after training to interpret the model. Essential for model debugging, feature selection, and explaining predictions to stakeholders.",
+      "parameters": "`labels`: Feature names, `relative`: Show as percentage of max importance, `absolute`: Show raw importance values"
+    },
+    "CVScores": {
+      "name": "Cross-Validation Scores",
+      "category": "Model Selection",
+      "description": "Bar chart showing model performance across different cross-validation folds. Includes mean score and standard deviation.",
+      "interpretation": "Consistent bars = stable model. High variance across folds = model is sensitive to data split. Very different first fold might indicate data ordering issues.",
+      "fraud_context": "Verifies model stability across different subsets of transactions. High variance might mean the model overfits to specific fraud patterns that aren't consistent across time periods.",
+      "when_to_use": "Use to verify model stability and get confidence intervals on performance estimates. Essential before production deployment.",
+      "parameters": "`cv`: Number of folds, `scoring`: Metric to evaluate (f1, precision, recall)"
+    },
+    "ValidationCurve": {
+      "name": "Validation Curve",
+      "category": "Model Selection",
+      "description": "Shows how training and validation scores change as a hyperparameter varies. Helps identify optimal hyperparameter values and detect overfitting.",
+      "interpretation": "Gap between train/test = overfitting. Both decreasing = underfitting. Find the hyperparameter value where test score peaks before train-test gap widens.",
+      "fraud_context": "Tune CatBoost iterations/depth: too few = underfit (miss fraud patterns), too many = overfit (memorize training fraud, fail on new patterns).",
+      "when_to_use": "Use for hyperparameter tuning to find optimal complexity. Run for key hyperparameters like iterations, depth, learning_rate.",
+      "parameters": "`param_name`: Hyperparameter to tune, `param_range`: Values to test, `cv`: Cross-validation folds"
+    },
+    "LearningCurve": {
+      "name": "Learning Curve",
+      "category": "Model Selection",
+      "description": "Shows how training and validation scores change as training set size increases. Helps diagnose if more data would improve the model.",
+      "interpretation": "Converging curves with gap = more data won't help much (high bias). Curves still far apart = more data would help (high variance).",
+      "fraud_context": "Determines if collecting more fraud examples would improve detection. If curves converge early, focus on feature engineering instead of data collection.",
+      "when_to_use": "Use when deciding whether to invest in data collection or model complexity. Helps set expectations for improvement potential.",
+      "parameters": "`train_sizes`: Fractions of training data to test, `cv`: Cross-validation folds, `scoring`: Metric to plot"
+    },
+    "RFECV": {
+      "name": "Recursive Feature Elimination (RFECV)",
+      "category": "Model Selection",
+      "description": "Recursively removes least important features and tracks cross-validation score. Identifies the optimal number of features to use.",
+      "interpretation": "The curve shows score vs number of features. Peak indicates optimal feature count. Flat plateau means extra features don't hurt but don't help.",
+      "fraud_context": "Find minimal feature set for fraud detection: fewer features = faster predictions, simpler model, less overfitting. Important for real-time fraud scoring where latency matters.",
+      "when_to_use": "Use for feature selection when you want to reduce model complexity. Computationally expensive (VERY SLOW) - run on sampled data.",
+      "parameters": "`cv`: Cross-validation folds, `scoring`: Metric to optimize, `step`: Features to remove per iteration"
+    },
+    "DroppingCurve": {
+      "name": "Dropping Curve (Feature Robustness)",
+      "category": "Model Selection",
+      "description": "Shows how model performance changes when random subsets of features are used. Tests model robustness to missing features.",
+      "interpretation": "Gradual decline = model is robust, features are redundant. Sharp decline = model relies heavily on specific features. Flat = many features are unnecessary.",
+      "fraud_context": "Tests if fraud detection is robust when some features are missing (common in production due to data quality issues). Identifies critical features that must be present.",
+      "when_to_use": "Use to test production robustness and understand feature redundancy. Helps plan for graceful degradation when features are unavailable.",
+      "parameters": "`feature_sizes`: Fractions of features to test, `cv`: Cross-validation folds, `random_state`: Reproducibility"
+    }
+  }
+}

@@ -64,6 +64,24 @@ METRIC_INFO = {
 
 
 # =============================================================================
+# YellowBrick Visualizer Info Loader (descriptions and interpretations)
+# =============================================================================
+def load_yellowbrick_info(project_key: str) -> dict:
+    """Load YellowBrick visualizer info JSON for a project using orjson."""
+    data_dir = Path(__file__).parent.parent / "data"
+    file_path = data_dir / f"yellowbrick_info_{project_key}.json"
+    if file_path.exists():
+        with open(file_path, "rb") as f:
+            return orjson.loads(f.read())
+    return {"visualizers": {}}
+
+# Load yellowbrick info at module startup
+YELLOWBRICK_INFO = {
+    "tfd": load_yellowbrick_info("tfd"),
+}
+
+
+# =============================================================================
 # Dropdown Options Loader (pre-loaded for instant form rendering)
 # =============================================================================
 def load_dropdown_options(project_key: str) -> dict:

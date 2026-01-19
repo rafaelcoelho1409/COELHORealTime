@@ -21,6 +21,7 @@ from .shared import (
     batch_ml_training_box,
     batch_ml_run_and_training_box,
     metric_info_dialog,
+    yellowbrick_info_dialog,
     delta_lake_sql_tab,
     CONTEXT_TITLES,
 )
@@ -56,6 +57,7 @@ __all__ = [
     "batch_ml_training_box",
     "batch_ml_run_and_training_box",
     "metric_info_dialog",
+    "yellowbrick_info_dialog",
     "delta_lake_sql_tab",
     "CONTEXT_TITLES",
 

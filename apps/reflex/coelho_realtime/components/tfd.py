@@ -11,7 +11,7 @@ All components use TFDState for TFD-specific state.
 """
 import reflex as rx
 from ..states import TFDState, SharedState, METRIC_INFO
-from .shared import metric_info_dialog, ml_training_switch, batch_ml_run_and_training_box
+from .shared import metric_info_dialog, yellowbrick_info_dialog, ml_training_switch, batch_ml_run_and_training_box
 
 
 # =============================================================================
@@ -180,10 +180,42 @@ def heatmap_card_with_info(plotly_key: str, metric_key: str) -> rx.Component:
 # =============================================================================
 # Batch ML Plotly Card Helpers
 # =============================================================================
+# Mapping from plotly key to metric info key for batch ML metrics
+BATCH_PLOTLY_TO_METRIC_KEY = {
+    # Primary KPIs
+    "kpi_recall": "recall",
+    "kpi_precision": "precision",
+    "kpi_f1": "f1",
+    "kpi_fbeta": "fbeta",
+    # Ranking KPIs
+    "kpi_rocauc": "rocauc",
+    "kpi_avg_precision": "average_precision",
+    # Secondary Gauges
+    "gauge_accuracy": "accuracy",
+    "gauge_balanced_acc": "balanced_accuracy",
+    "gauge_mcc": "mcc",
+    "gauge_cohen_kappa": "cohen_kappa",
+    "gauge_jaccard": "jaccard",
+    "gauge_geometric_mean": "geometric_mean",
+    # Calibration Bullets
+    "bullet_log_loss": "logloss",
+    "bullet_brier": "brier",
+    "bullet_d2_log_loss": "d2_logloss",
+    "bullet_d2_brier": "d2_brier",
+}
+
+
 def batch_kpi_card(plotly_key: str) -> rx.Component:
-    """Create a KPI card for batch ML metrics."""
+    """Create a KPI card for batch ML metrics with info button."""
+    metric_key = BATCH_PLOTLY_TO_METRIC_KEY.get(plotly_key)
     return rx.card(
         rx.vstack(
+            rx.hstack(
+                rx.spacer(),
+                metric_info_dialog(metric_key, "tfd") if metric_key else rx.fragment(),
+                width="100%",
+                justify="end"
+            ),
             rx.plotly(data=TFDState.tfd_batch_dashboard_figures[plotly_key], width="100%"),
             spacing="0",
             width="100%"
@@ -193,9 +225,16 @@ def batch_kpi_card(plotly_key: str) -> rx.Component:
 
 
 def batch_gauge_card(plotly_key: str) -> rx.Component:
-    """Create a gauge card for batch ML metrics."""
+    """Create a gauge card for batch ML metrics with info button."""
+    metric_key = BATCH_PLOTLY_TO_METRIC_KEY.get(plotly_key)
     return rx.card(
         rx.vstack(
+            rx.hstack(
+                rx.spacer(),
+                metric_info_dialog(metric_key, "tfd") if metric_key else rx.fragment(),
+                width="100%",
+                justify="end"
+            ),
             rx.plotly(data=TFDState.tfd_batch_dashboard_figures[plotly_key], width="100%"),
             spacing="0",
             width="100%"
@@ -205,14 +244,54 @@ def batch_gauge_card(plotly_key: str) -> rx.Component:
 
 
 def batch_bullet_card(plotly_key: str) -> rx.Component:
-    """Create a bullet chart card for batch ML metrics."""
+    """Create a bullet chart card for batch ML metrics with info button."""
+    metric_key = BATCH_PLOTLY_TO_METRIC_KEY.get(plotly_key)
     return rx.card(
         rx.vstack(
+            rx.hstack(
+                rx.spacer(),
+                metric_info_dialog(metric_key, "tfd") if metric_key else rx.fragment(),
+                width="100%",
+                justify="end"
+            ),
             rx.plotly(data=TFDState.tfd_batch_dashboard_figures[plotly_key], width="100%"),
             spacing="0",
             width="100%"
         ),
         size="1"
+    )
+
+
+def yellowbrick_dynamic_info_button() -> rx.Component:
+    """Create a dynamic info button that shows info for the currently selected YellowBrick visualizer.
+
+    Uses rx.match to render the correct info dialog based on TFDState.yellowbrick_metric_name.
+    """
+    # All possible YellowBrick visualizers
+    all_visualizers = [
+        # Classification
+        "ConfusionMatrix", "ClassificationReport", "ROCAUC",
+        "PrecisionRecallCurve", "ClassPredictionError", "DiscriminationThreshold",
+        # Feature Analysis
+        "Rank1D", "Rank2D", "PCA", "Manifold",
+        "ParallelCoordinates", "RadViz", "JointPlot",
+        # Target
+        "ClassBalance", "FeatureCorrelation", "FeatureCorrelation_Pearson", "BalancedBinningReference",
+        # Model Selection
+        "FeatureImportances", "CVScores", "ValidationCurve",
+        "LearningCurve", "RFECV", "DroppingCurve",
+    ]
+
+    # Build match cases: (visualizer_name, info_dialog_component)
+    match_cases = [
+        (vis, yellowbrick_info_dialog(vis, "tfd"))
+        for vis in all_visualizers
+    ]
+
+    return rx.match(
+        TFDState.yellowbrick_metric_name,
+        *match_cases,
+        rx.fragment()  # Default: no button if no valid selection
     )
 
 
@@ -1442,11 +1521,17 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
                                 # Model available - show visualization selector
                                 rx.vstack(
                                     rx.text("Select a visualization to display.", size="2", color="gray"),
-                                    rx.select(
-                                        TFDState.yellowbrick_metrics_options["Feature Analysis"],
-                                        value=TFDState.yellowbrick_metric_name,
-                                        on_change=lambda v: TFDState.set_yellowbrick_visualization("Feature Analysis", v),
-                                        placeholder="Select visualization...",
+                                    rx.hstack(
+                                        rx.select(
+                                            TFDState.yellowbrick_metrics_options["Feature Analysis"],
+                                            value=TFDState.yellowbrick_metric_name,
+                                            on_change=lambda v: TFDState.set_yellowbrick_visualization("Feature Analysis", v),
+                                            placeholder="Select visualization...",
+                                            width="100%"
+                                        ),
+                                        yellowbrick_dynamic_info_button(),
+                                        spacing="2",
+                                        align_items="center",
                                         width="100%"
                                     ),
                                     # Loading spinner with stop button
@@ -1526,11 +1611,17 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
                                 # Model available - show visualization selector
                                 rx.vstack(
                                     rx.text("Select a visualization to display.", size="2", color="gray"),
-                                    rx.select(
-                                        TFDState.yellowbrick_metrics_options["Target"],
-                                        value=TFDState.yellowbrick_metric_name,
-                                        on_change=lambda v: TFDState.set_yellowbrick_visualization("Target", v),
-                                        placeholder="Select visualization...",
+                                    rx.hstack(
+                                        rx.select(
+                                            TFDState.yellowbrick_metrics_options["Target"],
+                                            value=TFDState.yellowbrick_metric_name,
+                                            on_change=lambda v: TFDState.set_yellowbrick_visualization("Target", v),
+                                            placeholder="Select visualization...",
+                                            width="100%"
+                                        ),
+                                        yellowbrick_dynamic_info_button(),
+                                        spacing="2",
+                                        align_items="center",
                                         width="100%"
                                     ),
                                     # Loading spinner with stop button
@@ -1610,11 +1701,17 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
                                 # Model available - show visualization selector
                                 rx.vstack(
                                     rx.text("Select a visualization to display.", size="2", color="gray"),
-                                    rx.select(
-                                        TFDState.yellowbrick_metrics_options["Classification"],
-                                        value=TFDState.yellowbrick_metric_name,
-                                        on_change=lambda v: TFDState.set_yellowbrick_visualization("Classification", v),
-                                        placeholder="Select visualization...",
+                                    rx.hstack(
+                                        rx.select(
+                                            TFDState.yellowbrick_metrics_options["Classification"],
+                                            value=TFDState.yellowbrick_metric_name,
+                                            on_change=lambda v: TFDState.set_yellowbrick_visualization("Classification", v),
+                                            placeholder="Select visualization...",
+                                            width="100%"
+                                        ),
+                                        yellowbrick_dynamic_info_button(),
+                                        spacing="2",
+                                        align_items="center",
                                         width="100%"
                                     ),
                                     # Loading spinner with stop button
@@ -1694,11 +1791,17 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
                                 # Model available - show visualization selector
                                 rx.vstack(
                                     rx.text("Select a visualization to display.", size="2", color="gray"),
-                                    rx.select(
-                                        TFDState.yellowbrick_metrics_options["Model Selection"],
-                                        value=TFDState.yellowbrick_metric_name,
-                                        on_change=lambda v: TFDState.set_yellowbrick_visualization("Model Selection", v),
-                                        placeholder="Select visualization...",
+                                    rx.hstack(
+                                        rx.select(
+                                            TFDState.yellowbrick_metrics_options["Model Selection"],
+                                            value=TFDState.yellowbrick_metric_name,
+                                            on_change=lambda v: TFDState.set_yellowbrick_visualization("Model Selection", v),
+                                            placeholder="Select visualization...",
+                                            width="100%"
+                                        ),
+                                        yellowbrick_dynamic_info_button(),
+                                        spacing="2",
+                                        align_items="center",
                                         width="100%"
                                     ),
                                     # Loading spinner with stop button

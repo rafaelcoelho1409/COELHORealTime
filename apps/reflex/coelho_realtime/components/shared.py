@@ -9,7 +9,7 @@ This module contains:
 """
 
 import reflex as rx
-from ..states.shared import SharedState, METRIC_INFO
+from ..states.shared import SharedState, METRIC_INFO, YELLOWBRICK_INFO
 
 
 # Context titles for each project type
@@ -117,6 +117,144 @@ def metric_info_dialog(metric_key: str, project_key: str = "tfd") -> rx.Componen
                 align="start"
             ),
             max_width="500px"
+        )
+    )
+
+
+def yellowbrick_info_dialog(visualizer_key: str, project_key: str = "tfd") -> rx.Component:
+    """Create an info dialog button for YellowBrick visualizers.
+
+    Shows description, interpretation, fraud context, and when to use
+    for each YellowBrick visualization.
+    """
+    info = YELLOWBRICK_INFO.get(project_key, {}).get("visualizers", {}).get(visualizer_key, {})
+    if not info:
+        return rx.fragment()
+
+    return rx.dialog.root(
+        rx.dialog.trigger(
+            rx.icon_button(
+                rx.icon("info", size=12),
+                size="1",
+                variant="ghost",
+                color_scheme="gray",
+                cursor="pointer",
+                title=f"Learn about {info.get('name', visualizer_key)}"
+            )
+        ),
+        rx.dialog.content(
+            rx.hstack(
+                rx.dialog.title(
+                    rx.hstack(
+                        rx.icon("bar-chart-2", size=20),
+                        rx.text(info.get("name", visualizer_key)),
+                        spacing="2",
+                        align="center"
+                    ),
+                    margin="0"
+                ),
+                rx.spacer(),
+                rx.dialog.close(
+                    rx.icon_button(
+                        rx.icon("x", size=16),
+                        size="1",
+                        variant="ghost",
+                        color_scheme="gray",
+                        cursor="pointer"
+                    )
+                ),
+                width="100%",
+                align="center"
+            ),
+            rx.separator(size="4"),
+            rx.vstack(
+                # Category badge
+                rx.badge(
+                    info.get("category", "Visualizer"),
+                    color_scheme="purple",
+                    variant="soft",
+                    size="1"
+                ),
+                # Description section
+                rx.box(
+                    rx.vstack(
+                        rx.hstack(
+                            rx.icon("eye", size=14),
+                            rx.text("What it shows", weight="bold", size="2"),
+                            spacing="1",
+                            align="center"
+                        ),
+                        rx.text(info.get("description", ""), size="2"),
+                        spacing="1",
+                        align="start",
+                        width="100%"
+                    ),
+                    padding="3",
+                    background=rx.color("gray", 2),
+                    border_radius="8px",
+                    width="100%"
+                ),
+                # Interpretation section
+                rx.vstack(
+                    rx.hstack(
+                        rx.icon("scan-eye", size=14),
+                        rx.text("How to read it", weight="bold", size="2"),
+                        spacing="1",
+                        align="center"
+                    ),
+                    rx.markdown(info.get("interpretation", ""), component_map={"p": lambda text: rx.text(text, size="2")}),
+                    spacing="1",
+                    align="start",
+                    width="100%"
+                ),
+                # Fraud context section
+                rx.box(
+                    rx.vstack(
+                        rx.hstack(
+                            rx.icon("shield-alert", size=14),
+                            rx.text("In Fraud Detection", weight="bold", size="2"),
+                            spacing="1",
+                            align="center"
+                        ),
+                        rx.markdown(info.get("fraud_context", ""), component_map={"p": lambda text: rx.text(text, size="2")}),
+                        spacing="1",
+                        align="start",
+                        width="100%"
+                    ),
+                    padding="3",
+                    background=rx.color("accent", 2),
+                    border_radius="8px",
+                    width="100%"
+                ),
+                # When to use section
+                rx.vstack(
+                    rx.hstack(
+                        rx.icon("lightbulb", size=14),
+                        rx.text("When to use", weight="bold", size="2"),
+                        spacing="1",
+                        align="center"
+                    ),
+                    rx.text(info.get("when_to_use", ""), size="2"),
+                    spacing="1",
+                    align="start",
+                    width="100%"
+                ),
+                # Parameters info
+                rx.cond(
+                    info.get("parameters", "") != "",
+                    rx.hstack(
+                        rx.badge("Key params:", color_scheme="gray", variant="soft", size="1"),
+                        rx.code(info.get("parameters", ""), size="1"),
+                        spacing="2",
+                        wrap="wrap"
+                    ),
+                    rx.fragment()
+                ),
+                spacing="3",
+                width="100%",
+                align="start"
+            ),
+            max_width="550px"
         )
     )
 

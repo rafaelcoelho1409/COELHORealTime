@@ -5,7 +5,7 @@ This module provides a clean import interface for all state classes.
 
 Usage:
     from coelho_realtime.states import SharedState, TFDState, ETAState, ECCIState
-    from coelho_realtime.states import METRIC_INFO, DROPDOWN_OPTIONS
+    from coelho_realtime.states import METRIC_INFO, DROPDOWN_OPTIONS, YELLOWBRICK_INFO
 """
 
 # Shared base state and utilities
@@ -15,6 +15,7 @@ from .shared import (
 
     # Pre-loaded constants
     METRIC_INFO,
+    YELLOWBRICK_INFO,
     DROPDOWN_OPTIONS,
 
     # API base URLs
@@ -30,6 +31,7 @@ from .shared import (
     get_nested_str,
     parse_json_field,
     load_metric_info,
+    load_yellowbrick_info,
     load_dropdown_options,
 )
 
@@ -48,6 +50,7 @@ __all__ = [
 
     # Constants
     "METRIC_INFO",
+    "YELLOWBRICK_INFO",
     "DROPDOWN_OPTIONS",
     "RIVER_BASE_URL",
     "SKLEARN_BASE_URL",
@@ -61,5 +64,6 @@ __all__ = [
     "get_nested_str",
     "parse_json_field",
     "load_metric_info",
+    "load_yellowbrick_info",
     "load_dropdown_options",
 ]
