@@ -66,8 +66,10 @@ class TFDState(SharedState):
         ],
         "Target": [
             "Select visualization...",
-            "BalancedBinningReference",
-            "ClassBalance"
+            "ClassBalance",  # ESSENTIAL: Class distribution & imbalance detection
+            "FeatureCorrelation",  # HIGH: Mutual info correlation (non-linear)
+            "FeatureCorrelation_Pearson",  # Linear correlation
+            "BalancedBinningReference",  # For regression binning (skip for TFD)
         ],
         "Model Selection": [
             "Select visualization...",

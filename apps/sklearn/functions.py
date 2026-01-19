@@ -1078,11 +1078,44 @@ def yellowbrick_target_kwargs(
     labels: list = None,
     feature_names: list = None
 ) -> dict:
-    """Get kwargs for YellowBrick target visualizers."""
+    """Get kwargs for YellowBrick target visualizers.
+
+    Reference: https://www.scikit-yb.org/en/latest/api/target/index.html
+
+    Available visualizers:
+    - ClassBalance: Class distribution (ESSENTIAL for fraud detection)
+    - FeatureCorrelation: Feature-target correlation with mutual information
+    - FeatureCorrelation_Pearson: Feature-target correlation with Pearson
+    - BalancedBinningReference: Optimal bin boundaries (for regression)
+    """
     kwargs = {
-        "BalancedBinningReference": {},
+        # ClassBalance: CRITICAL for fraud detection - shows class imbalance
+        # Docs: https://www.scikit-yb.org/en/latest/api/target/class_balance.html
         "ClassBalance": {
-            "labels": labels,
+            "labels": labels if labels else ["Non-Fraud", "Fraud"],
+            "colors": ["#2ecc71", "#e74c3c"],  # Green=non-fraud, Red=fraud
+        },
+        # FeatureCorrelation with Mutual Information (best for classification)
+        # Captures non-linear relationships between features and target
+        # Docs: https://www.scikit-yb.org/en/latest/api/target/feature_correlation.html
+        "FeatureCorrelation": {
+            "method": "mutual_info-classification",  # Best for binary classification
+            "labels": feature_names,
+            "sort": True,  # Sort by correlation (most important first)
+            "color": "#3498db",  # Blue bars
+        },
+        # FeatureCorrelation with Pearson (faster, linear only)
+        "FeatureCorrelation_Pearson": {
+            "method": "pearson",
+            "labels": feature_names,
+            "sort": True,
+            "color": "#9b59b6",  # Purple bars
+        },
+        # BalancedBinningReference: NOT useful for binary classification
+        # Use for regression (ETA) to discretize continuous targets
+        "BalancedBinningReference": {
+            "target": "is_fraud",
+            "bins": 4,
         },
     }
     return {metric_name: kwargs.get(metric_name, {})}
@@ -1093,12 +1126,32 @@ def yellowbrick_target_visualizers(
     X: pd.DataFrame,
     y: pd.Series,
 ):
-    """Create and fit YellowBrick target visualizer."""
+    """Create and fit YellowBrick target visualizer.
+
+    Reference: https://www.scikit-yb.org/en/latest/api/target/index.html
+
+    Fit Methods:
+    - ClassBalance: fit(y)
+    - BalancedBinningReference: fit(y)
+    - FeatureCorrelation: fit(X, y)
+    - FeatureCorrelation_Pearson: fit(X, y)
+    """
+    # Map _Pearson suffix to actual class name
+    visualizer_name_map = {
+        "FeatureCorrelation_Pearson": "FeatureCorrelation",
+    }
+
     for visualizer_name, params in yb_kwargs.items():
-        visualizer = getattr(target, visualizer_name)(**params)
+        # Get actual class name (handle _Pearson suffix)
+        actual_class_name = visualizer_name_map.get(visualizer_name, visualizer_name)
+        visualizer = getattr(target, actual_class_name)(**params)
+
+        # Fit based on visualizer type
         if visualizer_name in ["BalancedBinningReference", "ClassBalance"]:
+            # Target-only visualizers
             visualizer.fit(y)
         else:
+            # Feature-target correlation visualizers need X
             visualizer.fit(X, y)
         return visualizer
     return None
