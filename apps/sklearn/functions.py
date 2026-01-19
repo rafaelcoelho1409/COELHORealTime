@@ -290,16 +290,120 @@ def get_best_mlflow_run(project_name: str, model_name: str) -> Optional[str]:
         return None
 
 
-def load_model_from_mlflow(project_name: str, model_name: str):
-    """Load model from the best MLflow run based on metrics.
+def get_all_mlflow_runs(project_name: str, model_name: str) -> list[dict]:
+    """Get all MLflow runs for a project, ordered by metric criteria (best first).
 
-    Uses get_best_mlflow_run to find the run with optimal metrics.
+    Each project (TFD, ETA, ECCI) has its own MLflow experiment.
+    Returns runs ordered by BEST_METRIC_CRITERIA:
+    - TFD: fbeta_score DESC (maximize)
+    - ETA: MAE ASC (minimize)
+    - ECCI: silhouette_score DESC (maximize)
+
+    Returns:
+        List of run info dicts with: run_id, run_name, start_time,
+        metrics, params, total_rows, is_best (True for first/best run)
+    """
+    try:
+        experiment = get_cached_experiment(project_name)
+        if experiment is None:
+            print(f"No MLflow experiment found for {project_name}")
+            return []
+
+        # Search for completed runs
+        runs_df = mlflow.search_runs(
+            experiment_ids=[experiment.experiment_id],
+            filter_string="status = 'FINISHED'",
+            order_by=["start_time DESC"],
+            max_results=100,
+        )
+
+        if runs_df.empty:
+            return []
+
+        # Filter by model name
+        filtered_runs = runs_df[runs_df["tags.mlflow.runName"] == model_name]
+        if filtered_runs.empty:
+            return []
+
+        # Get metric criteria for sorting (each project has different criteria)
+        criteria = BEST_METRIC_CRITERIA.get(project_name)
+        if criteria:
+            metric_name = criteria["metric_name"]
+            maximize = criteria["maximize"]
+            metric_column = f"metrics.{metric_name}"
+
+            if metric_column in filtered_runs.columns:
+                # Sort by metric (best first based on maximize/minimize)
+                ascending = not maximize
+                filtered_runs = filtered_runs.sort_values(
+                    by=metric_column,
+                    ascending=ascending,
+                    na_position='last'
+                )
+
+        # Filter only runs with model artifacts
+        valid_runs = []
+        for idx, row in filtered_runs.iterrows():
+            if not _run_has_model_artifact(row["run_id"], model_name):
+                continue
+
+            # Extract metrics
+            metrics = {}
+            for col in row.index:
+                if col.startswith("metrics."):
+                    metric_key = col.replace("metrics.", "")
+                    val = row[col]
+                    if pd.notna(val):
+                        metrics[metric_key] = round(float(val), 4)
+
+            # Extract params
+            params = {}
+            for col in row.index:
+                if col.startswith("params."):
+                    param_key = col.replace("params.", "")
+                    val = row[col]
+                    if pd.notna(val):
+                        params[param_key] = val
+
+            # Calculate total rows
+            train_samples = int(params.get("train_samples", 0) or 0)
+            test_samples = int(params.get("test_samples", 0) or 0)
+            total_rows = train_samples + test_samples
+
+            valid_runs.append({
+                "run_id": row["run_id"],
+                "run_name": row.get("tags.mlflow.runName", model_name),
+                "start_time": row["start_time"].isoformat() if pd.notna(row["start_time"]) else None,
+                "end_time": row["end_time"].isoformat() if pd.notna(row.get("end_time")) else None,
+                "metrics": metrics,
+                "params": params,
+                "total_rows": total_rows,
+                "is_best": len(valid_runs) == 0,  # First valid run is best
+            })
+
+        print(f"Found {len(valid_runs)} valid runs for {project_name}/{model_name}")
+        return valid_runs
+
+    except Exception as e:
+        print(f"Error getting all MLflow runs: {e}")
+        return []
+
+
+def load_model_from_mlflow(project_name: str, model_name: str, run_id: str = None):
+    """Load model from MLflow run.
+
+    Args:
+        project_name: MLflow experiment name (e.g., "Transaction Fraud Detection")
+        model_name: Model name tag (e.g., "CatBoostClassifier")
+        run_id: Optional specific run ID. If None, uses get_best_mlflow_run().
 
     Returns:
         Loaded model, or None if not found.
     """
     try:
-        run_id = get_best_mlflow_run(project_name, model_name)
+        # Use provided run_id or find the best one
+        if run_id is None:
+            run_id = get_best_mlflow_run(project_name, model_name)
         if run_id is None:
             return None
 
@@ -328,11 +432,12 @@ def load_model_from_mlflow(project_name: str, model_name: str):
         return None
 
 
-def load_encoders_from_mlflow(project_name: str) -> Optional[Dict[str, Any]]:
-    """Load encoders from the best MLflow run based on metrics.
+def load_encoders_from_mlflow(project_name: str, run_id: str = None) -> Optional[Dict[str, Any]]:
+    """Load encoders from MLflow run.
 
-    Uses get_best_mlflow_run to find the run with optimal metrics,
-    ensuring encoders are loaded from the same run as the best model.
+    Args:
+        project_name: MLflow experiment name
+        run_id: Optional specific run ID. If None, uses get_best_mlflow_run().
 
     Returns:
         Dict with preprocessor/encoders, or None if not found.
@@ -343,7 +448,9 @@ def load_encoders_from_mlflow(project_name: str) -> Optional[Dict[str, Any]]:
             print(f"Unknown project for encoder loading: {project_name}")
             return None
 
-        run_id = get_best_mlflow_run(project_name, model_name)
+        # Use provided run_id or find the best one
+        if run_id is None:
+            run_id = get_best_mlflow_run(project_name, model_name)
         if run_id is None:
             return None
 
@@ -395,11 +502,16 @@ def load_or_create_sklearn_encoders(project_name: str) -> Dict[str, Any]:
 
 def load_training_data_from_mlflow(
     project_name: str,
+    run_id: str = None,
 ) -> Optional[tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, list[str]]]:
-    """Load training data from the best MLflow run's artifacts.
+    """Load training data from MLflow run's artifacts.
 
     This ensures YellowBrick visualizations use the EXACT same data
-    that was used to train the best model, guaranteeing 100% reproducibility.
+    that was used to train the selected model, guaranteeing 100% reproducibility.
+
+    Args:
+        project_name: MLflow experiment name
+        run_id: Optional specific run ID. If None, uses get_best_mlflow_run().
 
     Returns:
         Tuple of (X_train, X_test, y_train, y_test, feature_names) or None if not found.
@@ -410,9 +522,11 @@ def load_training_data_from_mlflow(
             print(f"Unknown project for training data loading: {project_name}")
             return None
 
-        run_id = get_best_mlflow_run(project_name, model_name)
+        # Use provided run_id or find the best one
         if run_id is None:
-            print(f"No best run found for {project_name}")
+            run_id = get_best_mlflow_run(project_name, model_name)
+        if run_id is None:
+            print(f"No run found for {project_name}")
             return None
 
         print(f"Loading training data from MLflow run: {run_id}")

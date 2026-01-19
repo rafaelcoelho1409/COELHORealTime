@@ -11,7 +11,7 @@ All components use TFDState for TFD-specific state.
 """
 import reflex as rx
 from ..states import TFDState, SharedState, METRIC_INFO
-from .shared import metric_info_dialog, ml_training_switch, batch_ml_training_box
+from .shared import metric_info_dialog, ml_training_switch, batch_ml_training_box, mlflow_run_selector
 
 
 # =============================================================================
@@ -1136,9 +1136,10 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
         width="100%"
     )
 
-    # Build left column with batch ML training box
+    # Build left column with run selector, batch ML training box, and form
     if model_key and project_name:
         left_column = rx.vstack(
+            mlflow_run_selector(project_name),  # Run selector at top
             batch_ml_training_box(model_key, project_name),
             form_card,
             spacing="4",
@@ -1146,6 +1147,7 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
         )
     else:
         left_column = rx.vstack(
+            mlflow_run_selector("Transaction Fraud Detection"),  # Run selector at top
             batch_ml_training_box("CatBoostClassifier", "Transaction Fraud Detection"),
             form_card,
             spacing="4",
@@ -1185,22 +1187,6 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
                         spacing="2",
                         align_items="center",
                         width="100%"
-                    ),
-                    # Model info row
-                    rx.hstack(
-                        rx.badge(
-                            rx.hstack(
-                                rx.icon("brain", size=12),
-                                rx.text("CatBoost Classifier (Scikit-Learn)", size="1"),
-                                spacing="1",
-                                align_items="center"
-                            ),
-                            color_scheme="purple",
-                            variant="soft",
-                            size="1"
-                        ),
-                        rx.badge("Batch ML", color_scheme="blue", variant="soft", size="1"),
-                        spacing="2"
                     ),
                     rx.cond(
                         TFDState.tfd_batch_prediction_show,
@@ -1326,22 +1312,6 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
                             title="Refresh metrics"
                         ),
                         align_items="center",
-                        spacing="2"
-                    ),
-                    # Model info row
-                    rx.hstack(
-                        rx.badge(
-                            rx.hstack(
-                                rx.icon("brain", size=12),
-                                rx.text("CatBoost Classifier (Scikit-Learn)", size="1"),
-                                spacing="1",
-                                align_items="center"
-                            ),
-                            color_scheme="purple",
-                            variant="soft",
-                            size="1"
-                        ),
-                        rx.badge("Batch ML", color_scheme="blue", variant="soft", size="1"),
                         spacing="2"
                     ),
                     # Metrics subtabs (YellowBrick categories)
@@ -1740,6 +1710,7 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
                             value="model_selection"
                         ),
                         default_value="overview",
+                        on_change=lambda _: TFDState.clear_yellowbrick_visualization(),
                         width="100%"
                     ),
                     spacing="4",

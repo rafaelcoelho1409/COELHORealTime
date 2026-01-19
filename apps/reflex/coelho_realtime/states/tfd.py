@@ -805,6 +805,13 @@ class TFDState(SharedState):
         self.yellowbrick_error = ""
 
     @rx.event
+    def clear_yellowbrick_visualization(self):
+        """Clear YellowBrick visualization state (called on tab change)."""
+        self.yellowbrick_image_base64 = ""
+        self.yellowbrick_error = ""
+        self.yellowbrick_metric_name = "Select visualization..."
+
+    @rx.event
     def set_yellowbrick_metric_name(self, metric_name: str):
         """Set YellowBrick metric name."""
         self.yellowbrick_metric_name = metric_name
@@ -826,9 +833,11 @@ class TFDState(SharedState):
 
     @rx.event(background=True)
     async def fetch_yellowbrick_metric(self, project_name: str):
-        """Fetch YellowBrick visualization from FastAPI."""
+        """Fetch YellowBrick visualization from FastAPI using selected MLflow run."""
         metric_type = self.yellowbrick_metric_type
         metric_name = self.yellowbrick_metric_name
+        # Use selected run_id from SharedState (or None for best)
+        run_id = self.selected_batch_run.get(project_name) or None
 
         if not metric_name or metric_name == "Select visualization...":
             async with self:
@@ -848,7 +857,8 @@ class TFDState(SharedState):
                 json={
                     "project_name": project_name,
                     "metric_type": metric_type,
-                    "metric_name": metric_name
+                    "metric_name": metric_name,
+                    "run_id": run_id,  # Use selected run's data
                 },
                 timeout=300.0  # 5 minutes for slow visualizations like Manifold
             )
@@ -907,15 +917,18 @@ class TFDState(SharedState):
 
     @rx.event(background=True)
     async def predict_batch_tfd(self):
-        """Make batch prediction for TFD using Scikit-Learn model."""
+        """Make batch prediction for TFD using Scikit-Learn model from selected run."""
         project_name = "Transaction Fraud Detection"
         current_form = self.form_data.get(project_name, {})
+        # Use selected run_id from SharedState (or None for best)
+        run_id = self.selected_batch_run.get(project_name) or None
         # Combine date and time
         timestamp = f"{current_form.get('timestamp_date', '')}T{current_form.get('timestamp_time', '')}:00.000000+00:00"
         # Prepare request payload from current form state
         payload = {
             "project_name": project_name,
             "model_name": "CatBoostClassifier",
+            "run_id": run_id,  # Use selected run's model
             "transaction_id": current_form.get("transaction_id", ""),
             "user_id": current_form.get("user_id", ""),
             "timestamp": timestamp,

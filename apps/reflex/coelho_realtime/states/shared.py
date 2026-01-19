@@ -15,7 +15,24 @@ import plotly.graph_objects as go
 import folium
 import orjson
 from pathlib import Path
+from typing import Optional
+from pydantic import BaseModel
 from ..utils import httpx_client_post, httpx_client_get
+
+
+# =============================================================================
+# MLflow Run Type Definition (for typed foreach in Reflex)
+# =============================================================================
+class MLflowRunInfo(BaseModel):
+    """Pydantic model for MLflow run info returned by /mlflow_runs endpoint."""
+    run_id: str
+    run_name: str
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    metrics: dict = {}
+    params: dict = {}
+    total_rows: int = 0
+    is_best: bool = False
 
 # =============================================================================
 # API Base URLs
@@ -322,6 +339,28 @@ class SharedState(rx.State):
         "Transaction Fraud Detection": 0,
         "Estimated Time of Arrival": 0,
         "E-Commerce Customer Interactions": 0
+    }
+
+    # ==========================================================================
+    # MLFLOW RUN SELECTION STATE VARIABLES
+    # ==========================================================================
+    # All available MLflow runs for each project (ordered by criteria, best first)
+    batch_mlflow_runs: dict[str, list[MLflowRunInfo]] = {
+        "Transaction Fraud Detection": [],
+        "Estimated Time of Arrival": [],
+        "E-Commerce Customer Interactions": []
+    }
+    # Currently selected run_id for each project (empty string = use best/first)
+    selected_batch_run: dict[str, str] = {
+        "Transaction Fraud Detection": "",
+        "Estimated Time of Arrival": "",
+        "E-Commerce Customer Interactions": ""
+    }
+    # Loading state for fetching runs list
+    batch_runs_loading: dict[str, bool] = {
+        "Transaction Fraud Detection": False,
+        "Estimated Time of Arrival": False,
+        "E-Commerce Customer Interactions": False
     }
 
     # ==========================================================================
@@ -1377,14 +1416,17 @@ class SharedState(rx.State):
 
     @rx.event(background=True)
     async def get_batch_mlflow_metrics(self, project_name: str):
-        """Fetch MLflow metrics for a batch model (no toast - for background fetches)."""
+        """Fetch MLflow metrics for selected run (no toast - for background fetches)."""
         model_name = self._batch_model_names.get(project_name, "CatBoostClassifier")
+        # Use selected run_id if set, otherwise endpoint uses best
+        run_id = self.selected_batch_run.get(project_name) or None
         try:
             response = await httpx_client_post(
                 url=f"{SKLEARN_BASE_URL}/mlflow_metrics",
                 json={
                     "project_name": project_name,
-                    "model_name": model_name
+                    "model_name": model_name,
+                    "run_id": run_id,
                 },
                 timeout=60.0
             )
@@ -1394,11 +1436,15 @@ class SharedState(rx.State):
                 # Set total_rows from MLflow params (persists across page refresh)
                 train_samples = metrics_data.get("params.train_samples")
                 test_samples = metrics_data.get("params.test_samples")
-                print(f"[DEBUG] get_batch_mlflow_metrics: train_samples={train_samples}, test_samples={test_samples}")
+                print(f"[DEBUG] get_batch_mlflow_metrics: run_id={run_id}, train_samples={train_samples}, test_samples={test_samples}")
                 if train_samples and test_samples:
                     total = int(train_samples) + int(test_samples)
                     print(f"[DEBUG] Setting batch_training_total_rows[{project_name}] = {total}")
                     self.batch_training_total_rows[project_name] = total
+                # Update MLflow URL to link directly to the selected run
+                run_url = metrics_data.get("run_url")
+                if run_url:
+                    self.batch_mlflow_experiment_url[project_name] = run_url
 
         except Exception as e:
             print(f"Error fetching batch MLflow metrics: {e}")
@@ -1409,12 +1455,15 @@ class SharedState(rx.State):
     async def refresh_batch_mlflow_metrics(self, project_name: str):
         """Force refresh batch MLflow metrics with toast notification."""
         model_name = self._batch_model_names.get(project_name, "CatBoostClassifier")
+        # Use selected run_id if set, otherwise endpoint uses best
+        run_id = self.selected_batch_run.get(project_name) or None
         try:
             response = await httpx_client_post(
                 url=f"{SKLEARN_BASE_URL}/mlflow_metrics",
                 json={
                     "project_name": project_name,
                     "model_name": model_name,
+                    "run_id": run_id,
                     "force_refresh": True
                 },
                 timeout=60.0
@@ -1427,6 +1476,10 @@ class SharedState(rx.State):
                 test_samples = metrics_data.get("params.test_samples")
                 if train_samples and test_samples:
                     self.batch_training_total_rows[project_name] = int(train_samples) + int(test_samples)
+                # Update MLflow URL to link directly to the selected run
+                run_url = metrics_data.get("run_url")
+                if run_url:
+                    self.batch_mlflow_experiment_url[project_name] = run_url
 
             yield rx.toast.success(
                 "Batch metrics refreshed",
@@ -1443,9 +1496,57 @@ class SharedState(rx.State):
 
     @rx.event(background=True)
     async def init_batch_page(self, project_name: str):
-        """Initialize batch ML page - check model availability and fetch metrics."""
+        """Initialize batch ML page - fetch runs list and metrics."""
         print(f"[DEBUG] init_batch_page called for: {project_name}")
+        # Fetch list of available MLflow runs (ordered by criteria, best first)
+        yield SharedState.fetch_mlflow_runs(project_name)
         # Check model availability
         yield SharedState.check_batch_model_available(project_name)
-        # Fetch metrics if model available
+        # Fetch metrics for selected run (or best if none selected)
         yield SharedState.get_batch_mlflow_metrics(project_name)
+
+    @rx.event(background=True)
+    async def fetch_mlflow_runs(self, project_name: str):
+        """Fetch list of all MLflow runs for a project (ordered by criteria, best first)."""
+        async with self:
+            self.batch_runs_loading[project_name] = True
+
+        try:
+            response = await httpx_client_post(
+                url=f"{SKLEARN_BASE_URL}/mlflow_runs",
+                json={"project_name": project_name},
+                timeout=30.0
+            )
+            runs_data = response.json()
+            # Convert to Pydantic models for typed foreach in Reflex
+            runs = [MLflowRunInfo(**run) for run in runs_data]
+            async with self:
+                self.batch_mlflow_runs[project_name] = runs
+                self.batch_runs_loading[project_name] = False
+                # If no run selected and runs exist, select the best (first)
+                if not self.selected_batch_run[project_name] and runs:
+                    self.selected_batch_run[project_name] = runs[0].run_id
+                print(f"[DEBUG] Fetched {len(runs)} MLflow runs for {project_name}")
+
+        except Exception as e:
+            print(f"Error fetching MLflow runs: {e}")
+            async with self:
+                self.batch_mlflow_runs[project_name] = []
+                self.batch_runs_loading[project_name] = False
+
+    @rx.event(background=True)
+    async def select_batch_run(self, project_name: str, run_id: str):
+        """Select a specific MLflow run and refresh metrics/visualizations."""
+        async with self:
+            self.selected_batch_run[project_name] = run_id
+            # Clear current metrics while loading new ones
+            self.batch_mlflow_metrics[project_name] = {}
+
+        # Refresh metrics for the newly selected run
+        yield SharedState.get_batch_mlflow_metrics(project_name)
+
+        yield rx.toast.info(
+            "Run selected",
+            description=f"Switched to run {run_id[:8]}...",
+            duration=2000
+        )

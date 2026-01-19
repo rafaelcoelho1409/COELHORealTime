@@ -107,15 +107,38 @@ Kafka → River ML Training Scripts → MLflow
 - [ ] Add model info to Reflex UI:
   - [ ] Display current model version on each page
   - [ ] Show last model update timestamp
-- [ ] **MLflow Model Selector Dropdown** (Priority: MEDIUM)
-  - [ ] Allow user to choose which MLflow model run to use for predictions
-  - [ ] Applies to both River (Incremental ML) and Scikit-Learn (Batch ML)
-  - [ ] Dropdown shows all available runs from the project's MLflow experiment
-  - [ ] Best model (based on `BEST_METRIC_CRITERIA`) flagged with visual indicator (e.g., "⭐ Best" badge)
-  - [ ] Best model set as default selected option
-  - [ ] Display key metrics alongside each run option (run_id, metric value, timestamp)
-  - [ ] Selection updates the model used for `/predict` endpoint
+- [x] **MLflow Model Selector Dropdown - Batch ML (Scikit-Learn)** (COMPLETED - January 2026)
+  - [x] Allow user to choose which MLflow model run to use for predictions
+  - [x] Dropdown shows all available runs from the project's MLflow experiment
+  - [x] Best model (based on `BEST_METRIC_CRITERIA`) flagged with visual indicator ("★ Best")
+  - [x] Best model set as default selected option
+  - [x] Runs ordered by metric criteria (TFD: fbeta_score DESC, ETA: MAE ASC, ECCI: silhouette_score DESC)
+  - [x] Selection updates:
+    - [x] Metrics display (`/mlflow_metrics` with `run_id`)
+    - [x] YellowBrick visualizations (`/yellowbrick_metric` with `run_id`)
+    - [x] MLflow URL (direct link to selected run)
+    - [x] Batch predictions (`/predict` with `run_id`)
+  - [x] Total rows badge persists across page refresh (loaded from MLflow params)
+  - [x] Implemented for TFD page (ETA, ECCI pending)
+  - **Files modified:**
+    - `apps/sklearn/app.py` - `/mlflow_runs` endpoint, `run_id` support in `/mlflow_metrics`, `/yellowbrick_metric`, `/predict`
+    - `apps/sklearn/functions.py` - `get_all_mlflow_runs()`, `run_id` support in `load_model_from_mlflow()`, `load_training_data_from_mlflow()`
+    - `apps/reflex/coelho_realtime/states/shared.py` - `MLflowRunInfo` Pydantic model, `batch_mlflow_runs`, `selected_batch_run`, `fetch_mlflow_runs()`, `select_batch_run()`
+    - `apps/reflex/coelho_realtime/components/shared.py` - `mlflow_run_selector()` component
+    - `apps/reflex/coelho_realtime/states/tfd.py` - `run_id` in `fetch_yellowbrick_metric()`, `predict_batch_tfd()`
+    - `apps/reflex/coelho_realtime/components/tfd.py` - Added `mlflow_run_selector` to batch form
+- [ ] **MLflow Model Selector Dropdown - Incremental ML (River)** (Priority: MEDIUM)
+  - [ ] Implement same functionality for River ML (Incremental) models
+  - [ ] Add `/mlflow_runs` endpoint to River service
+  - [ ] Add `run_id` support to River `/mlflow_metrics` endpoint
+  - [ ] Add `run_id` support to River `/predict` endpoint
+  - [ ] Update Reflex Incremental ML tab with run selector dropdown
   - [ ] Implement for all pages: TFD, ETA, ECCI
+- [ ] **MLflow Model Selector - ETA and ECCI Batch ML** (Priority: MEDIUM)
+  - [ ] Add `mlflow_run_selector` to ETA Batch ML tab
+  - [ ] Add `mlflow_run_selector` to ECCI Batch ML tab
+  - [ ] Update ETA state with `run_id` support for predictions/visualizations
+  - [ ] Update ECCI state with `run_id` support for predictions/visualizations
 - [ ] **Persist River ML Metrics Across Training Runs** (Priority: MEDIUM)
   - Problem: When training continues from best model, metrics (FBeta, Recall, etc.) reset to zero
   - Current behavior: Model loads correctly, but metric objects are created fresh each run
@@ -987,6 +1010,27 @@ Services Removed:
   - Prediction during training ~5-10ms faster
   - Cluster visualizations ~200-500ms faster on cached requests
 
+### MLflow Run Selector for Batch ML (January 2026)
+- **Problem:** Users could only use the "best" model, couldn't test/compare other trained runs
+- **Solution:** Dropdown selector to choose any MLflow run for all Batch ML functionalities
+- **Implementation:**
+  - Backend: `/mlflow_runs` endpoint lists all runs ordered by metric criteria
+  - Backend: `/mlflow_metrics`, `/yellowbrick_metric`, `/predict` accept optional `run_id`
+  - Frontend: `MLflowRunInfo` Pydantic model for typed state
+  - Frontend: `mlflow_run_selector()` component with dropdown
+  - Frontend: All functionalities connected to selected run
+- **Features:**
+  - Runs ordered by project criteria (TFD: fbeta_score DESC, ETA: MAE ASC, ECCI: silhouette_score DESC)
+  - Best run marked with "★" indicator
+  - MLflow button links directly to selected run (not just experiment)
+  - Total rows badge persists across page refresh (from MLflow params)
+- **Connected functionalities:**
+  - Metrics display (loads metrics from selected run)
+  - YellowBrick visualizations (uses training data from selected run)
+  - Batch predictions (loads model from selected run)
+  - MLflow URL (direct link to selected run page)
+- **Files modified:** `app.py`, `functions.py` (sklearn), `shared.py`, `tfd.py` (states/components)
+
 ---
 
 ## Notes
@@ -1027,4 +1071,4 @@ Services Removed:
 
 ---
 
-*Last updated: 2026-01-17 (Added MLflow Model Selector Dropdown idea; Added Polars removal task - migrating to DuckDB only)*
+*Last updated: 2026-01-19 (MLflow Run Selector for Batch ML completed; Added tasks for River Incremental ML and ETA/ECCI Batch ML run selectors)*

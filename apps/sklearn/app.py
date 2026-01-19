@@ -42,9 +42,10 @@ from functions import (
     load_model_from_mlflow,
     load_encoders_from_mlflow,
     get_best_mlflow_run,
+    get_all_mlflow_runs,
     load_training_data_from_mlflow,
 )
-from visualization_cache import visualization_cache
+# Redis visualization cache removed - using MLflow artifact caching instead
 
 
 MLFLOW_HOST = os.getenv("MLFLOW_HOST", "localhost")
@@ -253,8 +254,39 @@ class MLflowMetricsCache:
 mlflow_cache = MLflowMetricsCache(ttl_seconds=30)
 
 
-def _sync_get_mlflow_metrics(project_name: str, model_name: str) -> dict:
-    """Synchronous MLflow query - to be run in thread pool."""
+def _sync_get_mlflow_metrics(project_name: str, model_name: str, run_id: str = None) -> dict:
+    """Synchronous MLflow query - to be run in thread pool.
+
+    Args:
+        project_name: MLflow experiment name
+        model_name: Model name tag
+        run_id: Optional specific run ID. If None, uses best run based on criteria.
+    """
+    if run_id:
+        # Get specific run by ID
+        client = mlflow.MlflowClient()
+        run = client.get_run(run_id)
+        experiment_id = run.info.experiment_id
+        # Convert to dict format similar to search_runs output
+        result = {
+            "run_id": run.info.run_id,
+            "experiment_id": experiment_id,
+            "status": run.info.status,
+            "start_time": run.info.start_time,
+            "end_time": run.info.end_time,
+            "tags.mlflow.runName": run.data.tags.get("mlflow.runName", model_name),
+            # Direct link to this specific run in MLflow UI
+            "run_url": f"http://localhost:5001/#/experiments/{experiment_id}/runs/{run.info.run_id}",
+        }
+        # Add metrics
+        for key, value in run.data.metrics.items():
+            result[f"metrics.{key}"] = value
+        # Add params
+        for key, value in run.data.params.items():
+            result[f"params.{key}"] = value
+        return result
+
+    # Default: get best run based on criteria
     experiment = mlflow.get_experiment_by_name(project_name)
     if experiment is None:
         raise ValueError(f"Experiment '{project_name}' not found in MLflow")
@@ -268,7 +300,10 @@ def _sync_get_mlflow_metrics(project_name: str, model_name: str) -> dict:
     if runs_df.empty:
         raise ValueError(f"No runs found for model '{model_name}'")
     run_df = runs_df.iloc[0]
-    return run_df.replace({np.nan: None}).to_dict()
+    result = run_df.replace({np.nan: None}).to_dict()
+    # Add direct link to the run in MLflow UI
+    result["run_url"] = f"http://localhost:5001/#/experiments/{experiment_id}/runs/{result.get('run_id', '')}"
+    return result
 
 
 # =============================================================================
@@ -307,6 +342,7 @@ class TransactionFraudDetection(BaseModel):
 class PredictRequest(BaseModel):
     project_name: str
     model_name: str
+    run_id: Optional[str] = None  # Optional: specific run, or None for best
     transaction_id: Optional[str] = None
     user_id: Optional[str] = None
     timestamp: Optional[str] = None
@@ -328,6 +364,7 @@ class PredictRequest(BaseModel):
 class MLflowMetricsRequest(BaseModel):
     project_name: str
     model_name: str
+    run_id: Optional[str] = None  # Optional: specific run, or None for best
     force_refresh: bool = False
 
 
@@ -443,13 +480,14 @@ async def update_healthcheck(update_data: SklearnHealthcheck):
 
 @app.post("/predict")
 async def predict(request: PredictRequest):
-    """Make batch ML prediction using best CatBoostClassifier from MLflow.
+    """Make batch ML prediction using CatBoostClassifier from MLflow.
 
-    Uses model cache to avoid loading model on every request.
-    Selects best model based on fbeta_score (beta=2.0) for fraud detection.
+    If run_id is provided, loads model from that specific run.
+    Otherwise, uses model cache to get best model based on fbeta_score.
     """
     project_name = request.project_name
     model_name = request.model_name
+    requested_run_id = request.run_id  # Optional: specific run to use
 
     if model_name != "CatBoostClassifier":
         raise HTTPException(status_code=400, detail=f"Model {model_name} not supported")
@@ -477,8 +515,16 @@ async def predict(request: PredictRequest):
         try:
             X = process_sklearn_sample(sample, project_name)
 
-            # Get best model from cache (loads from MLflow if expired/missing)
-            model, run_id = model_cache.get_model(project_name)
+            if requested_run_id:
+                # Load model from specific run (not cached)
+                model = load_model_from_mlflow(project_name, model_name, run_id=requested_run_id)
+                run_id = requested_run_id
+                is_best_model = False
+            else:
+                # Get best model from cache (loads from MLflow if expired/missing)
+                model, run_id = model_cache.get_model(project_name)
+                is_best_model = True
+
             if model is None:
                 raise HTTPException(
                     status_code=404,
@@ -493,7 +539,7 @@ async def predict(request: PredictRequest):
                 "fraud_probability": float(fraud_probability),
                 "model_name": model_name,
                 "run_id": run_id,
-                "best_model": True  # Indicates this is from best model selection
+                "best_model": is_best_model
             }
         except HTTPException:
             raise
@@ -543,10 +589,61 @@ async def invalidate_model_cache(project_name: str = None):
     return {"message": "All caches invalidated"}
 
 
+# =============================================================================
+# MLflow Run Listing Endpoint
+# =============================================================================
+@app.post("/mlflow_runs")
+async def list_mlflow_runs(payload: dict):
+    """List all MLflow runs for a project, ordered by metric criteria (best first).
+
+    Each project (TFD, ETA, ECCI) has its own MLflow experiment with different
+    metric criteria for ordering:
+    - TFD: fbeta_score DESC (maximize)
+    - ETA: MAE ASC (minimize)
+    - ECCI: silhouette_score DESC (maximize)
+
+    Payload:
+        project_name: str - MLflow experiment name
+        model_name: str (optional) - Model name filter, defaults to project's default
+
+    Returns:
+        List of runs with: run_id, run_name, start_time, metrics, params,
+        total_rows, is_best (first run is best based on criteria)
+    """
+    project_name = payload.get("project_name")
+    model_name = payload.get("model_name") or MLFLOW_MODEL_NAMES.get(project_name)
+
+    if not project_name:
+        raise HTTPException(status_code=400, detail="project_name is required")
+    if not model_name:
+        raise HTTPException(status_code=400, detail=f"Unknown project: {project_name}")
+
+    try:
+        runs = await asyncio.wait_for(
+            asyncio.to_thread(get_all_mlflow_runs, project_name, model_name),
+            timeout=30.0
+        )
+        return runs
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="MLflow query timed out")
+    except Exception as e:
+        print(f"Error listing MLflow runs: {e}", file=sys.stderr)
+        raise HTTPException(status_code=500, detail=f"Failed to list MLflow runs: {str(e)}")
+
+
 @app.post("/mlflow_metrics")
 async def get_mlflow_metrics(request: MLflowMetricsRequest):
-    """Get MLflow metrics with caching."""
-    cache_key = f"{request.project_name}:{request.model_name}"
+    """Get MLflow metrics for a specific run or best run.
+
+    Args (via request body):
+        project_name: MLflow experiment name
+        model_name: Model name tag
+        run_id: Optional specific run ID. If None, uses best run.
+        force_refresh: Bypass cache if True
+    """
+    # Cache key includes run_id (None becomes "best" in key)
+    cache_run_key = request.run_id or "best"
+    cache_key = f"{request.project_name}:{request.model_name}:{cache_run_key}"
 
     if not request.force_refresh:
         cached_result = mlflow_cache.get(cache_key)
@@ -558,7 +655,8 @@ async def get_mlflow_metrics(request: MLflowMetricsRequest):
             asyncio.to_thread(
                 _sync_get_mlflow_metrics,
                 request.project_name,
-                request.model_name
+                request.model_name,
+                request.run_id
             ),
             timeout=30.0
         )
@@ -573,24 +671,125 @@ async def get_mlflow_metrics(request: MLflowMetricsRequest):
         raise HTTPException(status_code=500, detail=f"Failed to fetch MLflow metrics: {str(e)}")
 
 
+def _get_visualization_artifact_path(metric_type: str, metric_name: str) -> str:
+    """Get MLflow artifact path for a YellowBrick visualization.
+
+    Maps metric_type to YellowBrick module name:
+    - Classification → classifier
+    - Feature Analysis → features
+    - Target → target
+    - Model Selection → model_selection
+
+    Returns: visualizations/{module}/{metric_name}.png
+    """
+    module_map = {
+        "Classification": "classifier",
+        "Feature Analysis": "features",
+        "Target": "target",
+        "Model Selection": "model_selection",
+    }
+    module_name = module_map.get(metric_type, metric_type.lower().replace(" ", "_"))
+    return f"visualizations/{module_name}/{metric_name}.png"
+
+
+def _check_visualization_artifact(run_id: str, artifact_path: str) -> Optional[bytes]:
+    """Check if visualization artifact exists in MLflow run.
+
+    Returns: PNG bytes if found, None otherwise.
+    """
+    try:
+        local_path = mlflow.artifacts.download_artifacts(
+            run_id=run_id,
+            artifact_path=artifact_path,
+        )
+        with open(local_path, "rb") as f:
+            return f.read()
+    except Exception:
+        # Artifact doesn't exist
+        return None
+
+
+def _save_artifact(run_id: str, artifact_path: str, data: bytes) -> bool:
+    """Save data as MLflow artifact to an existing run.
+
+    Uses MlflowClient.log_artifact() to add artifacts to finished runs
+    without changing run status. Can be used for any file type.
+
+    Args:
+        run_id: MLflow run ID to save artifact to
+        artifact_path: Path within artifacts (e.g., "visualizations/classifier/ConfusionMatrix.png")
+        data: Binary data to save
+
+    Returns: True if saved successfully, False otherwise.
+    """
+    import tempfile
+    import os
+
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Extract directory and filename from artifact_path
+            artifact_dir = os.path.dirname(artifact_path)  # e.g., "visualizations/classifier"
+            artifact_filename = os.path.basename(artifact_path)  # e.g., "ConfusionMatrix.png"
+
+            # Write data to temp file
+            local_file = os.path.join(tmpdir, artifact_filename)
+            with open(local_file, "wb") as f:
+                f.write(data)
+
+            # Use MlflowClient to log artifact (works on finished runs)
+            client = mlflow.MlflowClient()
+            client.log_artifact(run_id, local_file, artifact_path=artifact_dir)
+
+            print(f"Saved artifact: {artifact_path} (run_id={run_id[:8]}...)")
+            return True
+    except Exception as e:
+        print(f"Failed to save artifact {artifact_path}: {e}")
+        return False
+
+
 def _sync_generate_yellowbrick_plot(
     project_name: str,
     metric_type: str,
     metric_name: str,
-) -> bytes:
-    """Synchronous yellowbrick plot generation using MLflow training data.
+    run_id: str = None,
+) -> tuple[bytes, str, bool]:
+    """Synchronous yellowbrick plot generation with MLflow artifact caching.
 
-    Loads training data from the best MLflow run's artifacts, ensuring
-    visualizations use the EXACT same data used to train the best model.
-    This guarantees 100% reproducibility.
+    First checks if visualization exists as MLflow artifact. If not, generates
+    the plot and saves it as an artifact for future requests.
+
+    Args:
+        project_name: MLflow experiment name
+        metric_type: YellowBrick category (Classification, Feature Analysis, etc.)
+        metric_name: Specific visualizer name (ConfusionMatrix, RadViz, etc.)
+        run_id: Optional specific run ID. If None, uses best run.
+
+    Returns:
+        Tuple of (image_bytes, run_id, cache_hit)
     """
     import pandas as pd
 
     if project_name != "Transaction Fraud Detection":
         raise ValueError(f"Unsupported project: {project_name}")
 
-    # Load training data from MLflow artifacts (exact data used for best model)
-    result = load_training_data_from_mlflow(project_name)
+    # Get run_id if not provided
+    if run_id is None:
+        model_name = MLFLOW_MODEL_NAMES.get(project_name)
+        run_id = get_best_mlflow_run(project_name, model_name)
+        if run_id is None:
+            raise ValueError("No trained model found in MLflow.")
+
+    # Check for cached visualization in MLflow artifacts
+    artifact_path = _get_visualization_artifact_path(metric_type, metric_name)
+    cached_image = _check_visualization_artifact(run_id, artifact_path)
+    if cached_image is not None:
+        print(f"MLflow artifact cache HIT: {artifact_path} (run_id={run_id[:8]}...)")
+        return cached_image, run_id, True
+
+    print(f"MLflow artifact cache MISS: {artifact_path} (run_id={run_id[:8]}...) - generating...")
+
+    # Load training data from MLflow artifacts (from selected or best run)
+    result = load_training_data_from_mlflow(project_name, run_id=run_id)
     if result is None:
         raise ValueError(
             "No training data found in MLflow. Train a model first to generate visualizations."
@@ -640,7 +839,12 @@ def _sync_generate_yellowbrick_plot(
         if yb_vis is not None:
             yb_vis.fig.savefig(fig_buf, format="png", bbox_inches='tight')
             fig_buf.seek(0)
-            return fig_buf.getvalue()
+            image_bytes = fig_buf.getvalue()
+
+            # Save to MLflow artifacts for future requests
+            _save_artifact(run_id, artifact_path, image_bytes)
+
+            return image_bytes, run_id, False
         raise ValueError("Failed to generate visualization")
     finally:
         plt.clf()
@@ -651,10 +855,21 @@ def _sync_generate_yellowbrick_plot(
 
 @app.post("/yellowbrick_metric")
 async def yellowbrick_metric(payload: dict):
-    """Generate YellowBrick visualizations."""
+    """Generate YellowBrick visualizations for a specific MLflow run.
+
+    Uses MLflow artifact caching: first request generates and saves to MLflow,
+    subsequent requests load from MLflow artifacts (fast!).
+
+    Payload:
+        project_name: str - MLflow experiment name
+        metric_type: str - YellowBrick category (Classification, Feature Analysis, etc.)
+        metric_name: str - Specific visualizer name
+        run_id: str (optional) - Specific MLflow run ID. If None, uses best run.
+    """
     project_name = payload.get("project_name")
     metric_type = payload.get("metric_type")
     metric_name = payload.get("metric_name")
+    run_id = payload.get("run_id")  # Optional: specific run, or None for best
 
     if not all([project_name, metric_type, metric_name]):
         raise HTTPException(
@@ -662,42 +877,28 @@ async def yellowbrick_metric(payload: dict):
             detail="Missing required fields: project_name, metric_type, metric_name"
         )
 
-    # Check if force_refresh is requested (bypass cache)
-    force_refresh = payload.get("force_refresh", False)
-
-    # Check Redis cache first (unless force_refresh)
-    if not force_refresh:
-        cached_image = visualization_cache.get(project_name, metric_name)
-        if cached_image:
-            image_base64 = base64.b64encode(cached_image).decode("utf-8")
-            return {
-                "image_base64": image_base64,
-                "cache": "HIT",
-                "metric_type": metric_type,
-                "metric_name": metric_name,
-            }
-
     try:
-        image_bytes = await asyncio.wait_for(
+        # Generate or load from MLflow artifact cache
+        image_bytes, actual_run_id, cache_hit = await asyncio.wait_for(
             asyncio.to_thread(
                 _sync_generate_yellowbrick_plot,
                 project_name,
                 metric_type,
                 metric_name,
+                run_id,
             ),
-            timeout=120.0
+            timeout=300.0  # 5 minutes for slow visualizations
         )
-
-        # Store in Redis cache
-        visualization_cache.set(project_name, metric_name, image_bytes)
 
         # Return base64 encoded image for Reflex frontend
         image_base64 = base64.b64encode(image_bytes).decode("utf-8")
         return {
             "image_base64": image_base64,
-            "cache": "MISS",
+            "cache": "HIT" if cache_hit else "MISS",
+            "cache_type": "mlflow_artifact",
             "metric_type": metric_type,
             "metric_name": metric_name,
+            "run_id": actual_run_id,
         }
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="Visualization generation timed out")
@@ -983,10 +1184,8 @@ async def switch_batch_model(payload: dict):
     try:
         print(f"Starting batch training: {model_key}" + (f" with sample_frac={sample_frac}" if sample_frac else ""))
 
-        # Invalidate visualization cache - new training means new data
-        project_name = MODEL_SCRIPTS.get(model_key)
-        if project_name:
-            visualization_cache.invalidate(project_name)
+        # Note: No cache invalidation needed - MLflow artifact caching stores
+        # visualizations per run_id, so each new training run has its own cache
 
         log_dir = "/app/logs"
         os.makedirs(log_dir, exist_ok=True)
@@ -1083,26 +1282,31 @@ async def list_yellowbrick_visualizers():
 async def get_visualization_cache_status():
     """Get YellowBrick visualization cache status.
 
-    Returns:
-        - Redis connection status
-        - Number of cached visualizations
-        - Cached visualizations by project
+    Visualizations are now cached as MLflow artifacts (per run_id).
+    This endpoint provides info about the caching strategy.
     """
-    return visualization_cache.status()
+    return {
+        "cache_type": "mlflow_artifact",
+        "description": "Visualizations are stored as MLflow artifacts per run",
+        "artifact_path_pattern": "visualizations/{module}/{visualizer_name}.png",
+        "benefits": [
+            "Persistent across deployments",
+            "Tied to specific training run",
+            "No TTL/expiry management needed",
+            "Viewable in MLflow UI"
+        ]
+    }
 
 
 @app.post("/yellowbrick/cache/clear")
 async def clear_visualization_cache(payload: dict = None):
     """Clear YellowBrick visualization cache.
 
-    Payload (optional):
-        project_name: str - Clear only for specific project
-                           If not provided, clears all visualizations
+    Note: With MLflow artifact caching, visualizations are stored per run_id.
+    To "clear" a visualization, you would need to delete the artifact from MLflow.
+    This is typically not needed as each run has its own visualization cache.
     """
-    if payload and payload.get("project_name"):
-        project_name = payload["project_name"]
-        deleted = visualization_cache.invalidate(project_name)
-        return {"message": f"Cleared {deleted} cached visualizations for '{project_name}'"}
-    else:
-        deleted = visualization_cache.clear_all()
-        return {"message": f"Cleared {deleted} cached visualizations"}
+    return {
+        "message": "MLflow artifact caching is now used. Visualizations are stored per run_id.",
+        "note": "Each MLflow run has its own visualization artifacts. No manual clearing needed."
+    }

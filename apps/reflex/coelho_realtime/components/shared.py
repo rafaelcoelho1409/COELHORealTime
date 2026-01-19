@@ -242,6 +242,105 @@ def ml_training_switch(model_key: str, project_name: str) -> rx.Component:
     )
 
 
+def _run_select_item(run) -> rx.Component:
+    """Helper to render a single run option in the selector (Pydantic MLflowRunInfo)."""
+    # Format: "★ run_id" for best, "run_id" for others
+    return rx.select.item(
+        rx.cond(
+            run.is_best,
+            "★ " + run.run_id,
+            run.run_id
+        ),
+        value=run.run_id
+    )
+
+
+def mlflow_run_selector(project_name: str) -> rx.Component:
+    """
+    Dropdown selector for MLflow runs, ordered by metric criteria (best first).
+
+    Allows users to select which MLflow run to use for:
+    - Metrics display
+    - YellowBrick visualizations
+    - Model predictions
+
+    First option is always the best run based on project criteria.
+    """
+    return rx.card(
+        rx.vstack(
+            rx.hstack(
+                rx.icon("git-branch", size=16, color=rx.color("blue", 9)),
+                rx.text("MLflow Run", size="2", weight="medium"),
+                rx.cond(
+                    SharedState.batch_runs_loading[project_name],
+                    rx.spinner(size="1"),
+                    rx.fragment()
+                ),
+                spacing="2",
+                align_items="center"
+            ),
+            rx.cond(
+                SharedState.batch_mlflow_runs[project_name].length() > 0,
+                rx.select.root(
+                    rx.select.trigger(placeholder="Select MLflow run...", width="100%"),
+                    rx.select.content(
+                        rx.foreach(
+                            SharedState.batch_mlflow_runs[project_name],
+                            _run_select_item
+                        )
+                    ),
+                    value=SharedState.selected_batch_run[project_name],
+                    on_change=lambda v: SharedState.select_batch_run(project_name, v),
+                    size="2",
+                    width="100%"
+                ),
+                rx.text("No runs available. Train a model first.", size="1", color="gray")
+            ),
+            # Show total rows badge and MLflow button
+            rx.cond(
+                SharedState.selected_batch_run[project_name] != "",
+                rx.hstack(
+                    rx.badge(
+                        SharedState.batch_training_total_rows[project_name].to(str) + " rows",
+                        color_scheme="blue",
+                        variant="soft",
+                        size="1"
+                    ),
+                    rx.spacer(),
+                    rx.link(
+                        rx.button(
+                            rx.hstack(
+                                rx.image(
+                                    src="https://cdn.simpleicons.org/mlflow/0194E2",
+                                    width="14px",
+                                    height="14px"
+                                ),
+                                rx.text("MLflow", size="1"),
+                                spacing="1",
+                                align_items="center"
+                            ),
+                            size="1",
+                            variant="soft",
+                            color_scheme="cyan",
+                        ),
+                        href=SharedState.batch_mlflow_experiment_url[project_name],
+                        is_external=True,
+                    ),
+                    spacing="2",
+                    align_items="center",
+                    width="100%"
+                ),
+                rx.fragment()
+            ),
+            spacing="2",
+            align_items="start",
+            width="100%"
+        ),
+        size="1",
+        width="100%"
+    )
+
+
 def batch_ml_training_box(model_key: str, project_name: str) -> rx.Component:
     """
     A training box component for Batch ML (Scikit-Learn).
@@ -363,17 +462,6 @@ def batch_ml_training_box(model_key: str, project_name: str) -> rx.Component:
                             color="blue",
                             weight="medium"
                         ),
-                        # Total rows badge (shown after data is loaded)
-                        rx.cond(
-                            SharedState.batch_training_total_rows[project_name] > 0,
-                            rx.badge(
-                                SharedState.batch_training_total_rows[project_name].to(str) + " rows",
-                                color_scheme="gray",
-                                variant="soft",
-                                size="1"
-                            ),
-                            rx.fragment()
-                        ),
                         spacing="2",
                         align_items="center",
                         width="100%"
@@ -494,24 +582,13 @@ def batch_ml_training_box(model_key: str, project_name: str) -> rx.Component:
                         size="1",
                         color="gray"
                     ),
-                    # Show total rows from last training (persists after training completes)
-                    rx.cond(
-                        SharedState.batch_training_total_rows[project_name] > 0,
-                        rx.badge(
-                            SharedState.batch_training_total_rows[project_name].to(str) + " rows",
-                            color_scheme="blue",
-                            variant="soft",
-                            size="1"
-                        ),
-                        rx.fragment()
-                    ),
                     align_items="center",
                     spacing="2",
                     width="100%"
                 ),
             ),
             rx.divider(size="4", width="100%"),
-            # Model name badge and MLflow button
+            # Model name and Batch ML badges
             rx.hstack(
                 rx.badge(
                     rx.hstack(
@@ -524,52 +601,8 @@ def batch_ml_training_box(model_key: str, project_name: str) -> rx.Component:
                     variant="soft",
                     size="1"
                 ),
-                # MLflow button - links to experiment (enabled only when model is trained)
-                rx.cond(
-                    SharedState.batch_model_available[project_name],
-                    rx.link(
-                        rx.button(
-                            rx.hstack(
-                                rx.image(
-                                    src="https://cdn.simpleicons.org/mlflow/0194E2",
-                                    width="14px",
-                                    height="14px"
-                                ),
-                                rx.text("MLflow", size="1"),
-                                spacing="1",
-                                align_items="center"
-                            ),
-                            size="1",
-                            variant="soft",
-                            color_scheme="cyan",
-                            width="100%"
-                        ),
-                        href=SharedState.batch_mlflow_experiment_url[project_name],
-                        is_external=True,
-                        flex="1"
-                    ),
-                    rx.button(
-                        rx.hstack(
-                            rx.image(
-                                src="https://cdn.simpleicons.org/mlflow/0194E2",
-                                width="14px",
-                                height="14px",
-                                opacity="0.5"
-                            ),
-                            rx.text("MLflow", size="1"),
-                            spacing="1",
-                            align_items="center"
-                        ),
-                        size="1",
-                        variant="soft",
-                        color_scheme="gray",
-                        disabled=True,
-                        flex="1"
-                    )
-                ),
-                spacing="2",
-                align_items="center",
-                width="100%"
+                rx.badge("Batch ML", color_scheme="blue", variant="soft", size="1"),
+                spacing="2"
             ),
             spacing="2",
             align_items="start",
