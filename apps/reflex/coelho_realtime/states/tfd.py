@@ -48,11 +48,12 @@ class TFDState(SharedState):
     yellowbrick_metrics_options: dict[str, list[str]] = {
         "Classification": [
             "Select visualization...",
-            "ClassificationReport",
-            "ConfusionMatrix",
-            "ROCAUC",
-            "PrecisionRecallCurve",
-            "ClassPredictionError"
+            "ConfusionMatrix",           # Essential: TP, TN, FP, FN distribution
+            "ClassificationReport",      # Per-class precision, recall, F1
+            "ROCAUC",                    # ROC curve with AUC
+            "PrecisionRecallCurve",      # BEST for imbalanced data
+            "ClassPredictionError",      # Bar chart of prediction errors
+            "DiscriminationThreshold",   # Optimal threshold for binary classification
         ],
         "Feature Analysis": [
             "Select visualization...",

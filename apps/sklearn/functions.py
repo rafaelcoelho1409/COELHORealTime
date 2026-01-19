@@ -858,34 +858,180 @@ def create_batch_model(project_name: str, **kwargs):
 
 # =============================================================================
 # YellowBrick Classification Visualizers
+# Reference: https://www.scikit-yb.org/en/latest/api/classifier/index.html
 # =============================================================================
+
+# Sklearn-compatible wrappers for CatBoost (YellowBrick compatibility)
+from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.utils.multiclass import unique_labels
+from yellowbrick.classifier.class_prediction_error import ClassPredictionError as _ClassPredictionErrorBase
+from yellowbrick.exceptions import YellowbrickValueError, ModelError
+
+try:
+    from sklearn.metrics._classification import _check_targets
+except ImportError:
+    from sklearn.metrics.classification import _check_targets
+
+
+class CatBoostWrapper(BaseEstimator, ClassifierMixin):
+    """Wraps pre-fitted CatBoost model for YellowBrick sklearn compatibility."""
+    _estimator_type = 'classifier'
+
+    def __init__(self, model):
+        self.model = model
+        self.classes_ = np.array(model.classes_)
+
+    def fit(self, X, y):
+        return self  # Already fitted
+
+    def predict(self, X):
+        return self.model.predict(X).flatten()
+
+    def predict_proba(self, X):
+        return self.model.predict_proba(X)
+
+
+class CatBoostWrapperCV(BaseEstimator, ClassifierMixin):
+    """CatBoost wrapper for CV-based visualizers (can be cloned and re-fitted)."""
+    _estimator_type = 'classifier'
+
+    def __init__(self, iterations=100, depth=6, learning_rate=0.1,
+                 auto_class_weights='Balanced', random_state=42):
+        self.iterations = iterations
+        self.depth = depth
+        self.learning_rate = learning_rate
+        self.auto_class_weights = auto_class_weights
+        self.random_state = random_state
+        self.model_ = None
+        self.classes_ = None
+
+    def fit(self, X, y):
+        self.model_ = CatBoostClassifier(
+            iterations=self.iterations,
+            depth=self.depth,
+            learning_rate=self.learning_rate,
+            auto_class_weights=self.auto_class_weights,
+            random_seed=self.random_state,
+            verbose=0
+        )
+        self.model_.fit(X, y)
+        self.classes_ = np.array(self.model_.classes_)
+        return self
+
+    def predict(self, X):
+        return self.model_.predict(X).flatten()
+
+    def predict_proba(self, X):
+        return self.model_.predict_proba(X)
+
+
+class ClassPredictionErrorFixed(_ClassPredictionErrorBase):
+    """ClassPredictionError with sklearn 1.8+ compatibility fix.
+
+    sklearn 1.8 changed _check_targets to return 4 values instead of 3.
+    """
+
+    def score(self, X, y):
+        y_pred = self.predict(X)
+
+        # FIX: Handle sklearn 1.8+ which returns 4 values
+        result = _check_targets(y, y_pred)
+        if len(result) == 4:
+            y_type, y_true, y_pred, _ = result  # Ignore sample_weight
+        else:
+            y_type, y_true, y_pred = result
+
+        if y_type not in ("binary", "multiclass"):
+            raise YellowbrickValueError("{} is not supported".format(y_type))
+
+        indices = unique_labels(y_true, y_pred)
+        labels = self._labels()
+
+        try:
+            super(_ClassPredictionErrorBase, self).score(X, y)
+        except ModelError as e:
+            if labels is not None and len(labels) < len(indices):
+                raise NotImplementedError("filtering classes is currently not supported")
+            else:
+                raise e
+
+        if labels is not None and len(labels) > len(indices):
+            raise ModelError("y and y_pred contain zero values for one of the specified classes")
+
+        self.predictions_ = np.array([
+            [(y_pred[y_true == label_t] == label_p).sum() for label_p in indices]
+            for label_t in indices
+        ])
+
+        self.draw()
+        return self.score_
+
+
 def yellowbrick_classification_kwargs(
     project_name: str,
     metric_name: str,
     y_train: pd.Series,
     binary_classes: list
 ) -> dict:
-    """Get kwargs for YellowBrick classification visualizers."""
+    """Get kwargs for YellowBrick classification visualizers.
+
+    Reference: https://www.scikit-yb.org/en/latest/api/classifier/index.html
+
+    All visualizers use CatBoostWrapper with is_fitted=True and force_model=True
+    for CatBoost compatibility, except DiscriminationThreshold which uses
+    CatBoostWrapperCV for CV-based training.
+    """
+    # Human-readable class names for fraud detection
+    class_names = ["Non-Fraud", "Fraud"] if "Fraud" in project_name else binary_classes
+
     kwargs = {
-        "ClassificationReport": {
-            "estimator": create_batch_model(project_name, y_train=y_train),
-            "classes": binary_classes,
-            "support": True,
-        },
+        # ConfusionMatrix: Essential for fraud detection
         "ConfusionMatrix": {
-            "estimator": create_batch_model(project_name, y_train=y_train),
-            "classes": binary_classes,
+            "classes": class_names,
+            "cmap": "Blues",
+            "percent": True,
+            "is_fitted": True,
+            "force_model": True,
         },
+        # ClassificationReport: Per-class precision, recall, F1
+        "ClassificationReport": {
+            "classes": class_names,
+            "cmap": "YlOrRd",
+            "support": "percent",
+            "colorbar": True,
+            "is_fitted": True,
+            "force_model": True,
+        },
+        # ROCAUC: ROC curve for binary classification
         "ROCAUC": {
-            "estimator": create_batch_model(project_name, y_train=y_train),
-            "classes": binary_classes,
+            "classes": class_names,
+            "binary": True,
+            "is_fitted": True,
+            "force_model": True,
         },
+        # PrecisionRecallCurve: BEST for imbalanced data!
         "PrecisionRecallCurve": {
-            "estimator": create_batch_model(project_name, y_train=y_train),
+            "classes": class_names,
+            "fill_area": True,
+            "ap_score": True,
+            "iso_f1_curves": True,
+            "is_fitted": True,
+            "force_model": True,
         },
+        # ClassPredictionError: Bar chart showing prediction errors
         "ClassPredictionError": {
-            "estimator": create_batch_model(project_name, y_train=y_train),
-            "classes": binary_classes,
+            "classes": class_names,
+            "is_fitted": True,
+            "force_model": True,
+        },
+        # DiscriminationThreshold: Shows optimal threshold for binary classification
+        # NOTE: Uses CatBoostWrapperCV (unfitted) for internal CV
+        "DiscriminationThreshold": {
+            "n_trials": 10,
+            "cv": 0.2,
+            "argmax": "fscore",
+            "random_state": 42,
+            # No is_fitted - needs to re-fit during CV
         },
     }
     return {metric_name: kwargs.get(metric_name, {})}
@@ -897,12 +1043,55 @@ def yellowbrick_classification_visualizers(
     X_test: pd.DataFrame,
     y_train: pd.Series,
     y_test: pd.Series,
+    model = None,
 ):
-    """Create and fit YellowBrick classification visualizer."""
+    """Create and fit YellowBrick classification visualizer.
+
+    Reference: https://www.scikit-yb.org/en/latest/api/classifier/index.html
+
+    Uses CatBoostWrapper for pre-fitted model visualizers, and
+    CatBoostWrapperCV for CV-based visualizers (DiscriminationThreshold).
+    """
+    from yellowbrick.classifier import (
+        ConfusionMatrix,
+        ClassificationReport,
+        ROCAUC,
+        PrecisionRecallCurve,
+        DiscriminationThreshold,
+    )
+
+    # Map visualizer names to classes
+    visualizer_map = {
+        "ConfusionMatrix": ConfusionMatrix,
+        "ClassificationReport": ClassificationReport,
+        "ROCAUC": ROCAUC,
+        "PrecisionRecallCurve": PrecisionRecallCurve,
+        "ClassPredictionError": ClassPredictionErrorFixed,  # sklearn 1.8+ fix
+        "DiscriminationThreshold": DiscriminationThreshold,
+    }
+
     for visualizer_name, params in yb_kwargs.items():
-        visualizer = getattr(classifier, visualizer_name)(**params)
-        visualizer.fit(X_train, y_train)
-        visualizer.score(X_test, y_test)
+        vis_class = visualizer_map.get(visualizer_name)
+        if vis_class is None:
+            raise ValueError(f"Unknown visualizer: {visualizer_name}")
+
+        if visualizer_name == "DiscriminationThreshold":
+            # DiscriminationThreshold needs CV-compatible unfitted wrapper
+            cv_estimator = CatBoostWrapperCV(iterations=100, depth=6, learning_rate=0.1)
+            visualizer = vis_class(cv_estimator, **params)
+            # Fit on full data (CV happens internally)
+            X_full = pd.concat([X_train, X_test], ignore_index=True)
+            y_full = pd.concat([y_train, y_test], ignore_index=True)
+            visualizer.fit(X_full, y_full)
+        else:
+            # Other visualizers use pre-fitted wrapped model
+            if model is None:
+                raise ValueError("Model required for classification visualizers")
+            wrapped_model = CatBoostWrapper(model) if 'CatBoost' in type(model).__name__ else model
+            visualizer = vis_class(wrapped_model, **params)
+            visualizer.fit(X_train, y_train)
+            visualizer.score(X_test, y_test)
+
         return visualizer
     return None
 

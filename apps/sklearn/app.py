@@ -808,11 +808,14 @@ def _sync_generate_yellowbrick_plot(
 
     try:
         if metric_type == "Classification":
+            # Load model from MLflow for classification visualizers
+            model_name = MLFLOW_MODEL_NAMES.get(project_name)
+            model = load_model_from_mlflow(project_name, model_name, run_id=run_id)
             yb_kwargs = yellowbrick_classification_kwargs(
                 project_name, metric_name, y_train, classes
             )
             yb_vis = yellowbrick_classification_visualizers(
-                yb_kwargs, X_train, X_test, y_train, y_test
+                yb_kwargs, X_train, X_test, y_train, y_test, model=model
             )
         elif metric_type == "Feature Analysis":
             yb_kwargs = yellowbrick_feature_analysis_kwargs(
