@@ -284,7 +284,25 @@ def batch_ml_training_box(model_key: str, project_name: str) -> rx.Component:
                 ),
                 rx.cond(
                     SharedState.batch_training_loading[project_name],
-                    rx.spinner(size="3"),
+                    # Training in progress: show spinner + stop button
+                    rx.hstack(
+                        rx.spinner(size="3"),
+                        rx.button(
+                            rx.hstack(
+                                rx.icon("square", size=12),
+                                rx.text("Stop", size="1"),
+                                spacing="1",
+                                align_items="center"
+                            ),
+                            on_click=SharedState.stop_batch_training(project_name),
+                            size="1",
+                            color_scheme="red",
+                            variant="soft"
+                        ),
+                        spacing="2",
+                        align_items="center"
+                    ),
+                    # Not training: show Train button
                     rx.button(
                         rx.hstack(
                             rx.icon("play", size=14),
@@ -344,6 +362,17 @@ def batch_ml_training_box(model_key: str, project_name: str) -> rx.Component:
                             size="1",
                             color="blue",
                             weight="medium"
+                        ),
+                        # Total rows badge (shown after data is loaded)
+                        rx.cond(
+                            SharedState.batch_training_total_rows[project_name] > 0,
+                            rx.badge(
+                                SharedState.batch_training_total_rows[project_name].to(str) + " rows",
+                                color_scheme="gray",
+                                variant="soft",
+                                size="1"
+                            ),
+                            rx.fragment()
                         ),
                         spacing="2",
                         align_items="center",
@@ -465,6 +494,17 @@ def batch_ml_training_box(model_key: str, project_name: str) -> rx.Component:
                         size="1",
                         color="gray"
                     ),
+                    # Show total rows from last training (persists after training completes)
+                    rx.cond(
+                        SharedState.batch_training_total_rows[project_name] > 0,
+                        rx.badge(
+                            SharedState.batch_training_total_rows[project_name].to(str) + " rows",
+                            color_scheme="blue",
+                            variant="soft",
+                            size="1"
+                        ),
+                        rx.fragment()
+                    ),
                     align_items="center",
                     spacing="2",
                     width="100%"
@@ -484,9 +524,9 @@ def batch_ml_training_box(model_key: str, project_name: str) -> rx.Component:
                     variant="soft",
                     size="1"
                 ),
-                # MLflow button - links to experiment
+                # MLflow button - links to experiment (enabled only when model is trained)
                 rx.cond(
-                    SharedState.batch_mlflow_experiment_url[project_name] != "",
+                    SharedState.batch_model_available[project_name],
                     rx.link(
                         rx.button(
                             rx.hstack(

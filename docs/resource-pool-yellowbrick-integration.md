@@ -1,8 +1,10 @@
-# Resource Pool + YellowBrick Integration
+# MLflow Training Data + YellowBrick Integration
 
 ## Overview
 
-This document describes the integration between ResourcePool and YellowBrick visualizations in the sklearn FastAPI service.
+YellowBrick visualizations use the EXACT same training data stored in MLflow artifacts,
+guaranteeing 100% reproducibility. Training data is saved alongside the model in each
+MLflow run.
 
 ## Architecture
 
@@ -10,134 +12,141 @@ This document describes the integration between ResourcePool and YellowBrick vis
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                           Training Flow                                      │
 │                                                                              │
-│  User clicks "Train" → process_batch_data_duckdb() → ResourcePool.store()   │
+│  Delta Lake → DuckDB SQL (DENSE_RANK encoding) → All-numeric DataFrame       │
 │                                      ↓                                       │
-│                              Model trained → MLflow.log_model()              │
+│                          Train CatBoost Model                                │
+│                                      ↓                                       │
+│                          MLflow.log_model() + log_artifacts():               │
+│                            - model/                                          │
+│                            - training_data/X_train.parquet                   │
+│                            - training_data/X_test.parquet                    │
+│                            - training_data/y_train.parquet                   │
+│                            - training_data/y_test.parquet                    │
 └─────────────────────────────────────────────────────────────────────────────┘
-                                       ↓
+
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                         YellowBrick Flow                                     │
 │                                                                              │
 │  User requests visualization → /yellowbrick_metric endpoint                  │
 │                                      ↓                                       │
-│                          ResourcePool.get() → data (X, y)                    │
-│                          ModelCache.get_model() → best model from MLflow     │
+│                          Check Redis cache (HIT → return PNG)                │
+│                                      ↓ (MISS)                                │
+│                          get_best_mlflow_run() → best run_id                 │
+│                          load_training_data_from_mlflow() → X, y             │
 │                                      ↓                                       │
-│                          Generate visualization → Return PNG                 │
+│                          Generate visualization → Cache in Redis → Return    │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+## Key Benefits
+
+| Aspect | Description |
+|--------|-------------|
+| **100% Reproducibility** | Visualizations use EXACT same data as best model |
+| **No Data Mismatch** | Data tied to specific MLflow run, not random reload |
+| **Persistent** | Training data survives pod restarts |
+| **Consistent with Predictions** | Same best model selection logic |
+
 ## Components
 
-### 1. ResourcePool (`resource_pool.py`)
-- **Purpose**: Store training data from latest session
-- **Stores**: X_train, X_test, y_train, y_test, feature_names, cat_feature_indices
-- **Does NOT store**: Model (loaded from MLflow on-demand)
-- **Pattern**: Thread-safe singleton, one session at a time
+### 1. Training Data Artifacts (MLflow)
+- **Storage**: MinIO (S3-compatible) via MLflow artifact store
+- **Format**: Parquet with snappy compression (~2-3 MB per run)
+- **Contents**: X_train, X_test, y_train, y_test
+- **Selection**: Best run by fbeta_score (fraud detection)
 
-### 2. ModelCache (`app.py`)
-- **Purpose**: Cache best model from MLflow
-- **Selection**: Best model based on fbeta_score (for fraud detection)
-- **TTL**: 5 minutes, auto-reloads when expired
-- **Used by**: Predictions AND YellowBrick visualizations
+### 2. Redis Visualization Cache
+- **Purpose**: Cache generated PNG visualizations
+- **TTL**: 1 hour (configurable)
+- **Invalidation**: On new training completion
 
-### 3. YellowBrick Functions (`functions.py`)
-- Classification visualizers: ConfusionMatrix, ROCAUC, PrecisionRecallCurve, etc.
-- Feature analysis visualizers: PCA, ParallelCoordinates, Manifold, etc.
-- Target visualizers: ClassBalance, BalancedBinningReference
-- Model selection visualizers: LearningCurve, ValidationCurve, FeatureImportances
+### 3. YellowBrick Visualizers
+- **Feature Analysis**: Rank1D, Rank2D, PCA, Manifold, ParallelCoordinates, RadViz, JointPlot
+- **Classification**: ConfusionMatrix, ROCAUC, PrecisionRecallCurve, etc.
+- **Target**: ClassBalance, BalancedBinningReference
+- **Model Selection**: LearningCurve, ValidationCurve
 
-## Implementation Status
+## Data Flow Details
 
-### Completed
-- [x] Create `resource_pool.py` with SessionResources dataclass
-- [x] Modify `functions.py` to store data in pool after `process_batch_data_duckdb()`
-- [x] Add `/resource_pool/status` and `/resource_pool/clear` endpoints to `app.py`
-
-### In Progress
-- [ ] Update `_sync_generate_yellowbrick_plot()` to use ResourcePool instead of ModelDataManager
-- [ ] Update YellowBrick classification visualizers to use best model from ModelCache
-- [ ] Add proper error handling when ResourcePool has no session
-
-### Future
-- [ ] Add YellowBrick dropdown selector in Reflex UI
-- [ ] Add loading/spinner state for visualization generation
-- [ ] Add cancellation support for slow visualizations (Manifold, RFECV)
-- [ ] Cache generated visualizations in MLflow artifacts
-
-## Implementation Details
-
-### Current Code (to be replaced)
-```python
-# app.py - _sync_generate_yellowbrick_plot()
-def _sync_generate_yellowbrick_plot(..., dm: ModelDataManager):
-    dm.load_data(project_name)  # Reloads from DuckDB every time
-    # ... generate visualization
+### DuckDB SQL Preprocessing
+All categorical features are label-encoded using `DENSE_RANK() - 1`:
+```sql
+SELECT
+    amount, account_age_days, ...  -- Numerical (unchanged)
+    DENSE_RANK() OVER (ORDER BY currency) - 1 AS currency,  -- Categorical (encoded)
+    ...
+FROM delta_scan('s3://lakehouse/delta/transaction_fraud_detection')
 ```
 
-### New Code (using ResourcePool)
+This produces all-numeric data compatible with:
+- CatBoost (via `cat_features` indices)
+- YellowBrick (requires numeric data)
+- All sklearn tools
+
+### MLflow Training Data Loading
 ```python
-# app.py - _sync_generate_yellowbrick_plot()
-def _sync_generate_yellowbrick_plot(...):
-    session = resource_pool.get()
-    if session is None:
-        raise ValueError("No training session available. Run training first.")
+def load_training_data_from_mlflow(project_name: str):
+    """Load training data from best MLflow run's artifacts."""
+    run_id = get_best_mlflow_run(project_name, model_name)
 
-    # Use data from ResourcePool
-    X_train, X_test = session.X_train, session.X_test
-    y_train, y_test = session.y_train, session.y_test
-    X, y = session.X, session.y  # Combined data
+    X_train = pd.read_parquet(mlflow.artifacts.download_artifacts(
+        run_id=run_id, artifact_path="training_data/X_train.parquet"
+    ))
+    # ... same for X_test, y_train, y_test
 
-    # For classification visualizers that need a model:
-    # Use ModelCache to get best model from MLflow
-    model, run_id = model_cache.get_model(project_name)
-
-    # ... generate visualization
+    return X_train, X_test, y_train, y_test, feature_names
 ```
-
-### YellowBrick Visualizer Categories
-
-| Category | Needs Model? | Data Used |
-|----------|--------------|-----------|
-| Classification (ConfusionMatrix, ROCAUC, etc.) | Yes | X_train, X_test, y_train, y_test |
-| Feature Analysis (PCA, Manifold, etc.) | No | X, y (combined) |
-| Target (ClassBalance, etc.) | No | y only |
-| Model Selection (LearningCurve, etc.) | Yes (creates new) | X, y (combined) |
-
-### Classification Visualizers - Model Handling
-
-Current behavior: Creates a NEW untrained model for each visualization
-```python
-"ConfusionMatrix": {
-    "estimator": create_batch_model(project_name, y_train=y_train),  # New model
-}
-```
-
-Better behavior: Use the BEST trained model from MLflow
-```python
-"ConfusionMatrix": {
-    "estimator": model_cache.get_model(project_name)[0],  # Best model
-}
-```
-
-This ensures visualizations reflect the actual production model performance.
 
 ## API Endpoints
 
-### Resource Pool
-- `GET /resource_pool/status` - Get data availability and best model info
-- `POST /resource_pool/clear` - Clear stored data (free memory)
-
 ### YellowBrick
-- `POST /yellowbrick_metric` - Generate visualization
-  - Body: `{"project_name": "...", "metric_type": "...", "metric_name": "..."}`
-  - Returns: PNG image
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/yellowbrick_metric` | POST | Generate visualization (with Redis caching) |
+| `/yellowbrick/visualizers` | GET | List available visualizers |
+| `/yellowbrick/cache/status` | GET | Cache connection status |
+| `/yellowbrick/cache/clear` | POST | Clear visualization cache |
 
 ## Error Handling
 
 | Scenario | Response |
 |----------|----------|
-| No training session in ResourcePool | 400: "No training session available. Run training first." |
-| No model in MLflow | 404: "No trained model found. Train a model first." |
-| Visualization timeout | 504: "Visualization generation timed out" |
+| No training data in MLflow | 400: "No training data found. Train a model first." |
 | Invalid visualizer name | 400: "Unknown metric type/name" |
+| Visualization timeout | 504: "Visualization generation timed out" |
+
+## Storage Estimates
+
+| Data | Size (per run) |
+|------|----------------|
+| X_train (80K × 17) | ~1-2 MB |
+| X_test (20K × 17) | ~300-500 KB |
+| y_train, y_test | ~50-100 KB |
+| **Total** | **~2-3 MB** |
+
+Minimal compared to CatBoost models (~50-100 MB).
+
+## MLflow Experiment Cleanup
+
+To clear all experiments for a fresh start:
+
+```bash
+# Port-forward MLflow if needed
+kubectl port-forward svc/coelho-realtime-mlflow 5000:5000
+
+# Option 1: Delete via MLflow CLI
+mlflow experiments delete --experiment-id <id>
+
+# Option 2: Delete via MinIO (artifacts)
+mc rm --recursive minio/mlflow/
+
+# Option 3: Delete MLflow database (PostgreSQL)
+kubectl exec -it <postgres-pod> -- psql -U postgres -d mlflow -c "TRUNCATE experiments, runs CASCADE;"
+```
+
+## Migration from ResourcePool
+
+ResourcePool has been removed. The new architecture:
+- ❌ ~~ResourcePool~~ (removed)
+- ✅ MLflow training data artifacts
+- ✅ Redis visualization cache (unchanged)

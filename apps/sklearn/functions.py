@@ -24,7 +24,6 @@ from yellowbrick import (
     target,
     model_selection,
 )
-from resource_pool import resource_pool, SessionResources
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -98,6 +97,11 @@ def _get_duckdb_connection(force_reconnect: bool = False) -> duckdb.DuckDBPyConn
 
     Connection is kept alive and reused. If a query fails due to stale connection,
     caller should retry with force_reconnect=True.
+
+    Optimizations:
+    - Uses DuckDB's extension auto-loading (extensions cached to ~/.duckdb/extensions)
+    - Configures settings for faster Delta Lake scans
+    - Reuses connection across queries
     """
     global _duckdb_conn
     if _duckdb_conn is not None and not force_reconnect:
@@ -114,8 +118,16 @@ def _get_duckdb_connection(force_reconnect: bool = False) -> duckdb.DuckDBPyConn
     os.environ["AWS_ALLOW_HTTP"] = "true"
     os.environ["AWS_REGION"] = "us-east-1"
     os.environ["AWS_EC2_METADATA_DISABLED"] = "true"
-    conn = duckdb.connect()
-    # Install and load delta extension (install is cached to disk)
+    # Create connection with optimized settings
+    conn = duckdb.connect(config={
+        'threads': os.cpu_count(),  # Use all available CPU cores
+        'memory_limit': '4GB',       # Limit memory to avoid OOM
+        'temp_directory': '/tmp/duckdb',  # Use temp dir for spilling
+    })
+    # Enable autoinstall/autoload for faster subsequent loads
+    conn.execute("SET autoinstall_known_extensions = true;")
+    conn.execute("SET autoload_known_extensions = true;")
+    # Install delta extension (skips if already installed, cached to disk)
     conn.execute("INSTALL delta;")
     conn.execute("LOAD delta;")
     # Configure S3/MinIO credentials
@@ -132,6 +144,9 @@ def _get_duckdb_connection(force_reconnect: bool = False) -> duckdb.DuckDBPyConn
             REGION 'us-east-1'
         );
     """)
+    # Optimize for large data scans
+    conn.execute("SET enable_progress_bar = false;")  # Disable progress bar overhead
+    conn.execute("SET preserve_insertion_order = false;")  # Faster inserts
     _duckdb_conn = conn
     print("DuckDB connection ready with Delta extension loaded")
     return _duckdb_conn
@@ -378,6 +393,64 @@ def load_or_create_sklearn_encoders(project_name: str) -> Dict[str, Any]:
     }
 
 
+def load_training_data_from_mlflow(
+    project_name: str,
+) -> Optional[tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, list[str]]]:
+    """Load training data from the best MLflow run's artifacts.
+
+    This ensures YellowBrick visualizations use the EXACT same data
+    that was used to train the best model, guaranteeing 100% reproducibility.
+
+    Returns:
+        Tuple of (X_train, X_test, y_train, y_test, feature_names) or None if not found.
+    """
+    try:
+        model_name = MLFLOW_MODEL_NAMES.get(project_name)
+        if not model_name:
+            print(f"Unknown project for training data loading: {project_name}")
+            return None
+
+        run_id = get_best_mlflow_run(project_name, model_name)
+        if run_id is None:
+            print(f"No best run found for {project_name}")
+            return None
+
+        print(f"Loading training data from MLflow run: {run_id}")
+
+        # Download training data artifacts
+        X_train_path = mlflow.artifacts.download_artifacts(
+            run_id=run_id,
+            artifact_path="training_data/X_train.parquet",
+        )
+        X_test_path = mlflow.artifacts.download_artifacts(
+            run_id=run_id,
+            artifact_path="training_data/X_test.parquet",
+        )
+        y_train_path = mlflow.artifacts.download_artifacts(
+            run_id=run_id,
+            artifact_path="training_data/y_train.parquet",
+        )
+        y_test_path = mlflow.artifacts.download_artifacts(
+            run_id=run_id,
+            artifact_path="training_data/y_test.parquet",
+        )
+
+        # Load parquet files
+        X_train = pd.read_parquet(X_train_path)
+        X_test = pd.read_parquet(X_test_path)
+        y_train = pd.read_parquet(y_train_path)["target"]
+        y_test = pd.read_parquet(y_test_path)["target"]
+
+        feature_names = X_train.columns.tolist()
+
+        print(f"  Loaded: X_train={X_train.shape}, X_test={X_test.shape}")
+        return X_train, X_test, y_train, y_test, feature_names
+
+    except Exception as e:
+        print(f"Error loading training data from MLflow: {e}")
+        return None
+
+
 # =============================================================================
 # DuckDB SQL-Based Data Loading and Preprocessing
 # =============================================================================
@@ -419,16 +492,21 @@ def _load_tfd_data_duckdb(
     Single SQL query does:
     - JSON extraction (device_info → browser, os)
     - Timestamp extraction (→ year, month, day, hour, minute, second)
+    - Label encoding via DENSE_RANK() - 1 (all-numeric output)
     - Column selection and ordering (matches TFD_ALL_FEATURES order)
     - Sampling (if requested)
 
-    No pandas transformations, no StandardScaler (tree models don't need it).
-    CatBoost handles categorical features natively - no label encoding needed.
+    All categorical features are label-encoded as 0-indexed integers.
+    This produces all-numeric data compatible with:
+    - CatBoost (pass cat_features indices for native handling)
+    - YellowBrick (requires numeric data for all visualizers)
+    - sklearn tools
     """
     delta_path = DELTA_PATHS["Transaction Fraud Detection"]
 
     # Build the SQL query - all preprocessing in one pass
     # Column order MUST match TFD_ALL_FEATURES for correct cat_feature_indices
+    # All categorical features are label-encoded using DENSE_RANK() - 1
     query = f"""
     SELECT
         -- Numerical features (no scaling needed for CatBoost)
@@ -437,18 +515,19 @@ def _load_tfd_data_duckdb(
         CAST(cvv_provided AS INTEGER) AS cvv_provided,
         CAST(billing_address_match AS INTEGER) AS billing_address_match,
 
-        -- Categorical features (order matches TFD_CATEGORICAL_FEATURES)
-        currency,
-        merchant_id,
-        payment_method,
-        product_category,
-        transaction_type,
+        -- Categorical features: Label encoded with DENSE_RANK() - 1
+        -- Produces 0-indexed integers compatible with all ML tools
+        DENSE_RANK() OVER (ORDER BY currency) - 1 AS currency,
+        DENSE_RANK() OVER (ORDER BY merchant_id) - 1 AS merchant_id,
+        DENSE_RANK() OVER (ORDER BY payment_method) - 1 AS payment_method,
+        DENSE_RANK() OVER (ORDER BY product_category) - 1 AS product_category,
+        DENSE_RANK() OVER (ORDER BY transaction_type) - 1 AS transaction_type,
 
-        -- Categorical features from JSON (extracted in SQL)
-        json_extract_string(device_info, '$.browser') AS browser,
-        json_extract_string(device_info, '$.os') AS os,
+        -- Categorical features from JSON: extracted + label encoded
+        DENSE_RANK() OVER (ORDER BY json_extract_string(device_info, '$.browser')) - 1 AS browser,
+        DENSE_RANK() OVER (ORDER BY json_extract_string(device_info, '$.os')) - 1 AS os,
 
-        -- Timestamp components (extracted in SQL, cast VARCHAR to TIMESTAMP first)
+        -- Timestamp components (already integers)
         CAST(date_part('year', CAST(timestamp AS TIMESTAMP)) AS INTEGER) AS year,
         CAST(date_part('month', CAST(timestamp AS TIMESTAMP)) AS INTEGER) AS month,
         CAST(date_part('day', CAST(timestamp AS TIMESTAMP)) AS INTEGER) AS day,
@@ -493,10 +572,9 @@ def _load_tfd_data_duckdb(
     y = df["is_fraud"]
     X = df.drop("is_fraud", axis=1)
 
-    # Convert categorical columns to category dtype (memory efficient + CatBoost compatible)
-    for col in TFD_CATEGORICAL_FEATURES:
-        if col in X.columns:
-            X[col] = X[col].astype("category")
+    # All columns are now numeric (integers from DENSE_RANK or float64)
+    # No dtype conversion needed - works with CatBoost and YellowBrick
+    print(f"  All features numeric: {X.select_dtypes(include=['number']).shape[1]}/{X.shape[1]} columns")
 
     # Metadata for CatBoost
     metadata = {
@@ -506,7 +584,7 @@ def _load_tfd_data_duckdb(
         "feature_names": TFD_ALL_FEATURES,
     }
 
-    print(f"  Features: {len(TFD_NUMERICAL_FEATURES)} numerical, {len(TFD_CATEGORICAL_FEATURES)} categorical")
+    print(f"  Features: {len(TFD_NUMERICAL_FEATURES)} numerical, {len(TFD_CATEGORICAL_FEATURES)} label-encoded")
     print(f"  Categorical indices for CatBoost: {TFD_CAT_FEATURE_INDICES}")
 
     return X, y, metadata
@@ -555,19 +633,6 @@ def process_batch_data_duckdb(
     # Calculate class balance
     fraud_rate = y_train.sum() / len(y_train) * 100
     print(f"  Fraud rate in training set: {fraud_rate:.2f}%")
-
-    # Store in resource pool for YellowBrick visualizations
-    session = SessionResources(
-        X_train=X_train,
-        X_test=X_test,
-        y_train=y_train,
-        y_test=y_test,
-        feature_names=metadata["feature_names"],
-        cat_feature_indices=metadata["cat_feature_indices"],
-        project_name=project_name,
-    )
-    resource_pool.store(session)
-    print("  Data stored in resource pool for YellowBrick visualizations")
 
     return X_train, X_test, y_train, y_test, metadata
 
@@ -730,26 +795,128 @@ def yellowbrick_classification_visualizers(
 
 # =============================================================================
 # YellowBrick Feature Analysis Visualizers
+# Reference: https://www.scikit-yb.org/en/latest/api/features/index.html
 # =============================================================================
+
+# Categorize visualizers by fit method (per YellowBrick docs)
+FEATURE_FIT_TRANSFORM_VISUALIZERS = ["PCA", "Manifold", "ParallelCoordinates"]
+FEATURE_FIT_ONLY_VISUALIZERS = ["FeatureImportances", "RFECV", "JointPlot"]
+FEATURE_FIT_THEN_TRANSFORM_VISUALIZERS = ["Rank1D", "Rank2D", "RadViz"]
+
+
 def yellowbrick_feature_analysis_kwargs(
     project_name: str,
     metric_name: str,
     classes: list,
-    feature_names: list = None
+    feature_names: list = None,
 ) -> dict:
-    """Get kwargs for YellowBrick feature analysis visualizers."""
+    """
+    Get kwargs for YellowBrick feature analysis visualizers.
+
+    Reference: https://www.scikit-yb.org/en/latest/api/features/index.html
+
+    Available visualizers:
+    | Visualizer          | Fit Method      | Speed   |
+    |---------------------|-----------------|---------|
+    | Rank1D              | fit + transform | Fast    |
+    | Rank2D              | fit + transform | Fast    |
+    | PCA                 | fit_transform   | Fast    |
+    | Manifold            | fit_transform   | SLOW    |
+    | ParallelCoordinates | fit_transform   | Medium  |
+    | RadViz              | fit + transform | Fast    |
+    | JointPlot           | fit             | Fast    |
+
+    Note: All features are numeric (DENSE_RANK encoding in DuckDB SQL),
+    so all visualizers work with all features.
+    """
     kwargs = {
+        # =================================================================
+        # RANK FEATURES - Detect covariance between features
+        # Docs: https://www.scikit-yb.org/en/latest/api/features/rankd.html
+        # All features are numeric (DENSE_RANK encoded) - works with all
+        # =================================================================
+
+        # Rank1D: Single feature ranking using Shapiro-Wilk normality test
+        "Rank1D": {
+            "algorithm": "shapiro",
+            "features": feature_names,
+            "orient": "h",
+            "show_feature_names": True,
+        },
+
+        # Rank2D: Pairwise feature ranking (correlation matrix)
+        # Algorithms: 'pearson', 'covariance', 'spearman', 'kendalltau'
+        "Rank2D": {
+            "algorithm": "pearson",
+            "features": feature_names,
+            "colormap": "RdBu_r",
+            "show_feature_names": True,
+        },
+
+        # =================================================================
+        # PROJECTION - Reduce dimensionality for visualization
+        # =================================================================
+
+        # PCA: Principal Component Analysis projection
+        # Docs: https://www.scikit-yb.org/en/latest/api/features/pca.html
+        "PCA": {
+            "scale": True,
+            "projection": 2,
+            "proj_features": False,
+            "classes": classes,
+            "alpha": 0.75,
+            "heatmap": False,
+        },
+
+        # Manifold: Non-linear dimensionality reduction (SLOW - 30-120s)
+        # Docs: https://www.scikit-yb.org/en/latest/api/features/manifold.html
+        # Algorithms: 'lle', 'ltsa', 'hessian', 'modified', 'isomap', 'mds', 'spectral', 'tsne'
+        "Manifold": {
+            "manifold": "tsne",
+            "n_neighbors": 10,
+            "classes": classes,
+            "projection": 2,
+            "alpha": 0.75,
+            "random_state": 42,
+            "target_type": "discrete",
+        },
+
+        # =================================================================
+        # MULTI-DIMENSIONAL VISUALIZATION
+        # =================================================================
+
+        # ParallelCoordinates: Each instance as a line across feature axes
+        # Docs: https://www.scikit-yb.org/en/latest/api/features/pcoords.html
         "ParallelCoordinates": {
             "classes": classes,
             "features": feature_names,
+            "normalize": "minmax",
             "sample": 0.05,
             "shuffle": True,
-            "n_jobs": 1,
+            "alpha": 0.3,
+            "fast": True,
         },
-        "PCA": {
+
+        # RadViz: Radial visualization (features as points on circle)
+        # Docs: https://www.scikit-yb.org/en/latest/api/features/radviz.html
+        "RadViz": {
             "classes": classes,
-            "scale": True,
-            "n_jobs": 1,
+            "features": feature_names,
+            "alpha": 0.5,
+        },
+
+        # =================================================================
+        # DIRECT DATA VISUALIZATION
+        # =================================================================
+
+        # JointPlot: 2D correlation between two features
+        # Docs: https://www.scikit-yb.org/en/latest/api/features/jointplot.html
+        "JointPlot": {
+            "columns": feature_names[:2] if feature_names and len(feature_names) >= 2 else None,
+            "correlation": "pearson",
+            "kind": "scatter",
+            "hist": True,
+            "alpha": 0.65,
         },
     }
     return {metric_name: kwargs.get(metric_name, {})}
@@ -760,14 +927,30 @@ def yellowbrick_feature_analysis_visualizers(
     X: pd.DataFrame,
     y: pd.Series,
 ):
-    """Create and fit YellowBrick feature analysis visualizer."""
+    """
+    Create and fit YellowBrick feature analysis visualizer.
+
+    Uses correct fit method per YellowBrick documentation:
+    - fit_transform(): PCA, Manifold, ParallelCoordinates
+    - fit() only: JointPlot
+    - fit() + transform(): Rank1D, Rank2D, RadViz
+    """
     for visualizer_name, params in yb_kwargs.items():
         visualizer = getattr(features, visualizer_name)(**params)
-        if visualizer_name in ["ParallelCoordinates", "PCA", "Manifold"]:
+
+        # Use correct fit method per YellowBrick documentation
+        if visualizer_name in FEATURE_FIT_TRANSFORM_VISUALIZERS:
             visualizer.fit_transform(X, y)
-        else:
+        elif visualizer_name in FEATURE_FIT_ONLY_VISUALIZERS:
+            visualizer.fit(X, y)
+        elif visualizer_name in FEATURE_FIT_THEN_TRANSFORM_VISUALIZERS:
             visualizer.fit(X, y)
             visualizer.transform(X)
+        else:
+            # Default: fit + transform
+            visualizer.fit(X, y)
+            visualizer.transform(X)
+
         return visualizer
     return None
 

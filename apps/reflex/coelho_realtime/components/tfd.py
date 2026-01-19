@@ -231,6 +231,31 @@ def transaction_fraud_detection_batch_metrics() -> rx.Component:
     """Display batch ML metrics for TFD organized by category."""
     return rx.vstack(
         # ---------------------------------------------------------------------
+        # TRAINING DATA INFO - Show total rows processed
+        # ---------------------------------------------------------------------
+        rx.cond(
+            SharedState.batch_training_total_rows["Transaction Fraud Detection"] > 0,
+            rx.callout(
+                rx.hstack(
+                    rx.text("Training Data:", size="2", weight="medium"),
+                    rx.badge(
+                        SharedState.batch_training_total_rows["Transaction Fraud Detection"].to(str) + " rows",
+                        color_scheme="blue",
+                        variant="solid",
+                        size="2"
+                    ),
+                    rx.text("(80% train / 20% test split)", size="1", color="gray"),
+                    spacing="2",
+                    align_items="center"
+                ),
+                icon="database",
+                color="blue",
+                variant="soft",
+                width="100%"
+            ),
+            rx.fragment()
+        ),
+        # ---------------------------------------------------------------------
         # PRIMARY METRICS - Most important for fraud detection
         # ---------------------------------------------------------------------
         rx.hstack(
@@ -1380,209 +1405,337 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
                         ),
                         # Subtab 2: Feature Analysis (YellowBrick)
                         rx.tabs.content(
-                            rx.vstack(
-                                rx.text("Select a visualization to display.", size="2", color="gray"),
-                                rx.select(
-                                    TFDState.yellowbrick_metrics_options["Feature Analysis"],
-                                    value=TFDState.yellowbrick_metric_name,
-                                    on_change=lambda v: TFDState.set_yellowbrick_visualization("Feature Analysis", v),
-                                    placeholder="Select visualization...",
-                                    width="100%"
-                                ),
-                                # Loading spinner
-                                rx.cond(
-                                    TFDState.yellowbrick_loading,
-                                    rx.hstack(
-                                        rx.spinner(size="3"),
-                                        rx.text("Loading visualization...", size="2", color="gray"),
-                                        spacing="2",
-                                        align_items="center",
-                                        justify="center",
-                                        width="100%",
-                                        padding="4em"
-                                    ),
-                                    rx.fragment()
-                                ),
-                                # Error display
-                                rx.cond(
-                                    TFDState.yellowbrick_error != "",
-                                    rx.callout(
-                                        TFDState.yellowbrick_error,
-                                        icon="triangle-alert",
-                                        color="red",
+                            rx.cond(
+                                TFDState.tfd_batch_model_available,
+                                # Model available - show visualization selector
+                                rx.vstack(
+                                    rx.text("Select a visualization to display.", size="2", color="gray"),
+                                    rx.select(
+                                        TFDState.yellowbrick_metrics_options["Feature Analysis"],
+                                        value=TFDState.yellowbrick_metric_name,
+                                        on_change=lambda v: TFDState.set_yellowbrick_visualization("Feature Analysis", v),
+                                        placeholder="Select visualization...",
                                         width="100%"
                                     ),
-                                    rx.fragment()
-                                ),
-                                # Image display
-                                rx.cond(
-                                    TFDState.yellowbrick_image_base64 != "",
-                                    rx.image(
-                                        src=f"data:image/png;base64,{TFDState.yellowbrick_image_base64}",
-                                        width="100%",
-                                        alt="YellowBrick visualization"
+                                    # Loading spinner with stop button
+                                    rx.cond(
+                                        TFDState.yellowbrick_loading,
+                                        rx.vstack(
+                                            rx.hstack(
+                                                rx.spinner(size="3"),
+                                                rx.text("Loading visualization...", size="2", color="gray"),
+                                                spacing="2",
+                                                align_items="center",
+                                            ),
+                                            rx.button(
+                                                rx.hstack(
+                                                    rx.icon("square", size=12),
+                                                    rx.text("Stop", size="1"),
+                                                    spacing="1",
+                                                    align_items="center"
+                                                ),
+                                                on_click=TFDState.cancel_yellowbrick_loading,
+                                                size="1",
+                                                color_scheme="red",
+                                                variant="soft"
+                                            ),
+                                            spacing="3",
+                                            align_items="center",
+                                            justify="center",
+                                            width="100%",
+                                            padding="4em"
+                                        ),
+                                        rx.fragment()
                                     ),
-                                    rx.fragment()
+                                    # Error display
+                                    rx.cond(
+                                        TFDState.yellowbrick_error != "",
+                                        rx.callout(
+                                            TFDState.yellowbrick_error,
+                                            icon="triangle-alert",
+                                            color="red",
+                                            width="100%"
+                                        ),
+                                        rx.fragment()
+                                    ),
+                                    # Image display
+                                    rx.cond(
+                                        TFDState.yellowbrick_image_base64 != "",
+                                        rx.image(
+                                            src=f"data:image/png;base64,{TFDState.yellowbrick_image_base64}",
+                                            width="100%",
+                                            alt="YellowBrick visualization"
+                                        ),
+                                        rx.fragment()
+                                    ),
+                                    spacing="4",
+                                    width="100%",
+                                    padding_top="1em",
                                 ),
-                                spacing="4",
-                                width="100%",
-                                padding_top="1em",
+                                # No model - show message
+                                rx.vstack(
+                                    rx.callout(
+                                        "Train a model first to view visualizations. Go to the Batch ML tab and click Train.",
+                                        icon="info",
+                                        color="blue",
+                                        width="100%"
+                                    ),
+                                    spacing="4",
+                                    width="100%",
+                                    padding_top="1em",
+                                )
                             ),
                             value="feature_analysis"
                         ),
                         # Subtab 3: Target (YellowBrick)
                         rx.tabs.content(
-                            rx.vstack(
-                                rx.text("Select a visualization to display.", size="2", color="gray"),
-                                rx.select(
-                                    TFDState.yellowbrick_metrics_options["Target"],
-                                    value=TFDState.yellowbrick_metric_name,
-                                    on_change=lambda v: TFDState.set_yellowbrick_visualization("Target", v),
-                                    placeholder="Select visualization...",
-                                    width="100%"
-                                ),
-                                # Loading spinner
-                                rx.cond(
-                                    TFDState.yellowbrick_loading,
-                                    rx.hstack(
-                                        rx.spinner(size="3"),
-                                        rx.text("Loading visualization...", size="2", color="gray"),
-                                        spacing="2",
-                                        align_items="center",
-                                        justify="center",
-                                        width="100%",
-                                        padding="4em"
-                                    ),
-                                    rx.fragment()
-                                ),
-                                # Error display
-                                rx.cond(
-                                    TFDState.yellowbrick_error != "",
-                                    rx.callout(
-                                        TFDState.yellowbrick_error,
-                                        icon="triangle-alert",
-                                        color="red",
+                            rx.cond(
+                                TFDState.tfd_batch_model_available,
+                                # Model available - show visualization selector
+                                rx.vstack(
+                                    rx.text("Select a visualization to display.", size="2", color="gray"),
+                                    rx.select(
+                                        TFDState.yellowbrick_metrics_options["Target"],
+                                        value=TFDState.yellowbrick_metric_name,
+                                        on_change=lambda v: TFDState.set_yellowbrick_visualization("Target", v),
+                                        placeholder="Select visualization...",
                                         width="100%"
                                     ),
-                                    rx.fragment()
-                                ),
-                                # Image display
-                                rx.cond(
-                                    TFDState.yellowbrick_image_base64 != "",
-                                    rx.image(
-                                        src=f"data:image/png;base64,{TFDState.yellowbrick_image_base64}",
-                                        width="100%",
-                                        alt="YellowBrick visualization"
+                                    # Loading spinner with stop button
+                                    rx.cond(
+                                        TFDState.yellowbrick_loading,
+                                        rx.vstack(
+                                            rx.hstack(
+                                                rx.spinner(size="3"),
+                                                rx.text("Loading visualization...", size="2", color="gray"),
+                                                spacing="2",
+                                                align_items="center",
+                                            ),
+                                            rx.button(
+                                                rx.hstack(
+                                                    rx.icon("square", size=12),
+                                                    rx.text("Stop", size="1"),
+                                                    spacing="1",
+                                                    align_items="center"
+                                                ),
+                                                on_click=TFDState.cancel_yellowbrick_loading,
+                                                size="1",
+                                                color_scheme="red",
+                                                variant="soft"
+                                            ),
+                                            spacing="3",
+                                            align_items="center",
+                                            justify="center",
+                                            width="100%",
+                                            padding="4em"
+                                        ),
+                                        rx.fragment()
                                     ),
-                                    rx.fragment()
+                                    # Error display
+                                    rx.cond(
+                                        TFDState.yellowbrick_error != "",
+                                        rx.callout(
+                                            TFDState.yellowbrick_error,
+                                            icon="triangle-alert",
+                                            color="red",
+                                            width="100%"
+                                        ),
+                                        rx.fragment()
+                                    ),
+                                    # Image display
+                                    rx.cond(
+                                        TFDState.yellowbrick_image_base64 != "",
+                                        rx.image(
+                                            src=f"data:image/png;base64,{TFDState.yellowbrick_image_base64}",
+                                            width="100%",
+                                            alt="YellowBrick visualization"
+                                        ),
+                                        rx.fragment()
+                                    ),
+                                    spacing="4",
+                                    width="100%",
+                                    padding_top="1em",
                                 ),
-                                spacing="4",
-                                width="100%",
-                                padding_top="1em",
+                                # No model - show message
+                                rx.vstack(
+                                    rx.callout(
+                                        "Train a model first to view visualizations. Go to the Batch ML tab and click Train.",
+                                        icon="info",
+                                        color="blue",
+                                        width="100%"
+                                    ),
+                                    spacing="4",
+                                    width="100%",
+                                    padding_top="1em",
+                                )
                             ),
                             value="target"
                         ),
                         # Subtab 4: Classification (YellowBrick)
                         rx.tabs.content(
-                            rx.vstack(
-                                rx.text("Select a visualization to display.", size="2", color="gray"),
-                                rx.select(
-                                    TFDState.yellowbrick_metrics_options["Classification"],
-                                    value=TFDState.yellowbrick_metric_name,
-                                    on_change=lambda v: TFDState.set_yellowbrick_visualization("Classification", v),
-                                    placeholder="Select visualization...",
-                                    width="100%"
-                                ),
-                                # Loading spinner
-                                rx.cond(
-                                    TFDState.yellowbrick_loading,
-                                    rx.hstack(
-                                        rx.spinner(size="3"),
-                                        rx.text("Loading visualization...", size="2", color="gray"),
-                                        spacing="2",
-                                        align_items="center",
-                                        justify="center",
-                                        width="100%",
-                                        padding="4em"
-                                    ),
-                                    rx.fragment()
-                                ),
-                                # Error display
-                                rx.cond(
-                                    TFDState.yellowbrick_error != "",
-                                    rx.callout(
-                                        TFDState.yellowbrick_error,
-                                        icon="triangle-alert",
-                                        color="red",
+                            rx.cond(
+                                TFDState.tfd_batch_model_available,
+                                # Model available - show visualization selector
+                                rx.vstack(
+                                    rx.text("Select a visualization to display.", size="2", color="gray"),
+                                    rx.select(
+                                        TFDState.yellowbrick_metrics_options["Classification"],
+                                        value=TFDState.yellowbrick_metric_name,
+                                        on_change=lambda v: TFDState.set_yellowbrick_visualization("Classification", v),
+                                        placeholder="Select visualization...",
                                         width="100%"
                                     ),
-                                    rx.fragment()
-                                ),
-                                # Image display
-                                rx.cond(
-                                    TFDState.yellowbrick_image_base64 != "",
-                                    rx.image(
-                                        src=f"data:image/png;base64,{TFDState.yellowbrick_image_base64}",
-                                        width="100%",
-                                        alt="YellowBrick visualization"
+                                    # Loading spinner with stop button
+                                    rx.cond(
+                                        TFDState.yellowbrick_loading,
+                                        rx.vstack(
+                                            rx.hstack(
+                                                rx.spinner(size="3"),
+                                                rx.text("Loading visualization...", size="2", color="gray"),
+                                                spacing="2",
+                                                align_items="center",
+                                            ),
+                                            rx.button(
+                                                rx.hstack(
+                                                    rx.icon("square", size=12),
+                                                    rx.text("Stop", size="1"),
+                                                    spacing="1",
+                                                    align_items="center"
+                                                ),
+                                                on_click=TFDState.cancel_yellowbrick_loading,
+                                                size="1",
+                                                color_scheme="red",
+                                                variant="soft"
+                                            ),
+                                            spacing="3",
+                                            align_items="center",
+                                            justify="center",
+                                            width="100%",
+                                            padding="4em"
+                                        ),
+                                        rx.fragment()
                                     ),
-                                    rx.fragment()
+                                    # Error display
+                                    rx.cond(
+                                        TFDState.yellowbrick_error != "",
+                                        rx.callout(
+                                            TFDState.yellowbrick_error,
+                                            icon="triangle-alert",
+                                            color="red",
+                                            width="100%"
+                                        ),
+                                        rx.fragment()
+                                    ),
+                                    # Image display
+                                    rx.cond(
+                                        TFDState.yellowbrick_image_base64 != "",
+                                        rx.image(
+                                            src=f"data:image/png;base64,{TFDState.yellowbrick_image_base64}",
+                                            width="100%",
+                                            alt="YellowBrick visualization"
+                                        ),
+                                        rx.fragment()
+                                    ),
+                                    spacing="4",
+                                    width="100%",
+                                    padding_top="1em",
                                 ),
-                                spacing="4",
-                                width="100%",
-                                padding_top="1em",
+                                # No model - show message
+                                rx.vstack(
+                                    rx.callout(
+                                        "Train a model first to view visualizations. Go to the Batch ML tab and click Train.",
+                                        icon="info",
+                                        color="blue",
+                                        width="100%"
+                                    ),
+                                    spacing="4",
+                                    width="100%",
+                                    padding_top="1em",
+                                )
                             ),
                             value="classification"
                         ),
                         # Subtab 5: Model Selection (YellowBrick)
                         rx.tabs.content(
-                            rx.vstack(
-                                rx.text("Select a visualization to display.", size="2", color="gray"),
-                                rx.select(
-                                    TFDState.yellowbrick_metrics_options["Model Selection"],
-                                    value=TFDState.yellowbrick_metric_name,
-                                    on_change=lambda v: TFDState.set_yellowbrick_visualization("Model Selection", v),
-                                    placeholder="Select visualization...",
-                                    width="100%"
-                                ),
-                                # Loading spinner
-                                rx.cond(
-                                    TFDState.yellowbrick_loading,
-                                    rx.hstack(
-                                        rx.spinner(size="3"),
-                                        rx.text("Loading visualization...", size="2", color="gray"),
-                                        spacing="2",
-                                        align_items="center",
-                                        justify="center",
-                                        width="100%",
-                                        padding="4em"
-                                    ),
-                                    rx.fragment()
-                                ),
-                                # Error display
-                                rx.cond(
-                                    TFDState.yellowbrick_error != "",
-                                    rx.callout(
-                                        TFDState.yellowbrick_error,
-                                        icon="triangle-alert",
-                                        color="red",
+                            rx.cond(
+                                TFDState.tfd_batch_model_available,
+                                # Model available - show visualization selector
+                                rx.vstack(
+                                    rx.text("Select a visualization to display.", size="2", color="gray"),
+                                    rx.select(
+                                        TFDState.yellowbrick_metrics_options["Model Selection"],
+                                        value=TFDState.yellowbrick_metric_name,
+                                        on_change=lambda v: TFDState.set_yellowbrick_visualization("Model Selection", v),
+                                        placeholder="Select visualization...",
                                         width="100%"
                                     ),
-                                    rx.fragment()
-                                ),
-                                # Image display
-                                rx.cond(
-                                    TFDState.yellowbrick_image_base64 != "",
-                                    rx.image(
-                                        src=f"data:image/png;base64,{TFDState.yellowbrick_image_base64}",
-                                        width="100%",
-                                        alt="YellowBrick visualization"
+                                    # Loading spinner with stop button
+                                    rx.cond(
+                                        TFDState.yellowbrick_loading,
+                                        rx.vstack(
+                                            rx.hstack(
+                                                rx.spinner(size="3"),
+                                                rx.text("Loading visualization...", size="2", color="gray"),
+                                                spacing="2",
+                                                align_items="center",
+                                            ),
+                                            rx.button(
+                                                rx.hstack(
+                                                    rx.icon("square", size=12),
+                                                    rx.text("Stop", size="1"),
+                                                    spacing="1",
+                                                    align_items="center"
+                                                ),
+                                                on_click=TFDState.cancel_yellowbrick_loading,
+                                                size="1",
+                                                color_scheme="red",
+                                                variant="soft"
+                                            ),
+                                            spacing="3",
+                                            align_items="center",
+                                            justify="center",
+                                            width="100%",
+                                            padding="4em"
+                                        ),
+                                        rx.fragment()
                                     ),
-                                    rx.fragment()
+                                    # Error display
+                                    rx.cond(
+                                        TFDState.yellowbrick_error != "",
+                                        rx.callout(
+                                            TFDState.yellowbrick_error,
+                                            icon="triangle-alert",
+                                            color="red",
+                                            width="100%"
+                                        ),
+                                        rx.fragment()
+                                    ),
+                                    # Image display
+                                    rx.cond(
+                                        TFDState.yellowbrick_image_base64 != "",
+                                        rx.image(
+                                            src=f"data:image/png;base64,{TFDState.yellowbrick_image_base64}",
+                                            width="100%",
+                                            alt="YellowBrick visualization"
+                                        ),
+                                        rx.fragment()
+                                    ),
+                                    spacing="4",
+                                    width="100%",
+                                    padding_top="1em",
                                 ),
-                                spacing="4",
-                                width="100%",
-                                padding_top="1em",
+                                # No model - show message
+                                rx.vstack(
+                                    rx.callout(
+                                        "Train a model first to view visualizations. Go to the Batch ML tab and click Train.",
+                                        icon="info",
+                                        color="blue",
+                                        width="100%"
+                                    ),
+                                    spacing="4",
+                                    width="100%",
+                                    padding_top="1em",
+                                )
                             ),
                             value="model_selection"
                         ),

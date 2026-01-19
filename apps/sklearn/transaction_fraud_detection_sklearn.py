@@ -18,6 +18,7 @@ Environment variables:
 """
 import pickle
 import os
+import signal
 import sys
 import time
 import tempfile
@@ -25,20 +26,60 @@ import click
 import mlflow
 import mlflow.catboost
 import requests
+import pandas as pd
 from sklearn import metrics
 from imblearn.metrics import geometric_mean_score
+from catboost import CatBoostClassifier
 from functions import (
     process_batch_data_duckdb,
     create_batch_model,
     TFD_CAT_FEATURE_INDICES,
+    TFD_ALL_FEATURES,
 )
 
 
 MLFLOW_HOST = os.environ["MLFLOW_HOST"]
 SKLEARN_STATUS_URL = "http://localhost:8003/training_status"
 
+# =============================================================================
+# GRACEFUL SHUTDOWN (Signal Handling - matches River pattern)
+# =============================================================================
+_shutdown_requested = False
 
-def update_status(message: str, progress: int = None, stage: str = None, metrics: dict = None):
+
+def signal_handler(signum, frame):
+    """Handle SIGTERM and SIGINT for graceful shutdown."""
+    global _shutdown_requested
+    signal_name = signal.Signals(signum).name
+    print(f"\nReceived {signal_name}, initiating graceful shutdown...")
+    _shutdown_requested = True
+
+
+# Register signal handlers
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
+
+
+class ShutdownCallback:
+    """CatBoost callback to check for shutdown requests during training."""
+
+    def after_iteration(self, info):
+        """Called after each iteration. Return True to stop training."""
+        if _shutdown_requested:
+            print("Shutdown requested, stopping CatBoost training early...")
+            return True  # Stop training
+        return False  # Continue training
+
+
+def check_shutdown(stage: str = "unknown"):
+    """Check if shutdown was requested and exit gracefully if so."""
+    if _shutdown_requested:
+        print(f"Shutdown requested during {stage}, exiting gracefully...")
+        update_status(f"Training stopped during {stage}", progress=0, stage="stopped")
+        sys.exit(0)
+
+
+def update_status(message: str, progress: int = None, stage: str = None, metrics: dict = None, total_rows: int = None):
     """Post training status update to sklearn service."""
     try:
         payload = {"message": message}
@@ -48,6 +89,8 @@ def update_status(message: str, progress: int = None, stage: str = None, metrics
             payload["stage"] = stage
         if metrics is not None:
             payload["metrics"] = metrics
+        if total_rows is not None:
+            payload["total_rows"] = total_rows
         requests.post(SKLEARN_STATUS_URL, json=payload, timeout=2)
     except Exception:
         pass  # Don't fail training if status update fails
@@ -113,20 +156,28 @@ def main(sample_frac: float | None, max_rows: int | None):
         print(f"Training set: {len(X_train)} samples")
         print(f"Test set: {len(X_test)} samples")
 
+        total_rows = len(X_train) + len(X_test)
         update_status(
             f"Data loaded: {len(X_train):,} train, {len(X_test):,} test samples",
             progress=25,
-            stage="data_loaded"
+            stage="data_loaded",
+            total_rows=total_rows
         )
+
+        # Check for shutdown after data loading
+        check_shutdown("data_loading")
 
         # Create model
         print("\nCreating model...")
         model = create_batch_model(PROJECT_NAME, y_train = y_train)
         print(f"Categorical feature indices: {cat_feature_indices}")
 
-        update_status("Training CatBoost model...", progress=30, stage="training")
+        # Check for shutdown after model creation
+        check_shutdown("model_creation")
 
-        # Train model with early stopping and native categorical handling
+        update_status("Training CatBoost model...", progress=30, stage="training", total_rows=total_rows)
+
+        # Train model with early stopping, native categorical handling, and shutdown callback
         print("Training model...")
         model.fit(
             X_train, y_train,
@@ -135,10 +186,14 @@ def main(sample_frac: float | None, max_rows: int | None):
             early_stopping_rounds = 50,
             use_best_model = True,
             verbose = True,  # Show all iterations
+            callbacks = [ShutdownCallback()],  # Check for shutdown during training
         )
         print("Model training complete.")
 
-        update_status("Evaluating model performance...", progress=70, stage="evaluating")
+        # Check for shutdown after training (in case callback didn't trigger exit)
+        check_shutdown("training")
+
+        update_status("Evaluating model performance...", progress=70, stage="evaluating", total_rows=total_rows)
 
         # Evaluate model
         print("\nEvaluating model...")
@@ -258,6 +313,9 @@ def main(sample_frac: float | None, max_rows: int | None):
         for name, value in metrics_to_log.items():
             print(f"  {name}: {value:.4f}")
 
+        # Check for shutdown after evaluation (before MLflow logging)
+        check_shutdown("evaluation")
+
         # Send metrics preview to status
         update_status(
             "Logging to MLflow...",
@@ -268,7 +326,8 @@ def main(sample_frac: float | None, max_rows: int | None):
                 "precision": metrics_to_log["precision_score"],
                 "f1": metrics_to_log["f1_score"],
                 "roc_auc": metrics_to_log["roc_auc_score"],
-            }
+            },
+            total_rows=total_rows
         )
 
         # Log to MLflow
@@ -303,8 +362,9 @@ def main(sample_frac: float | None, max_rows: int | None):
             # Log metrics
             for metric_name, metric_value in metrics_to_log.items():
                 mlflow.log_metric(metric_name, metric_value)
-            # Log model and encoders as artifacts
+            # Log model, encoders, and training data as artifacts
             with tempfile.TemporaryDirectory() as tmpdir:
+                # Save model and encoders
                 model_path = os.path.join(tmpdir, f"{MODEL_NAME}.pkl")
                 encoder_path = os.path.join(tmpdir, ENCODER_ARTIFACT_NAME)
                 with open(model_path, 'wb') as f:
@@ -313,6 +373,20 @@ def main(sample_frac: float | None, max_rows: int | None):
                     pickle.dump(preprocessor_dict, f)
                 mlflow.log_artifact(model_path)
                 mlflow.log_artifact(encoder_path)
+
+                # Save training data for YellowBrick visualization reproducibility
+                # Uses snappy compression (fast decompression, industry default)
+                print("Saving training data artifacts...")
+                X_train.to_parquet(os.path.join(tmpdir, "X_train.parquet"), compression="snappy")
+                X_test.to_parquet(os.path.join(tmpdir, "X_test.parquet"), compression="snappy")
+                y_train.to_frame(name="target").to_parquet(os.path.join(tmpdir, "y_train.parquet"), compression="snappy")
+                y_test.to_frame(name="target").to_parquet(os.path.join(tmpdir, "y_test.parquet"), compression="snappy")
+                mlflow.log_artifact(os.path.join(tmpdir, "X_train.parquet"), artifact_path="training_data")
+                mlflow.log_artifact(os.path.join(tmpdir, "X_test.parquet"), artifact_path="training_data")
+                mlflow.log_artifact(os.path.join(tmpdir, "y_train.parquet"), artifact_path="training_data")
+                mlflow.log_artifact(os.path.join(tmpdir, "y_test.parquet"), artifact_path="training_data")
+                print(f"  Saved: X_train={X_train.shape}, X_test={X_test.shape}")
+
             # Log model using MLflow's catboost flavor
             mlflow.catboost.log_model(model, "model")
             run_id = mlflow.active_run().info.run_id
@@ -330,7 +404,8 @@ def main(sample_frac: float | None, max_rows: int | None):
                 "f1": metrics_to_log["f1_score"],
                 "roc_auc": metrics_to_log["roc_auc_score"],
                 "fbeta": metrics_to_log["fbeta_score"],
-            }
+            },
+            total_rows=total_rows
         )
     except Exception as e:
         update_status(f"Training failed: {str(e)}", progress=0, stage="error")

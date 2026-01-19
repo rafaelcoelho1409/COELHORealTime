@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from typing import Optional, Dict
 import subprocess
 import sys
+import base64
 import mlflow
 import mlflow.catboost
 import os
@@ -26,7 +27,6 @@ import asyncio
 import time
 from datetime import datetime
 from functions import (
-    ModelDataManager,
     process_sklearn_sample,
     load_or_create_sklearn_encoders,
     yellowbrick_classification_kwargs,
@@ -42,8 +42,9 @@ from functions import (
     load_model_from_mlflow,
     load_encoders_from_mlflow,
     get_best_mlflow_run,
+    load_training_data_from_mlflow,
 )
-from resource_pool import resource_pool
+from visualization_cache import visualization_cache
 
 
 MLFLOW_HOST = os.getenv("MLFLOW_HOST", "localhost")
@@ -76,6 +77,7 @@ class BatchTrainingState:
         self.progress_percent: int = 0
         self.current_stage: str = ""
         self.metrics_preview: Dict[str, float] = {}
+        self.total_rows: int = 0  # Total rows from DuckDB (set once after data loading)
 
     def close_log_file(self):
         """Close the log file handle if open."""
@@ -86,7 +88,7 @@ class BatchTrainingState:
                 pass
             self.log_file = None
 
-    def update_status(self, message: str, progress: int = None, stage: str = None, metrics: Dict[str, float] = None):
+    def update_status(self, message: str, progress: int = None, stage: str = None, metrics: Dict[str, float] = None, total_rows: int = None):
         """Update training status from training script."""
         self.status_message = message
         if progress is not None:
@@ -95,6 +97,8 @@ class BatchTrainingState:
             self.current_stage = stage
         if metrics is not None:
             self.metrics_preview = metrics
+        if total_rows is not None:
+            self.total_rows = total_rows
 
     def reset_status(self):
         """Reset status for new training run."""
@@ -102,6 +106,7 @@ class BatchTrainingState:
         self.progress_percent = 0
         self.current_stage = ""
         self.metrics_preview = {}
+        self.total_rows = 0
 
 
 batch_state = BatchTrainingState()
@@ -273,8 +278,7 @@ PROJECT_NAMES = [
     "Transaction Fraud Detection",
 ]
 
-# Global data manager
-data_manager = ModelDataManager()
+# Global encoders dict
 encoders_dict = {x: None for x in PROJECT_NAMES}
 
 
@@ -350,6 +354,16 @@ async def lifespan(app: FastAPI):
     global encoders_dict, sklearn_healthcheck
 
     encoders_load_status = {}
+
+    # Initialize DuckDB connection at startup (warm it up for fast data loading)
+    # This is imported from functions.py which creates the connection at module load
+    from functions import _get_duckdb_connection
+    try:
+        print("Warming up DuckDB connection...")
+        _get_duckdb_connection()
+        print("DuckDB connection ready")
+    except Exception as e:
+        print(f"Warning: Could not warm up DuckDB connection: {e}", file=sys.stderr)
 
     # Load sklearn encoders from MLflow (or create new if not available)
     print("Loading sklearn encoders...")
@@ -563,16 +577,32 @@ def _sync_generate_yellowbrick_plot(
     project_name: str,
     metric_type: str,
     metric_name: str,
-    dm: ModelDataManager
 ) -> bytes:
-    """Synchronous yellowbrick plot generation."""
-    dm.load_data(project_name)
+    """Synchronous yellowbrick plot generation using MLflow training data.
+
+    Loads training data from the best MLflow run's artifacts, ensuring
+    visualizations use the EXACT same data used to train the best model.
+    This guarantees 100% reproducibility.
+    """
+    import pandas as pd
 
     if project_name != "Transaction Fraud Detection":
         raise ValueError(f"Unsupported project: {project_name}")
 
-    classes = list(set(dm.y_train.unique().tolist() + dm.y_test.unique().tolist()))
-    classes.sort()
+    # Load training data from MLflow artifacts (exact data used for best model)
+    result = load_training_data_from_mlflow(project_name)
+    if result is None:
+        raise ValueError(
+            "No training data found in MLflow. Train a model first to generate visualizations."
+        )
+
+    X_train, X_test, y_train, y_test, feature_names = result
+
+    # Combined data for visualizers that need full dataset
+    X = pd.concat([X_train, X_test], ignore_index=True)
+    y = pd.concat([y_train, y_test], ignore_index=True)
+
+    classes = sorted(list(set(y_train.unique().tolist() + y_test.unique().tolist())))
 
     fig_buf = io.BytesIO()
     yb_vis = None
@@ -580,30 +610,30 @@ def _sync_generate_yellowbrick_plot(
     try:
         if metric_type == "Classification":
             yb_kwargs = yellowbrick_classification_kwargs(
-                project_name, metric_name, dm.y_train, classes
+                project_name, metric_name, y_train, classes
             )
             yb_vis = yellowbrick_classification_visualizers(
-                yb_kwargs, dm.X_train, dm.X_test, dm.y_train, dm.y_test
+                yb_kwargs, X_train, X_test, y_train, y_test
             )
         elif metric_type == "Feature Analysis":
             yb_kwargs = yellowbrick_feature_analysis_kwargs(
-                project_name, metric_name, classes
+                project_name, metric_name, classes, feature_names
             )
             yb_vis = yellowbrick_feature_analysis_visualizers(
-                yb_kwargs, dm.X, dm.y
+                yb_kwargs, X, y
             )
         elif metric_type == "Target":
-            labels = list(set(dm.y_train.unique().tolist() + dm.y_test.unique().tolist()))
-            features_list = dm.X_train.columns.tolist()
+            labels = sorted(list(set(y_train.unique().tolist() + y_test.unique().tolist())))
+            features_list = X_train.columns.tolist()
             yb_kwargs = yellowbrick_target_kwargs(
                 project_name, metric_name, labels, features_list
             )
-            yb_vis = yellowbrick_target_visualizers(yb_kwargs, dm.X, dm.y)
+            yb_vis = yellowbrick_target_visualizers(yb_kwargs, X, y)
         elif metric_type == "Model Selection":
             yb_kwargs = yellowbrick_model_selection_kwargs(
-                project_name, metric_name, dm.y_train
+                project_name, metric_name, y_train
             )
-            yb_vis = yellowbrick_model_selection_visualizers(yb_kwargs, dm.X, dm.y)
+            yb_vis = yellowbrick_model_selection_visualizers(yb_kwargs, X, y)
         else:
             raise ValueError(f"Unknown metric type: {metric_type}")
 
@@ -632,6 +662,21 @@ async def yellowbrick_metric(payload: dict):
             detail="Missing required fields: project_name, metric_type, metric_name"
         )
 
+    # Check if force_refresh is requested (bypass cache)
+    force_refresh = payload.get("force_refresh", False)
+
+    # Check Redis cache first (unless force_refresh)
+    if not force_refresh:
+        cached_image = visualization_cache.get(project_name, metric_name)
+        if cached_image:
+            image_base64 = base64.b64encode(cached_image).decode("utf-8")
+            return {
+                "image_base64": image_base64,
+                "cache": "HIT",
+                "metric_type": metric_type,
+                "metric_name": metric_name,
+            }
+
     try:
         image_bytes = await asyncio.wait_for(
             asyncio.to_thread(
@@ -639,14 +684,21 @@ async def yellowbrick_metric(payload: dict):
                 project_name,
                 metric_type,
                 metric_name,
-                data_manager
             ),
             timeout=120.0
         )
-        return StreamingResponse(
-            io.BytesIO(image_bytes),
-            media_type="image/png"
-        )
+
+        # Store in Redis cache
+        visualization_cache.set(project_name, metric_name, image_bytes)
+
+        # Return base64 encoded image for Reflex frontend
+        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+        return {
+            "image_base64": image_base64,
+            "cache": "MISS",
+            "metric_type": metric_type,
+            "metric_name": metric_name,
+        }
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="Visualization generation timed out")
     except ValueError as e:
@@ -785,6 +837,7 @@ async def get_batch_status():
         "current_stage": batch_state.current_stage,
         "metrics_preview": batch_state.metrics_preview,
         "catboost_log": catboost_log,
+        "total_rows": batch_state.total_rows,
     }
 
     if batch_state.current_model_name and batch_state.current_process:
@@ -851,6 +904,7 @@ class TrainingStatusUpdate(BaseModel):
     progress: Optional[int] = None
     stage: Optional[str] = None
     metrics: Optional[Dict[str, float]] = None
+    total_rows: Optional[int] = None  # Total rows from DuckDB (set once after data loading)
 
 
 @app.post("/training_status")
@@ -860,9 +914,27 @@ async def update_training_status(update: TrainingStatusUpdate):
         message=update.message,
         progress=update.progress,
         stage=update.stage,
-        metrics=update.metrics
+        metrics=update.metrics,
+        total_rows=update.total_rows
     )
     return {"status": "ok"}
+
+
+@app.post("/stop_training")
+async def stop_training():
+    """Stop the current batch training process and reset state."""
+    if not batch_state.current_process:
+        return {"status": "idle", "message": "No training is currently running."}
+
+    model_name = batch_state.current_model_name
+    stop_current_training()
+    batch_state.reset_status()
+    batch_state.status = "idle"
+
+    return {
+        "status": "stopped",
+        "message": f"Training '{model_name}' has been stopped.",
+    }
 
 
 @app.post("/switch_model")
@@ -911,6 +983,11 @@ async def switch_batch_model(payload: dict):
     try:
         print(f"Starting batch training: {model_key}" + (f" with sample_frac={sample_frac}" if sample_frac else ""))
 
+        # Invalidate visualization cache - new training means new data
+        project_name = MODEL_SCRIPTS.get(model_key)
+        if project_name:
+            visualization_cache.invalidate(project_name)
+
         log_dir = "/app/logs"
         os.makedirs(log_dir, exist_ok=True)
         log_file_path = f"{log_dir}/{model_key}.log"
@@ -952,39 +1029,80 @@ async def switch_batch_model(payload: dict):
 
 
 # =============================================================================
-# Resource Pool Endpoints
+# YellowBrick Feature Analysis Endpoint
 # =============================================================================
-@app.get("/resource_pool/status")
-async def get_resource_pool_status():
-    """Get status of the resource pool (training data availability).
+@app.get("/yellowbrick/visualizers")
+async def list_yellowbrick_visualizers():
+    """List available YellowBrick Feature Analysis visualizers.
 
-    Returns information about the latest training session data,
-    which is used by YellowBrick visualizations.
-
-    Note: Model is loaded from MLflow on-demand, not stored in resource pool.
+    Returns visualizer metadata including name, speed, and description.
+    Other categories (Classification, Target, Model Selection) will be added gradually.
     """
-    status = resource_pool.status()
+    return {
+        "Feature Analysis": [
+            {
+                "name": "Rank1D",
+                "speed": "fast",
+                "description": "Single feature ranking (Shapiro-Wilk)",
+            },
+            {
+                "name": "Rank2D",
+                "speed": "fast",
+                "description": "Pairwise feature correlation matrix",
+            },
+            {
+                "name": "PCA",
+                "speed": "fast",
+                "description": "Principal Component Analysis 2D projection",
+            },
+            {
+                "name": "Manifold",
+                "speed": "slow",
+                "description": "t-SNE non-linear dimensionality reduction",
+            },
+            {
+                "name": "ParallelCoordinates",
+                "speed": "medium",
+                "description": "Multi-dimensional parallel coordinates plot",
+            },
+            {
+                "name": "RadViz",
+                "speed": "fast",
+                "description": "Radial visualization of features",
+            },
+            {
+                "name": "JointPlot",
+                "speed": "fast",
+                "description": "2D correlation between two features",
+            },
+        ],
+    }
 
-    # If session exists, also include best model info from MLflow
-    if status.get("has_session"):
-        project_name = status.get("project_name")
-        model_name = MLFLOW_MODEL_NAMES.get(project_name)
-        if model_name:
-            model, run_id = model_cache.get_model(project_name)
-            status["best_model"] = {
-                "available": model is not None,
-                "model_name": model_name,
-                "run_id": run_id,
-            }
 
-    return status
+@app.get("/yellowbrick/cache/status")
+async def get_visualization_cache_status():
+    """Get YellowBrick visualization cache status.
 
-
-@app.post("/resource_pool/clear")
-async def clear_resource_pool():
-    """Clear the resource pool, freeing memory.
-
-    Use this if you want to force a fresh data load on next training.
+    Returns:
+        - Redis connection status
+        - Number of cached visualizations
+        - Cached visualizations by project
     """
-    resource_pool.clear()
-    return {"message": "Resource pool cleared"}
+    return visualization_cache.status()
+
+
+@app.post("/yellowbrick/cache/clear")
+async def clear_visualization_cache(payload: dict = None):
+    """Clear YellowBrick visualization cache.
+
+    Payload (optional):
+        project_name: str - Clear only for specific project
+                           If not provided, clears all visualizations
+    """
+    if payload and payload.get("project_name"):
+        project_name = payload["project_name"]
+        deleted = visualization_cache.invalidate(project_name)
+        return {"message": f"Cleared {deleted} cached visualizations for '{project_name}'"}
+    else:
+        deleted = visualization_cache.clear_all()
+        return {"message": f"Cleared {deleted} cached visualizations"}

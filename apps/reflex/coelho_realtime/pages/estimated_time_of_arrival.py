@@ -40,8 +40,8 @@ def index() -> rx.Component:
         # On mount: page initialization + form randomization (instant local)
         on_mount=[
             ETAState.randomize_eta_form,  # Populate form with random values (local, instant)
-            ETAState.init_page(MODEL_KEY, PROJECT_NAME),  # Fetch MLflow metrics
-            SharedState.check_batch_model_available(PROJECT_NAME),  # Check batch model
+            ETAState.init_page(MODEL_KEY, PROJECT_NAME),  # Fetch MLflow metrics (Incremental ML)
+            SharedState.init_batch_page(PROJECT_NAME),  # Check batch model + fetch metrics (Batch ML)
         ],
         # On unmount: cleanup when leaving the page
         on_unmount=ETAState.cleanup_on_page_leave(PROJECT_NAME),

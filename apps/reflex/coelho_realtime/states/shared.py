@@ -317,6 +317,12 @@ class SharedState(rx.State):
         "Estimated Time of Arrival": {},
         "E-Commerce Customer Interactions": {}
     }
+    # Total rows loaded from DuckDB (set once after data loading)
+    batch_training_total_rows: dict[str, int] = {
+        "Transaction Fraud Detection": 0,
+        "Estimated Time of Arrival": 0,
+        "E-Commerce Customer Interactions": 0
+    }
 
     # ==========================================================================
     # SQL / DELTA LAKE STATE VARIABLES
@@ -1191,6 +1197,7 @@ class SharedState(rx.State):
             self.batch_training_stage[project_name] = "init"
             self.batch_training_metrics_preview[project_name] = {}
             self.batch_training_catboost_log[project_name] = {}
+            self.batch_training_total_rows[project_name] = 0
 
         # Show toast with percentage info
         pct_info = f" using {data_percentage}% of data" if data_percentage < 100 else ""
@@ -1240,6 +1247,9 @@ class SharedState(rx.State):
                         self.batch_training_metrics_preview[project_name] = status.get("metrics_preview", {})
                     # CatBoost training log (parsed dict)
                     self.batch_training_catboost_log[project_name] = status.get("catboost_log", {})
+                    # Total rows (set once after data loading, persists through training)
+                    if status.get("total_rows") and status.get("total_rows") > 0:
+                        self.batch_training_total_rows[project_name] = status.get("total_rows", 0)
 
                 if status.get("status") == "completed":
                     # Training completed successfully
@@ -1297,6 +1307,48 @@ class SharedState(rx.State):
             )
 
     @rx.event(background=True)
+    async def stop_batch_training(self, project_name: str):
+        """Stop the current batch training process and reset state."""
+        try:
+            response = await httpx_client_post(
+                url=f"{SKLEARN_BASE_URL}/stop_training",
+                json={},
+                timeout=30.0
+            )
+            result = response.json()
+
+            async with self:
+                # Reset all training state to initial values
+                self.batch_training_loading[project_name] = False
+                self.batch_training_status[project_name] = ""
+                self.batch_training_progress[project_name] = 0
+                self.batch_training_stage[project_name] = ""
+                self.batch_training_metrics_preview[project_name] = {}
+                self.batch_training_catboost_log[project_name] = {}
+                self.batch_training_total_rows[project_name] = 0
+
+            if result.get("status") == "stopped":
+                yield rx.toast.info(
+                    "Batch ML training stopped",
+                    description=f"Stopped training for {project_name}",
+                    duration=3000,
+                )
+            else:
+                yield rx.toast.info(
+                    "No training running",
+                    description="No batch training was active.",
+                    duration=3000,
+                )
+
+        except Exception as e:
+            print(f"Error stopping batch training: {e}")
+            yield rx.toast.error(
+                "Error stopping training",
+                description=str(e)[:100],
+                duration=5000,
+            )
+
+    @rx.event(background=True)
     async def check_batch_model_available(self, project_name: str):
         """Check if a trained batch (Scikit-Learn) model is available in MLflow."""
         model_name = self._batch_model_names.get(project_name, "XGBClassifier")
@@ -1337,7 +1389,16 @@ class SharedState(rx.State):
                 timeout=60.0
             )
             async with self:
-                self.batch_mlflow_metrics[project_name] = response.json()
+                metrics_data = response.json()
+                self.batch_mlflow_metrics[project_name] = metrics_data
+                # Set total_rows from MLflow params (persists across page refresh)
+                train_samples = metrics_data.get("params.train_samples")
+                test_samples = metrics_data.get("params.test_samples")
+                print(f"[DEBUG] get_batch_mlflow_metrics: train_samples={train_samples}, test_samples={test_samples}")
+                if train_samples and test_samples:
+                    total = int(train_samples) + int(test_samples)
+                    print(f"[DEBUG] Setting batch_training_total_rows[{project_name}] = {total}")
+                    self.batch_training_total_rows[project_name] = total
 
         except Exception as e:
             print(f"Error fetching batch MLflow metrics: {e}")
@@ -1359,7 +1420,13 @@ class SharedState(rx.State):
                 timeout=60.0
             )
             async with self:
-                self.batch_mlflow_metrics[project_name] = response.json()
+                metrics_data = response.json()
+                self.batch_mlflow_metrics[project_name] = metrics_data
+                # Set total_rows from MLflow params (persists across page refresh)
+                train_samples = metrics_data.get("params.train_samples")
+                test_samples = metrics_data.get("params.test_samples")
+                if train_samples and test_samples:
+                    self.batch_training_total_rows[project_name] = int(train_samples) + int(test_samples)
 
             yield rx.toast.success(
                 "Batch metrics refreshed",
@@ -1377,6 +1444,7 @@ class SharedState(rx.State):
     @rx.event(background=True)
     async def init_batch_page(self, project_name: str):
         """Initialize batch ML page - check model availability and fetch metrics."""
+        print(f"[DEBUG] init_batch_page called for: {project_name}")
         # Check model availability
         yield SharedState.check_batch_model_available(project_name)
         # Fetch metrics if model available

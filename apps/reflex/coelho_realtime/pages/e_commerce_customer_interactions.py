@@ -40,10 +40,10 @@ def index() -> rx.Component:
         # On mount: page initialization + form randomization (instant local)
         on_mount=[
             ECCIState.randomize_ecci_form,  # Populate form with random values (local, instant)
-            ECCIState.init_page(MODEL_KEY, PROJECT_NAME),  # Fetch MLflow metrics
+            ECCIState.init_page(MODEL_KEY, PROJECT_NAME),  # Fetch MLflow metrics (Incremental ML)
             ECCIState.fetch_ecci_cluster_counts,
             ECCIState.fetch_ecci_cluster_feature_counts,
-            SharedState.check_batch_model_available(PROJECT_NAME),  # Check batch model
+            SharedState.init_batch_page(PROJECT_NAME),  # Check batch model + fetch metrics (Batch ML)
         ],
         # On unmount: cleanup when leaving the page
         on_unmount=ECCIState.cleanup_on_page_leave(PROJECT_NAME),

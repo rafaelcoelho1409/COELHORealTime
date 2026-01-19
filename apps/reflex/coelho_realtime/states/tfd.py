@@ -43,6 +43,7 @@ class TFDState(SharedState):
     yellowbrick_image_base64: str = ""
     yellowbrick_loading: bool = False
     yellowbrick_error: str = ""
+    _yellowbrick_cancel_requested: bool = False
     # Detailed metrics options for YellowBrick
     yellowbrick_metrics_options: dict[str, list[str]] = {
         "Classification": [
@@ -55,6 +56,13 @@ class TFDState(SharedState):
         ],
         "Feature Analysis": [
             "Select visualization...",
+            "Rank1D",
+            "Rank2D",
+            "PCA",
+            "Manifold",
+            "ParallelCoordinates",
+            "RadViz",
+            "JointPlot",
         ],
         "Target": [
             "Select visualization...",
@@ -831,6 +839,8 @@ class TFDState(SharedState):
         async with self:
             self.yellowbrick_loading = True
             self.yellowbrick_error = ""
+            self.yellowbrick_image_base64 = ""  # Clear old image while loading new one
+            self._yellowbrick_cancel_requested = False
 
         try:
             response = await httpx_client_post(
@@ -840,19 +850,38 @@ class TFDState(SharedState):
                     "metric_type": metric_type,
                     "metric_name": metric_name
                 },
-                timeout=60.0
+                timeout=300.0  # 5 minutes for slow visualizations like Manifold
             )
+            # Check if cancelled before updating UI
+            if self._yellowbrick_cancel_requested:
+                return
             result = response.json()
             async with self:
                 self.yellowbrick_image_base64 = result.get("image_base64", "")
                 self.yellowbrick_loading = False
                 self.yellowbrick_error = result.get("error", "")
         except Exception as e:
+            if self._yellowbrick_cancel_requested:
+                return
             print(f"Error fetching YellowBrick metric: {e}")
             async with self:
                 self.yellowbrick_loading = False
                 self.yellowbrick_error = str(e)
                 self.yellowbrick_image_base64 = ""
+
+    @rx.event
+    def cancel_yellowbrick_loading(self):
+        """Cancel the current YellowBrick visualization loading."""
+        self._yellowbrick_cancel_requested = True
+        self.yellowbrick_loading = False
+        self.yellowbrick_error = ""
+        self.yellowbrick_image_base64 = ""
+        self.yellowbrick_metric_name = "Select visualization..."
+        yield rx.toast.info(
+            "Visualization cancelled",
+            description="Loading has been stopped.",
+            duration=2000
+        )
 
     @rx.event(background=True)
     async def check_batch_model_available(self, project_name: str):
