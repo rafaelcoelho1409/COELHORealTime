@@ -291,42 +291,6 @@ def batch_ml_run_and_training_box(model_key: str, project_name: str) -> rx.Compo
                 ),
                 rx.text("No runs available. Train a model first.", size="1", color="gray")
             ),
-            # Show total rows badge and MLflow button
-            rx.cond(
-                SharedState.selected_batch_run[project_name] != "",
-                rx.hstack(
-                    rx.badge(
-                        SharedState.batch_training_total_rows[project_name].to(str) + " rows",
-                        color_scheme="blue",
-                        variant="soft",
-                        size="1"
-                    ),
-                    rx.spacer(),
-                    rx.link(
-                        rx.button(
-                            rx.hstack(
-                                rx.image(
-                                    src="https://cdn.simpleicons.org/mlflow/0194E2",
-                                    width="14px",
-                                    height="14px"
-                                ),
-                                rx.text("MLflow", size="1"),
-                                spacing="1",
-                                align_items="center"
-                            ),
-                            size="1",
-                            variant="soft",
-                            color_scheme="cyan",
-                        ),
-                        href=SharedState.batch_mlflow_experiment_url[project_name],
-                        is_external=True,
-                    ),
-                    spacing="2",
-                    align_items="center",
-                    width="100%"
-                ),
-                rx.fragment()
-            ),
             # === Divider between MLflow Run and Training ===
             rx.divider(size="4", width="100%"),
             # === Batch ML Training Section ===
@@ -569,7 +533,7 @@ def batch_ml_run_and_training_box(model_key: str, project_name: str) -> rx.Compo
                 ),
             ),
             rx.divider(size="4", width="100%"),
-            # Model name and Batch ML badges
+            # Model name, Batch ML badges, and MLflow button
             rx.hstack(
                 rx.badge(
                     rx.hstack(
@@ -583,7 +547,50 @@ def batch_ml_run_and_training_box(model_key: str, project_name: str) -> rx.Compo
                     size="1"
                 ),
                 rx.badge("Batch ML", color_scheme="blue", variant="soft", size="1"),
-                spacing="2"
+                rx.spacer(),
+                # MLflow button - links to experiment
+                rx.cond(
+                    SharedState.batch_mlflow_experiment_url[project_name] != "",
+                    rx.link(
+                        rx.button(
+                            rx.hstack(
+                                rx.image(
+                                    src="https://cdn.simpleicons.org/mlflow/0194E2",
+                                    width="14px",
+                                    height="14px"
+                                ),
+                                rx.text("MLflow", size="1"),
+                                spacing="1",
+                                align_items="center"
+                            ),
+                            size="1",
+                            variant="soft",
+                            color_scheme="cyan",
+                        ),
+                        href=SharedState.batch_mlflow_experiment_url[project_name],
+                        is_external=True,
+                    ),
+                    rx.button(
+                        rx.hstack(
+                            rx.image(
+                                src="https://cdn.simpleicons.org/mlflow/0194E2",
+                                width="14px",
+                                height="14px",
+                                opacity="0.5"
+                            ),
+                            rx.text("MLflow", size="1"),
+                            spacing="1",
+                            align_items="center"
+                        ),
+                        size="1",
+                        variant="soft",
+                        color_scheme="gray",
+                        disabled=True,
+                    )
+                ),
+                spacing="2",
+                align_items="center",
+                width="100%"
             ),
             spacing="2",
             align_items="start",

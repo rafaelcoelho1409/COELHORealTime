@@ -296,7 +296,11 @@ def _sync_get_mlflow_metrics(project_name: str, model_name: str, run_id: str = N
         max_results=100,
         order_by=["start_time DESC"]
     )
-    runs_df = runs_df[runs_df["tags.mlflow.runName"] == model_name]
+    if runs_df.empty:
+        raise ValueError(f"No runs found in experiment '{project_name}'")
+    # Filter by model name if the column exists
+    if "tags.mlflow.runName" in runs_df.columns:
+        runs_df = runs_df[runs_df["tags.mlflow.runName"] == model_name]
     if runs_df.empty:
         raise ValueError(f"No runs found for model '{model_name}'")
     run_df = runs_df.iloc[0]
@@ -311,7 +315,27 @@ def _sync_get_mlflow_metrics(project_name: str, model_name: str, run_id: str = N
 # =============================================================================
 PROJECT_NAMES = [
     "Transaction Fraud Detection",
+    "Estimated Time of Arrival",
+    "E-Commerce Customer Interactions",
 ]
+
+
+def ensure_mlflow_experiments_exist():
+    """Create MLflow experiments if they don't exist.
+
+    This is called at startup to ensure all project experiments are available
+    before any training or metrics queries happen.
+    """
+    for project_name in PROJECT_NAMES:
+        try:
+            experiment = mlflow.get_experiment_by_name(project_name)
+            if experiment is None or experiment.lifecycle_stage == "deleted":
+                experiment_id = mlflow.create_experiment(project_name)
+                print(f"Created MLflow experiment: {project_name} (ID: {experiment_id})")
+            else:
+                print(f"MLflow experiment exists: {project_name} (ID: {experiment.experiment_id})")
+        except Exception as e:
+            print(f"Error creating MLflow experiment {project_name}: {e}", file=sys.stderr)
 
 # Global encoders dict
 encoders_dict = {x: None for x in PROJECT_NAMES}
@@ -422,6 +446,10 @@ async def lifespan(app: FastAPI):
         print("MLflow configured successfully")
     except Exception as e:
         print(f"Error configuring MLflow: {e}", file=sys.stderr)
+
+    # Ensure all MLflow experiments exist (create if missing)
+    print("Ensuring MLflow experiments exist...")
+    ensure_mlflow_experiments_exist()
 
     print("Sklearn service startup complete.")
     yield
@@ -640,10 +668,33 @@ async def get_mlflow_metrics(request: MLflowMetricsRequest):
         model_name: Model name tag
         run_id: Optional specific run ID. If None, uses best run.
         force_refresh: Bypass cache if True
+
+    Returns empty dict when no runs exist (instead of 404) to handle deleted runs gracefully.
     """
     # Cache key includes run_id (None becomes "best" in key)
     cache_run_key = request.run_id or "best"
     cache_key = f"{request.project_name}:{request.model_name}:{cache_run_key}"
+
+    # Always verify runs exist before returning cached data
+    # This prevents serving stale metrics after runs are deleted
+    try:
+        experiment = mlflow.get_experiment_by_name(request.project_name)
+        if experiment is None:
+            # No experiment = no runs, clear cache and return empty
+            mlflow_cache._cache.pop(cache_key, None)
+            return {"_no_runs": True, "message": "No experiment found"}
+
+        runs_df = mlflow.search_runs(
+            experiment_ids=[experiment.experiment_id],
+            max_results=1
+        )
+        if runs_df.empty:
+            # No runs exist, clear any cached data and return empty dict
+            mlflow_cache._cache.pop(cache_key, None)
+            return {"_no_runs": True, "message": "No runs found in experiment"}
+    except Exception as e:
+        print(f"Error checking runs existence: {e}", file=sys.stderr)
+        # On error, proceed with normal flow
 
     if not request.force_refresh:
         cached_result = mlflow_cache.get(cache_key)
@@ -665,7 +716,9 @@ async def get_mlflow_metrics(request: MLflowMetricsRequest):
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="MLflow query timed out")
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        # No runs found - clear cache and return empty dict instead of 404
+        mlflow_cache._cache.pop(cache_key, None)
+        return {"_no_runs": True, "message": str(e)}
     except Exception as e:
         print(f"Error fetching MLflow metrics: {e}", file=sys.stderr)
         raise HTTPException(status_code=500, detail=f"Failed to fetch MLflow metrics: {str(e)}")
@@ -845,7 +898,9 @@ def _sync_generate_yellowbrick_plot(
             raise ValueError(f"Unknown metric type: {metric_type}")
 
         if yb_vis is not None:
-            yb_vis.fig.savefig(fig_buf, format="png", bbox_inches='tight')
+            # CRITICAL: Call show() to finalize visualization before saving
+            yb_vis.show()
+            yb_vis.fig.savefig(fig_buf, format="png")
             fig_buf.seek(0)
             image_bytes = fig_buf.getvalue()
 

@@ -320,8 +320,11 @@ def get_all_mlflow_runs(project_name: str, model_name: str) -> list[dict]:
         if runs_df.empty:
             return []
 
-        # Filter by model name
-        filtered_runs = runs_df[runs_df["tags.mlflow.runName"] == model_name]
+        # Filter by model name if the column exists
+        if "tags.mlflow.runName" in runs_df.columns:
+            filtered_runs = runs_df[runs_df["tags.mlflow.runName"] == model_name]
+        else:
+            filtered_runs = runs_df
         if filtered_runs.empty:
             return []
 
@@ -1555,11 +1558,24 @@ class ModelDataManager:
 # YellowBrick Image Generation
 # =============================================================================
 def generate_yellowbrick_image(visualizer) -> str:
-    """Generate base64 encoded PNG image from YellowBrick visualizer."""
+    """Generate base64 encoded PNG image from YellowBrick visualizer.
+
+    The sequence is critical for correct rendering:
+    1. visualizer.show() - Finalizes the visualization (required!)
+    2. fig.savefig() - Save to buffer
+    3. plt.close() + plt.clf() - Cleanup to prevent overlap
+    """
+    # Finalize the visualization (required for proper rendering)
+    visualizer.show()
+
+    # Save to buffer
     buf = io.BytesIO()
     visualizer.fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
     buf.seek(0)
     image_base64 = base64.b64encode(buf.read()).decode('utf-8')
     buf.close()
-    plt.close(visualizer.fig)
+
+    # Cleanup - prevents overlapping plots and memory leaks
+    plt.close(visualizer.fig)  # Close specific figure
+    plt.clf()                   # Clear current figure state
     return image_base64

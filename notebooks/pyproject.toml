@@ -24,6 +24,7 @@ dependencies = [
     #Setuptools is necessary to YellowBrick
     "setuptools",
     "xgboost",
+    "mlflow",
 ]
 
 [dependency-groups]

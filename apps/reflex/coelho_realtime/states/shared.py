@@ -260,7 +260,7 @@ class SharedState(rx.State):
 
     # Batch ML model names for display
     batch_ml_model_name: dict = {
-        "Transaction Fraud Detection": "CatBoost Classifier (Scikit-Learn)",
+        "Transaction Fraud Detection": "CatBoost Classifier",
         "Estimated Time of Arrival": "CatBoost Regressor (Scikit-Learn)",
         "E-Commerce Customer Interactions": "KMeans Clustering (Scikit-Learn)",
     }
@@ -1306,7 +1306,8 @@ class SharedState(rx.State):
                         close_button=True,
                     )
 
-                    # Fetch metrics and check model availability
+                    # Refresh MLflow runs dropdown, check model availability, fetch metrics
+                    yield SharedState.fetch_mlflow_runs(project_name)
                     yield SharedState.check_batch_model_available(project_name)
                     yield SharedState.get_batch_mlflow_metrics(project_name)
                     return
@@ -1327,6 +1328,7 @@ class SharedState(rx.State):
                 self.batch_training_loading[project_name] = False
                 self.batch_training_status[project_name] = ""
 
+            yield SharedState.fetch_mlflow_runs(project_name)
             yield SharedState.check_batch_model_available(project_name)
             yield SharedState.get_batch_mlflow_metrics(project_name)
 
@@ -1432,6 +1434,12 @@ class SharedState(rx.State):
             )
             async with self:
                 metrics_data = response.json()
+                # Check if no runs exist (e.g., all runs deleted)
+                if metrics_data.get("_no_runs"):
+                    print(f"[DEBUG] get_batch_mlflow_metrics: No runs found for {project_name}")
+                    self.batch_mlflow_metrics[project_name] = {}
+                    self.batch_training_total_rows[project_name] = 0
+                    return
                 self.batch_mlflow_metrics[project_name] = metrics_data
                 # Set total_rows from MLflow params (persists across page refresh)
                 train_samples = metrics_data.get("params.train_samples")
@@ -1470,6 +1478,16 @@ class SharedState(rx.State):
             )
             async with self:
                 metrics_data = response.json()
+                # Check if no runs exist (e.g., all runs deleted)
+                if metrics_data.get("_no_runs"):
+                    self.batch_mlflow_metrics[project_name] = {}
+                    self.batch_training_total_rows[project_name] = 0
+                    yield rx.toast.info(
+                        "No runs found",
+                        description="No MLflow runs exist for this experiment. Train a model first.",
+                        duration=3000
+                    )
+                    return
                 self.batch_mlflow_metrics[project_name] = metrics_data
                 # Set total_rows from MLflow params (persists across page refresh)
                 train_samples = metrics_data.get("params.train_samples")
@@ -1523,15 +1541,24 @@ class SharedState(rx.State):
             async with self:
                 self.batch_mlflow_runs[project_name] = runs
                 self.batch_runs_loading[project_name] = False
-                # If no run selected and runs exist, select the best (first)
-                if not self.selected_batch_run[project_name] and runs:
-                    self.selected_batch_run[project_name] = runs[0].run_id
+                if runs:
+                    # If no run selected and runs exist, select the best (first)
+                    if not self.selected_batch_run[project_name]:
+                        self.selected_batch_run[project_name] = runs[0].run_id
+                else:
+                    # No runs - clear selected run and metrics
+                    self.selected_batch_run[project_name] = ""
+                    self.batch_mlflow_metrics[project_name] = {}
+                    self.batch_training_total_rows[project_name] = 0
                 print(f"[DEBUG] Fetched {len(runs)} MLflow runs for {project_name}")
 
         except Exception as e:
             print(f"Error fetching MLflow runs: {e}")
             async with self:
                 self.batch_mlflow_runs[project_name] = []
+                self.selected_batch_run[project_name] = ""
+                self.batch_mlflow_metrics[project_name] = {}
+                self.batch_training_total_rows[project_name] = 0
                 self.batch_runs_loading[project_name] = False
 
     @rx.event(background=True)

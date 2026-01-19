@@ -86,10 +86,7 @@ class TFDState(SharedState):
     batch_prediction_results: dict = {
         "Transaction Fraud Detection": {},
     }
-    # Batch ML MLflow metrics (separate from incremental ML)
-    batch_mlflow_metrics: dict = {
-        "Transaction Fraud Detection": {},
-    }
+    # NOTE: batch_mlflow_metrics is inherited from SharedState - do not shadow it here
     # Batch ML training state
     batch_training_loading: bool = False
     batch_model_available: dict = {
@@ -663,6 +660,144 @@ class TFDState(SharedState):
         """Get list of batch ML metric names for TFD."""
         return list(self.tfd_batch_metrics.keys())
 
+    @rx.var
+    def tfd_batch_dashboard_figures(self) -> dict:
+        """Generate Plotly figures for batch ML metrics dashboard.
+
+        Returns dict with keys:
+        - Primary metrics as KPI indicators: recall, precision, f1, fbeta, rocauc, avg_precision
+        - Secondary metrics as gauges: accuracy, balanced_accuracy, mcc, cohen_kappa
+        - Probabilistic metrics as bullet charts: log_loss, brier_score
+        """
+        raw_metrics = self.batch_mlflow_metrics.get("Transaction Fraud Detection", {})
+        if not isinstance(raw_metrics, dict):
+            raw_metrics = {}
+
+        def get_metric(name: str) -> float:
+            """Extract metric value from raw MLflow metrics."""
+            key = f"metrics.{name}"
+            val = raw_metrics.get(key, 0)
+            return float(val) if val is not None else 0.0
+
+        def create_kpi(value: float, title: str) -> go.Figure:
+            """Create KPI indicator with percentage display."""
+            display_value = value * 100
+            if value >= 0.85:
+                color = "#3b82f6"  # blue - excellent
+            elif value >= 0.70:
+                color = "#22c55e"  # green - good
+            elif value >= 0.50:
+                color = "#eab308"  # yellow - fair
+            else:
+                color = "#ef4444"  # red - poor
+
+            fig = go.Figure(go.Indicator(
+                mode="number",
+                value=display_value,
+                title={"text": f"<b>{title}</b>", "font": {"size": 12}},
+                number={"suffix": "%", "font": {"size": 24, "color": color}, "valueformat": ".1f"}
+            ))
+            fig.update_layout(
+                height=100, margin=dict(l=10, r=10, t=35, b=10),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)"
+            )
+            return fig
+
+        def create_gauge(value: float, title: str, min_val: float = 0, max_val: float = 1) -> go.Figure:
+            """Create gauge with colored ranges."""
+            if min_val == -1:  # MCC/CohenKappa range
+                steps = [
+                    {"range": [-1, 0], "color": "#ef4444"},
+                    {"range": [0, 0.4], "color": "#eab308"},
+                    {"range": [0.4, 0.6], "color": "#22c55e"},
+                    {"range": [0.6, 1], "color": "#3b82f6"}
+                ]
+                threshold_val = 0.5
+            else:  # 0-1 range
+                steps = [
+                    {"range": [0, 0.5], "color": "#ef4444"},
+                    {"range": [0.5, 0.7], "color": "#eab308"},
+                    {"range": [0.7, 0.85], "color": "#22c55e"},
+                    {"range": [0.85, 1], "color": "#3b82f6"}
+                ]
+                threshold_val = 0.8
+
+            fig = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=value,
+                title={"text": f"<b>{title}</b>", "font": {"size": 12}},
+                number={"valueformat": ".3f", "font": {"size": 20}},
+                gauge={
+                    "axis": {"range": [min_val, max_val], "tickwidth": 1},
+                    "bar": {"color": "#1e40af"},
+                    "steps": steps,
+                    "threshold": {"value": threshold_val, "line": {"color": "black", "width": 2}, "thickness": 0.75}
+                }
+            ))
+            fig.update_layout(
+                height=160, margin=dict(l=20, r=20, t=35, b=10),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)"
+            )
+            return fig
+
+        def create_bullet(value: float, title: str, max_val: float = 1.0, lower_is_better: bool = True) -> go.Figure:
+            """Create bullet chart for loss metrics (lower is better)."""
+            if lower_is_better:
+                # For loss metrics: green when low, red when high
+                steps = [
+                    {"range": [0, max_val * 0.3], "color": "#22c55e"},
+                    {"range": [max_val * 0.3, max_val * 0.6], "color": "#eab308"},
+                    {"range": [max_val * 0.6, max_val], "color": "#ef4444"}
+                ]
+            else:
+                steps = [
+                    {"range": [0, max_val * 0.5], "color": "#ef4444"},
+                    {"range": [max_val * 0.5, max_val * 0.7], "color": "#eab308"},
+                    {"range": [max_val * 0.7, max_val], "color": "#22c55e"}
+                ]
+
+            fig = go.Figure(go.Indicator(
+                mode="number+gauge",
+                value=value,
+                title={"text": f"<b>{title}</b>", "font": {"size": 12}},
+                number={"valueformat": ".4f", "font": {"size": 18}},
+                gauge={
+                    "shape": "bullet",
+                    "axis": {"range": [0, max_val]},
+                    "bar": {"color": "#1e40af"},
+                    "steps": steps,
+                }
+            ))
+            fig.update_layout(
+                height=100, margin=dict(l=120, r=30, t=35, b=10),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)"
+            )
+            return fig
+
+        return {
+            # Primary metrics (KPI indicators) - 4 metrics
+            "kpi_recall": create_kpi(get_metric("recall_score"), "Recall"),
+            "kpi_precision": create_kpi(get_metric("precision_score"), "Precision"),
+            "kpi_f1": create_kpi(get_metric("f1_score"), "F1 Score"),
+            "kpi_fbeta": create_kpi(get_metric("fbeta_score"), "F2 (β=2)"),
+            # Probabilistic metrics (KPI indicators) - 2 metrics
+            "kpi_rocauc": create_kpi(get_metric("roc_auc_score"), "ROC-AUC"),
+            "kpi_avg_precision": create_kpi(get_metric("average_precision_score"), "Avg Precision"),
+            # Secondary metrics (gauges) - 5 metrics
+            "gauge_accuracy": create_gauge(get_metric("accuracy_score"), "Accuracy"),
+            "gauge_balanced_acc": create_gauge(get_metric("balanced_accuracy_score"), "Balanced Acc"),
+            "gauge_mcc": create_gauge(get_metric("matthews_corrcoef"), "MCC", min_val=-1, max_val=1),
+            "gauge_cohen_kappa": create_gauge(get_metric("cohen_kappa_score"), "Cohen Kappa", min_val=-1, max_val=1),
+            "gauge_jaccard": create_gauge(get_metric("jaccard_score"), "Jaccard"),
+            # Imbalanced metrics (gauges) - 1 metric
+            "gauge_geometric_mean": create_gauge(get_metric("geometric_mean_score"), "G-Mean"),
+            # Probabilistic loss metrics (bullet charts - lower is better) - 4 metrics
+            "bullet_log_loss": create_bullet(get_metric("log_loss"), "Log Loss", max_val=2.0),
+            "bullet_brier": create_bullet(get_metric("brier_score_loss"), "Brier Score", max_val=0.5),
+            "bullet_d2_log_loss": create_bullet(get_metric("d2_log_loss_score"), "D² Log Loss", max_val=1.0, lower_is_better=False),
+            "bullet_d2_brier": create_bullet(get_metric("d2_brier_score"), "D² Brier", max_val=1.0, lower_is_better=False),
+        }
+
     # ==========================================================================
     # TFD INCREMENTAL ML EVENT HANDLERS
     # ==========================================================================
@@ -989,27 +1124,4 @@ class TFDState(SharedState):
                     }
                 }
 
-    @rx.event(background=True)
-    async def get_batch_mlflow_metrics(self, project_name: str):
-        """Fetch batch MLflow metrics for TFD."""
-        try:
-            response = await httpx_client_post(
-                url=f"{SKLEARN_BASE_URL}/mlflow_metrics",
-                json={
-                    "project_name": project_name,
-                    "model_name": "CatBoostClassifier"
-                },
-                timeout=60.0
-            )
-            async with self:
-                self.batch_mlflow_metrics = {
-                    **self.batch_mlflow_metrics,
-                    project_name: response.json()
-                }
-        except Exception as e:
-            print(f"Error fetching batch MLflow metrics: {e}")
-            async with self:
-                self.batch_mlflow_metrics = {
-                    **self.batch_mlflow_metrics,
-                    project_name: {}
-                }
+    # NOTE: get_batch_mlflow_metrics is inherited from SharedState - do not override here

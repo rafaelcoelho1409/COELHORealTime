@@ -178,6 +178,45 @@ def heatmap_card_with_info(plotly_key: str, metric_key: str) -> rx.Component:
 
 
 # =============================================================================
+# Batch ML Plotly Card Helpers
+# =============================================================================
+def batch_kpi_card(plotly_key: str) -> rx.Component:
+    """Create a KPI card for batch ML metrics."""
+    return rx.card(
+        rx.vstack(
+            rx.plotly(data=TFDState.tfd_batch_dashboard_figures[plotly_key], width="100%"),
+            spacing="0",
+            width="100%"
+        ),
+        size="1"
+    )
+
+
+def batch_gauge_card(plotly_key: str) -> rx.Component:
+    """Create a gauge card for batch ML metrics."""
+    return rx.card(
+        rx.vstack(
+            rx.plotly(data=TFDState.tfd_batch_dashboard_figures[plotly_key], width="100%"),
+            spacing="0",
+            width="100%"
+        ),
+        size="1"
+    )
+
+
+def batch_bullet_card(plotly_key: str) -> rx.Component:
+    """Create a bullet chart card for batch ML metrics."""
+    return rx.card(
+        rx.vstack(
+            rx.plotly(data=TFDState.tfd_batch_dashboard_figures[plotly_key], width="100%"),
+            spacing="0",
+            width="100%"
+        ),
+        size="1"
+    )
+
+
+# =============================================================================
 # TFD Metrics Dashboard
 # =============================================================================
 def transaction_fraud_detection_metrics() -> rx.Component:
@@ -228,7 +267,15 @@ def transaction_fraud_detection_metrics() -> rx.Component:
 
 
 def transaction_fraud_detection_batch_metrics() -> rx.Component:
-    """Display batch ML metrics for TFD organized by category."""
+    """Display batch ML metrics for TFD with Plotly charts organized by category.
+
+    Displays all 16 sklearn metrics:
+    - Primary (4): recall, precision, f1, fbeta
+    - Probabilistic Ranking (2): ROC-AUC, Avg Precision
+    - Secondary (5): accuracy, balanced_acc, MCC, Cohen Kappa, Jaccard
+    - Imbalanced (1): Geometric Mean
+    - Probabilistic Loss (4): Log Loss, Brier, D² Log Loss, D² Brier
+    """
     return rx.vstack(
         # ---------------------------------------------------------------------
         # TRAINING DATA INFO - Show total rows processed
@@ -256,65 +303,81 @@ def transaction_fraud_detection_batch_metrics() -> rx.Component:
             rx.fragment()
         ),
         # ---------------------------------------------------------------------
-        # PRIMARY METRICS - Most important for fraud detection
+        # PRIMARY METRICS - KPI Indicators (most important for fraud detection)
         # ---------------------------------------------------------------------
         rx.hstack(
             rx.icon("target", size=16, color="blue"),
             rx.text("Primary Metrics", size="2", weight="bold"),
-            rx.text("(Most important for fraud detection)", size="1", color="gray"),
+            rx.text("(Class-based - most important for fraud detection)", size="1", color="gray"),
             spacing="2",
             align_items="center"
         ),
         rx.grid(
-            metric_card("Recall", TFDState.tfd_batch_metrics.get("recall_score", "N/A"), "recall"),
-            metric_card("Precision", TFDState.tfd_batch_metrics.get("precision_score", "N/A"), "precision"),
-            metric_card("F1", TFDState.tfd_batch_metrics.get("f1_score", "N/A"), "f1"),
-            metric_card("F2 (beta=2)", TFDState.tfd_batch_metrics.get("fbeta_score", "N/A"), "fbeta"),
-            metric_card("ROC-AUC", TFDState.tfd_batch_metrics.get("roc_auc_score", "N/A"), "rocauc"),
-            metric_card("Avg Precision", TFDState.tfd_batch_metrics.get("average_precision_score", "N/A"), "average_precision"),
-            columns="6",
+            batch_kpi_card("kpi_recall"),
+            batch_kpi_card("kpi_precision"),
+            batch_kpi_card("kpi_f1"),
+            batch_kpi_card("kpi_fbeta"),
+            columns="4",
             spacing="2",
             width="100%"
         ),
         rx.divider(size="4", width="100%"),
         # ---------------------------------------------------------------------
-        # SECONDARY METRICS - Additional monitoring insights
+        # PROBABILISTIC RANKING METRICS - ROC-AUC and Average Precision
+        # ---------------------------------------------------------------------
+        rx.hstack(
+            rx.icon("bar-chart-3", size=16, color="indigo"),
+            rx.text("Ranking Metrics", size="2", weight="bold"),
+            rx.text("(Probability-based ranking ability)", size="1", color="gray"),
+            spacing="2",
+            align_items="center"
+        ),
+        rx.grid(
+            batch_kpi_card("kpi_rocauc"),
+            batch_kpi_card("kpi_avg_precision"),
+            columns="2",
+            spacing="2",
+            width="100%"
+        ),
+        rx.divider(size="4", width="100%"),
+        # ---------------------------------------------------------------------
+        # SECONDARY METRICS - Gauges (additional monitoring insights)
         # ---------------------------------------------------------------------
         rx.hstack(
             rx.icon("activity", size=16, color="green"),
             rx.text("Secondary Metrics", size="2", weight="bold"),
-            rx.text("(Additional monitoring)", size="1", color="gray"),
+            rx.text("(Additional monitoring insights)", size="1", color="gray"),
             spacing="2",
             align_items="center"
         ),
         rx.grid(
-            metric_card("Accuracy", TFDState.tfd_batch_metrics.get("accuracy_score", "N/A"), "accuracy"),
-            metric_card("Balanced Acc", TFDState.tfd_batch_metrics.get("balanced_accuracy_score", "N/A"), "balanced_accuracy"),
-            metric_card("MCC", TFDState.tfd_batch_metrics.get("matthews_corrcoef", "N/A"), "mcc"),
-            metric_card("Cohen Kappa", TFDState.tfd_batch_metrics.get("cohen_kappa_score", "N/A"), "cohen_kappa"),
-            metric_card("Jaccard", TFDState.tfd_batch_metrics.get("jaccard_score", "N/A"), "jaccard"),
-            metric_card("Geo Mean", TFDState.tfd_batch_metrics.get("geometric_mean_score", "N/A"), "geometric_mean"),
+            batch_gauge_card("gauge_accuracy"),
+            batch_gauge_card("gauge_balanced_acc"),
+            batch_gauge_card("gauge_mcc"),
+            batch_gauge_card("gauge_cohen_kappa"),
+            batch_gauge_card("gauge_jaccard"),
+            batch_gauge_card("gauge_geometric_mean"),
             columns="6",
             spacing="2",
             width="100%"
         ),
         rx.divider(size="4", width="100%"),
         # ---------------------------------------------------------------------
-        # PROBABILISTIC METRICS - Calibration monitoring
+        # PROBABILISTIC LOSS METRICS - Bullet charts (calibration monitoring)
         # ---------------------------------------------------------------------
         rx.hstack(
             rx.icon("gauge", size=16, color="purple"),
-            rx.text("Probabilistic Metrics", size="2", weight="bold"),
-            rx.text("(Calibration monitoring)", size="1", color="gray"),
+            rx.text("Calibration Metrics", size="2", weight="bold"),
+            rx.text("(Probability calibration quality)", size="1", color="gray"),
             spacing="2",
             align_items="center"
         ),
         rx.grid(
-            metric_card("Log Loss", TFDState.tfd_batch_metrics.get("log_loss", "N/A"), "logloss"),
-            metric_card("Brier Score", TFDState.tfd_batch_metrics.get("brier_score_loss", "N/A"), "brier"),
-            metric_card("D2 Log Loss", TFDState.tfd_batch_metrics.get("d2_log_loss_score", "N/A"), "d2_logloss"),
-            metric_card("D2 Brier", TFDState.tfd_batch_metrics.get("d2_brier_score", "N/A"), "d2_brier"),
-            columns="4",
+            batch_bullet_card("bullet_log_loss"),
+            batch_bullet_card("bullet_brier"),
+            batch_bullet_card("bullet_d2_log_loss"),
+            batch_bullet_card("bullet_d2_brier"),
+            columns="2",
             spacing="2",
             width="100%"
         ),
@@ -1327,6 +1390,15 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
                             ),
                             rx.tabs.trigger(
                                 rx.hstack(
+                                    rx.icon("check-circle", size=14),
+                                    rx.text("Classification"),
+                                    spacing="2",
+                                    align_items="center"
+                                ),
+                                value="classification"
+                            ),
+                            rx.tabs.trigger(
+                                rx.hstack(
                                     rx.icon("scatter-chart", size=14),
                                     rx.text("Feature Analysis"),
                                     spacing="2",
@@ -1342,15 +1414,6 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
                                     align_items="center"
                                 ),
                                 value="target"
-                            ),
-                            rx.tabs.trigger(
-                                rx.hstack(
-                                    rx.icon("check-circle", size=14),
-                                    rx.text("Classification"),
-                                    spacing="2",
-                                    align_items="center"
-                                ),
-                                value="classification"
                             ),
                             rx.tabs.trigger(
                                 rx.hstack(
