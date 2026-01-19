@@ -874,12 +874,24 @@ except ImportError:
 
 
 class CatBoostWrapper(BaseEstimator, ClassifierMixin):
-    """Wraps pre-fitted CatBoost model for YellowBrick sklearn compatibility."""
+    """Wraps pre-fitted CatBoost model for YellowBrick sklearn compatibility.
+
+    Exposes feature_importances_ for FeatureImportances visualizer.
+    Uses get_feature_importance() for reliable access (works with loaded models).
+    """
     _estimator_type = 'classifier'
 
     def __init__(self, model):
         self.model = model
         self.classes_ = np.array(model.classes_)
+        # Expose feature_importances_ for FeatureImportances visualizer
+        # Use get_feature_importance() which is more reliable for loaded models
+        try:
+            fi = model.get_feature_importance()
+            self.feature_importances_ = np.array(fi) if fi is not None else None
+        except Exception:
+            # Fallback to property
+            self.feature_importances_ = model.feature_importances_
 
     def fit(self, X, y):
         return self  # Already fitted
@@ -892,7 +904,10 @@ class CatBoostWrapper(BaseEstimator, ClassifierMixin):
 
 
 class CatBoostWrapperCV(BaseEstimator, ClassifierMixin):
-    """CatBoost wrapper for CV-based visualizers (can be cloned and re-fitted)."""
+    """CatBoost wrapper for CV-based visualizers (can be cloned and re-fitted).
+
+    Exposes feature_importances_ after fitting for RFECV and FeatureImportances.
+    """
     _estimator_type = 'classifier'
 
     def __init__(self, iterations=100, depth=6, learning_rate=0.1,
@@ -904,6 +919,7 @@ class CatBoostWrapperCV(BaseEstimator, ClassifierMixin):
         self.random_state = random_state
         self.model_ = None
         self.classes_ = None
+        self.feature_importances_ = None
 
     def fit(self, X, y):
         self.model_ = CatBoostClassifier(
@@ -916,6 +932,7 @@ class CatBoostWrapperCV(BaseEstimator, ClassifierMixin):
         )
         self.model_.fit(X, y)
         self.classes_ = np.array(self.model_.classes_)
+        self.feature_importances_ = self.model_.feature_importances_
         return self
 
     def predict(self, X):
@@ -923,6 +940,10 @@ class CatBoostWrapperCV(BaseEstimator, ClassifierMixin):
 
     def predict_proba(self, X):
         return self.model_.predict_proba(X)
+
+    def score(self, X, y):
+        from sklearn.metrics import accuracy_score
+        return accuracy_score(y, self.predict(X))
 
 
 class ClassPredictionErrorFixed(_ClassPredictionErrorBase):
@@ -1348,67 +1369,153 @@ def yellowbrick_target_visualizers(
 
 # =============================================================================
 # YellowBrick Model Selection Visualizers
+# Reference: https://www.scikit-yb.org/en/latest/api/model_selection/index.html
 # =============================================================================
 def yellowbrick_model_selection_kwargs(
     project_name: str,
     metric_name: str,
-    y_train: pd.Series
+    feature_names: list = None,
 ) -> dict:
-    """Get kwargs for YellowBrick model selection visualizers."""
+    """Get kwargs for YellowBrick model selection visualizers.
+
+    Reference: https://www.scikit-yb.org/en/latest/api/model_selection/index.html
+
+    All 6 visualizers:
+    - FeatureImportances: Feature ranking by importance (FAST)
+    - CVScores: Cross-validation scores bar chart (MODERATE)
+    - ValidationCurve: Hyperparameter tuning visualization (SLOW)
+    - LearningCurve: Training size vs performance (SLOW)
+    - RFECV: Recursive feature elimination with CV (VERY SLOW)
+    - DroppingCurve: Feature subset random selection (SLOW)
+
+    CatBoost Compatibility:
+    - FeatureImportances: Uses CatBoostWrapper with is_fitted=True
+    - All others: Use CatBoostWrapperCV for CV-based training
+    """
     kwargs = {
-        "ValidationCurve": {
-            "estimator": create_batch_model(project_name, y_train=y_train),
-            "param_name": "gamma",
-            "param_range": np.logspace(-6, -1, 10),
-            "logx": True,
-            "cv": StratifiedKFold(n_splits=5, shuffle=True, random_state=42),
-            "scoring": "average_precision",
-            "n_jobs": 1,
-        },
-        "LearningCurve": {
-            "estimator": create_batch_model(project_name, y_train=y_train),
-            "cv": StratifiedKFold(n_splits=5, shuffle=True, random_state=42),
-            "scoring": "average_precision",
-            "train_sizes": np.linspace(0.3, 1.0, 8),
-            "n_jobs": 1,
-        },
-        "CVScores": {
-            "estimator": create_batch_model(project_name, y_train=y_train),
-            "cv": StratifiedKFold(n_splits=5, shuffle=True, random_state=42),
-            "scoring": "average_precision",
-            "n_jobs": 1,
-        },
+        # =================================================================
+        # PRIMARY: FeatureImportances (FAST, works with CatBoostWrapper)
+        # =================================================================
         "FeatureImportances": {
-            "estimator": create_batch_model(project_name, y_train=y_train),
-            "n_jobs": 1,
+            "labels": feature_names,
+            "relative": True,              # Show as % of max importance
+            "absolute": False,
+            "is_fitted": True,             # CatBoostWrapper compatibility
         },
+
+        # =================================================================
+        # SECONDARY: CVScores (moderate speed with CatBoostWrapperCV)
+        # =================================================================
+        "CVScores": {
+            "cv": 5,                       # 5-fold stratified CV
+            "scoring": "f1",               # F1 score for imbalanced data
+        },
+
+        # =================================================================
+        # ValidationCurve: Hyperparameter tuning (SLOW)
+        # Shows how a single hyperparameter affects train/test scores
+        # =================================================================
+        "ValidationCurve": {
+            "param_name": "iterations",    # CatBoost iterations param
+            "param_range": np.array([50, 100, 150, 200]),
+            "cv": 3,
+            "scoring": "f1",
+        },
+
+        # =================================================================
+        # LearningCurve: Training size analysis (SLOW)
+        # =================================================================
+        "LearningCurve": {
+            "train_sizes": np.linspace(0.1, 1.0, 5),
+            "cv": 3,                       # Reduce folds for speed
+            "scoring": "f1",
+            "random_state": 42,
+        },
+
+        # =================================================================
+        # RFECV: Recursive Feature Elimination with CV (VERY SLOW)
+        # Finds optimal number of features
+        # =================================================================
+        "RFECV": {
+            "cv": 3,
+            "scoring": "f1",
+            "step": 1,                     # Remove 1 feature at a time
+        },
+
+        # =================================================================
+        # DroppingCurve: Feature subset analysis (SLOW)
+        # =================================================================
         "DroppingCurve": {
-            "estimator": create_batch_model(project_name, y_train=y_train),
-            "n_jobs": 1,
-        }
+            "feature_sizes": np.linspace(0.1, 1.0, 5),
+            "cv": 3,
+            "scoring": "f1",
+            "random_state": 42,
+        },
     }
     return {metric_name: kwargs.get(metric_name, {})}
 
 
 def yellowbrick_model_selection_visualizers(
     yb_kwargs: dict,
-    X: pd.DataFrame,
-    y: pd.Series,
+    X_train: pd.DataFrame,
+    X_test: pd.DataFrame,
+    y_train: pd.Series,
+    y_test: pd.Series,
+    model = None,
 ):
-    """Create and fit YellowBrick model selection visualizer."""
+    """Create and fit YellowBrick model selection visualizer.
+
+    Reference: https://www.scikit-yb.org/en/latest/api/model_selection/index.html
+
+    CatBoost Handling:
+    - FeatureImportances: Uses CatBoostWrapper (pre-fitted, sklearn-compatible)
+    - All others: Creates CatBoostWrapperCV for CV-based training
+    """
+    from yellowbrick.model_selection import (
+        FeatureImportances,
+        CVScores,
+        ValidationCurve,
+        LearningCurve,
+        RFECV,
+        DroppingCurve,
+    )
+
+    # Map visualizer names to classes
+    visualizer_map = {
+        "FeatureImportances": FeatureImportances,
+        "CVScores": CVScores,
+        "ValidationCurve": ValidationCurve,
+        "LearningCurve": LearningCurve,
+        "RFECV": RFECV,
+        "DroppingCurve": DroppingCurve,
+    }
+
+    # Combine data for CV-based visualizers
+    X_full = pd.concat([X_train, X_test], ignore_index=True)
+    y_full = pd.concat([y_train, y_test], ignore_index=True)
+
     for visualizer_name, params in yb_kwargs.items():
-        visualizer = getattr(model_selection, visualizer_name)(**params)
-        if visualizer_name in ["ValidationCurve", "RFECV"]:
-            X_stratified, _, y_stratified, _ = train_test_split(
-                X, y,
-                train_size=min(50000, len(X)),
-                shuffle=True,
-                stratify=y,
-                random_state=42
-            )
-            visualizer.fit(X_stratified, y_stratified)
+        vis_class = visualizer_map.get(visualizer_name)
+        if vis_class is None:
+            raise ValueError(f"Unknown visualizer: {visualizer_name}")
+
+        if visualizer_name == "FeatureImportances":
+            # FeatureImportances uses CatBoostWrapper (pre-fitted, sklearn-compatible)
+            if model is None:
+                raise ValueError("Model required for FeatureImportances")
+            wrapped_estimator = CatBoostWrapper(model) if 'CatBoost' in type(model).__name__ else model
+            visualizer = vis_class(wrapped_estimator, **params)
+            visualizer.fit(X_train, y_train)
         else:
-            visualizer.fit(X, y)
+            # All other visualizers need CatBoostWrapperCV
+            cv_wrapper = CatBoostWrapperCV(
+                iterations=100,
+                depth=6,
+                learning_rate=0.1,
+            )
+            visualizer = vis_class(cv_wrapper, **params)
+            visualizer.fit(X_full, y_full)
+
         return visualizer
     return None
 

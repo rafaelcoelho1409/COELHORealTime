@@ -74,11 +74,12 @@ class TFDState(SharedState):
         ],
         "Model Selection": [
             "Select visualization...",
-            "ValidationCurve",
-            "LearningCurve",
-            "CVScores",
-            "FeatureImportances",
-            "DroppingCurve"
+            "FeatureImportances",    # FAST: Feature ranking by importance
+            "CVScores",              # MODERATE: Cross-validation scores
+            "ValidationCurve",       # SLOW: Hyperparameter tuning
+            "LearningCurve",         # SLOW: Training size vs performance
+            "RFECV",                 # VERY SLOW: Recursive feature elimination
+            "DroppingCurve",         # SLOW: Feature dropping impact
         ]
     }
     # Batch ML prediction results (separate from incremental ML)

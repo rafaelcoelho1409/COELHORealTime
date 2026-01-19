@@ -832,10 +832,15 @@ def _sync_generate_yellowbrick_plot(
             )
             yb_vis = yellowbrick_target_visualizers(yb_kwargs, X, y)
         elif metric_type == "Model Selection":
+            # Load model from MLflow for FeatureImportances
+            model_name = MLFLOW_MODEL_NAMES.get(project_name)
+            model = load_model_from_mlflow(project_name, model_name, run_id=run_id)
             yb_kwargs = yellowbrick_model_selection_kwargs(
-                project_name, metric_name, y_train
+                project_name, metric_name, feature_names=feature_names
             )
-            yb_vis = yellowbrick_model_selection_visualizers(yb_kwargs, X, y)
+            yb_vis = yellowbrick_model_selection_visualizers(
+                yb_kwargs, X_train, X_test, y_train, y_test, model=model
+            )
         else:
             raise ValueError(f"Unknown metric type: {metric_type}")
 
