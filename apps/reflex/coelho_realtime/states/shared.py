@@ -402,6 +402,12 @@ class SharedState(rx.State):
         "Estimated Time of Arrival": False,
         "E-Commerce Customer Interactions": False
     }
+    # Last trained run ID (set when training completes, for display purposes)
+    batch_last_trained_run_id: dict[str, str] = {
+        "Transaction Fraud Detection": "",
+        "Estimated Time of Arrival": "",
+        "E-Commerce Customer Interactions": ""
+    }
 
     # ==========================================================================
     # SQL / DELTA LAKE STATE VARIABLES
@@ -1346,8 +1352,8 @@ class SharedState(rx.State):
                         close_button=True,
                     )
 
-                    # Refresh MLflow runs dropdown, check model availability, fetch metrics
-                    yield SharedState.fetch_mlflow_runs(project_name)
+                    # Refresh MLflow runs dropdown (stores last trained run ID), check model, fetch metrics
+                    yield SharedState.fetch_mlflow_runs_after_training(project_name)
                     yield SharedState.check_batch_model_available(project_name)
                     yield SharedState.get_batch_mlflow_metrics(project_name)
                     return
@@ -1609,6 +1615,78 @@ class SharedState(rx.State):
                 self.batch_mlflow_metrics[project_name] = {}
                 self.batch_training_total_rows[project_name] = 0
                 self.batch_runs_loading[project_name] = False
+
+    @rx.event(background=True)
+    async def fetch_mlflow_runs_after_training(self, project_name: str):
+        """Fetch MLflow runs after training completes - stores last trained run ID and auto-selects it."""
+        async with self:
+            self.batch_runs_loading[project_name] = True
+
+        try:
+            response = await httpx_client_post(
+                url=f"{SKLEARN_BASE_URL}/mlflow_runs",
+                json={"project_name": project_name},
+                timeout=30.0
+            )
+            runs_data = response.json()
+            runs = [MLflowRunInfo(**run) for run in runs_data]
+            async with self:
+                self.batch_mlflow_runs[project_name] = runs
+                self.batch_runs_loading[project_name] = False
+                if runs:
+                    # The first run is the newest (just trained) - store and select it
+                    new_run_id = runs[0].run_id
+                    self.batch_last_trained_run_id[project_name] = new_run_id
+                    self.selected_batch_run[project_name] = new_run_id
+                    print(f"[DEBUG] New model trained - run ID: {new_run_id}")
+                else:
+                    self.selected_batch_run[project_name] = ""
+                    self.batch_mlflow_metrics[project_name] = {}
+
+        except Exception as e:
+            print(f"Error fetching MLflow runs after training: {e}")
+            async with self:
+                self.batch_runs_loading[project_name] = False
+
+    @rx.event(background=True)
+    async def refresh_mlflow_runs(self, project_name: str):
+        """Manual refresh of MLflow runs dropdown with toast feedback."""
+        async with self:
+            self.batch_runs_loading[project_name] = True
+
+        try:
+            response = await httpx_client_post(
+                url=f"{SKLEARN_BASE_URL}/mlflow_runs",
+                json={"project_name": project_name},
+                timeout=30.0
+            )
+            runs_data = response.json()
+            runs = [MLflowRunInfo(**run) for run in runs_data]
+            async with self:
+                self.batch_mlflow_runs[project_name] = runs
+                self.batch_runs_loading[project_name] = False
+                if runs:
+                    # Keep current selection if still valid, otherwise select best
+                    current = self.selected_batch_run[project_name]
+                    valid_ids = [r.run_id for r in runs]
+                    if current not in valid_ids:
+                        self.selected_batch_run[project_name] = runs[0].run_id
+
+            yield rx.toast.success(
+                "Runs refreshed",
+                description=f"Found {len(runs)} MLflow runs.",
+                duration=2000,
+            )
+
+        except Exception as e:
+            print(f"Error refreshing MLflow runs: {e}")
+            async with self:
+                self.batch_runs_loading[project_name] = False
+            yield rx.toast.error(
+                "Refresh failed",
+                description=str(e)[:50],
+                duration=3000,
+            )
 
     @rx.event(background=True)
     async def select_batch_run(self, project_name: str, run_id: str):

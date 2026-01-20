@@ -321,7 +321,7 @@ def index() -> rx.Component:
             width="100%"
         ),
         on_mount=[
-            ETAState.randomize_eta_form,
+            ETAState.init_eta_form_if_empty,
             SharedState.init_batch_page(PROJECT_NAME),
         ],
         on_unmount=ETAState.cleanup_on_page_leave(PROJECT_NAME),

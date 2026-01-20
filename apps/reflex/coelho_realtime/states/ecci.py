@@ -574,6 +574,42 @@ class ECCIState(SharedState):
             duration=2000,
         )
 
+    @rx.event
+    def init_ecci_form_if_empty(self):
+        """Initialize ECCI form with random values only if form is empty (silent, no toast)."""
+        import random
+        import uuid
+        project_name = "E-Commerce Customer Interactions"
+        current_form = self.form_data.get(project_name, {})
+        # Only initialize if form is empty
+        if current_form and current_form.get("event_id"):
+            return  # Form already has data, skip initialization
+        opts = self.dropdown_options.get(project_name, {})
+        now = dt.datetime.now()
+        form_data = {
+            "browser": random.choice(opts.get("browser") or ["Chrome"]),
+            "device_type": random.choice(opts.get("device_type") or ["Desktop"]),
+            "os": random.choice(opts.get("os") or ["Windows"]),
+            "event_type": random.choice(opts.get("event_type") or ["page_view"]),
+            "product_category": random.choice(opts.get("product_category") or ["Electronics"]),
+            "product_id": random.choice(opts.get("product_id") or ["prod_1000"]),
+            "referrer_url": random.choice(opts.get("referrer_url") or ["direct"]),
+            "lat": str(round(random.uniform(29.5, 30.1), 3)),
+            "lon": str(round(random.uniform(-95.8, -95.0), 3)),
+            "price": str(round(random.uniform(9.99, 999.99), 2)),
+            "quantity": str(random.randint(1, 5)),
+            "session_event_sequence": str(random.randint(1, 20)),
+            "time_on_page_seconds": str(random.randint(5, 300)),
+            "timestamp_date": now.strftime("%Y-%m-%d"),
+            "timestamp_time": now.strftime("%H:%M"),
+            "customer_id": f"cust_{uuid.uuid4().hex[:8]}",
+            "event_id": f"evt_{uuid.uuid4().hex[:12]}",
+            "session_id": f"sess_{uuid.uuid4().hex[:10]}",
+            "page_url": f"https://shop.example.com/products/{random.randint(1000, 9999)}",
+            "search_query": random.choice(["", "", "laptop", "phone", "headphones", "shoes"]),
+        }
+        self.form_data[project_name] = form_data
+
     # ==========================================================================
     # ECCI CLUSTER ANALYTICS EVENT HANDLERS
     # ==========================================================================

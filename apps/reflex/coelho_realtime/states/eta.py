@@ -611,6 +611,48 @@ class ETAState(SharedState):
             duration=2000,
         )
 
+    @rx.event
+    def init_eta_form_if_empty(self):
+        """Initialize ETA form with random values only if form is empty (silent, no toast)."""
+        import random
+        import uuid
+        project_name = "Estimated Time of Arrival"
+        current_form = self.form_data.get(project_name, {})
+        # Only initialize if form is empty
+        if current_form and current_form.get("trip_id"):
+            return  # Form already has data, skip initialization
+        opts = self.dropdown_options.get(project_name, {})
+        now = dt.datetime.now()
+        origin_lat = round(random.uniform(29.5, 30.1), 6)
+        origin_lon = round(random.uniform(-95.8, -95.0), 6)
+        dest_lat = round(random.uniform(29.5, 30.1), 6)
+        dest_lon = round(random.uniform(-95.8, -95.0), 6)
+        distance_km = round(abs(origin_lat - dest_lat) * 111 + abs(origin_lon - dest_lon) * 85, 2)
+        form_data = {
+            "driver_id": random.choice(opts.get("driver_id") or ["driver_1000"]),
+            "vehicle_id": random.choice(opts.get("vehicle_id") or ["vehicle_100"]),
+            "weather": random.choice(opts.get("weather") or ["Clear"]),
+            "vehicle_type": random.choice(opts.get("vehicle_type") or ["Sedan"]),
+            "timestamp_date": now.strftime("%Y-%m-%d"),
+            "timestamp_time": now.strftime("%H:%M"),
+            "origin_lat": str(origin_lat),
+            "origin_lon": str(origin_lon),
+            "destination_lat": str(dest_lat),
+            "destination_lon": str(dest_lon),
+            "hour_of_day": str(random.randint(0, 23)),
+            "day_of_week": str(random.randint(0, 6)),
+            "driver_rating": str(round(random.uniform(3.5, 5.0), 1)),
+            "temperature_celsius": str(round(random.uniform(15.0, 35.0), 1)),
+            "estimated_distance_km": str(distance_km),
+            "initial_estimated_travel_time_seconds": str(int(distance_km * 60)),
+            "debug_traffic_factor": str(round(random.uniform(0.8, 1.5), 2)),
+            "debug_weather_factor": str(round(random.uniform(0.9, 1.3), 2)),
+            "debug_incident_delay_seconds": str(random.choice([0, 0, 0, 60, 120, 300])),
+            "debug_driver_factor": str(round(random.uniform(0.9, 1.1), 2)),
+            "trip_id": f"trip_{uuid.uuid4().hex[:12]}",
+        }
+        self.form_data[project_name] = form_data
+
     # ==========================================================================
     # BATCH ML PREDICTION (Scikit-Learn)
     # ==========================================================================

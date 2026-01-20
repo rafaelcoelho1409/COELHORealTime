@@ -389,7 +389,7 @@ def index() -> rx.Component:
             width="100%"
         ),
         on_mount=[
-            ECCIState.randomize_ecci_form,
+            ECCIState.init_ecci_form_if_empty,
             SharedState.init_batch_page(PROJECT_NAME),
         ],
         on_unmount=ECCIState.cleanup_on_page_leave(PROJECT_NAME),

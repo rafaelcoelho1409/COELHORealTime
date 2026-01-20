@@ -442,7 +442,7 @@ def index() -> rx.Component:
             width="100%"
         ),
         on_mount=[
-            TFDState.randomize_tfd_form,
+            TFDState.init_tfd_form_if_empty,
             SharedState.init_batch_page(PROJECT_NAME),
         ],
         on_unmount=TFDState.cleanup_on_page_leave(PROJECT_NAME),

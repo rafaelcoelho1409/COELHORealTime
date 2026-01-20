@@ -937,6 +937,45 @@ class TFDState(SharedState):
             duration=2000,
         )
 
+    @rx.event
+    def init_tfd_form_if_empty(self):
+        """Initialize TFD form with random values only if form is empty (silent, no toast)."""
+        import random
+        import uuid
+        project_name = "Transaction Fraud Detection"
+        current_form = self.form_data.get(project_name, {})
+        # Only initialize if form is empty
+        if current_form and current_form.get("transaction_id"):
+            return  # Form already has data, skip initialization
+        opts = self.dropdown_options.get(project_name, {})
+        now = dt.datetime.now()
+        form_data = {
+            "currency": random.choice(opts.get("currency") or ["USD"]),
+            "merchant_id": random.choice(opts.get("merchant_id") or ["merchant_1"]),
+            "product_category": random.choice(opts.get("product_category") or ["electronics"]),
+            "transaction_type": random.choice(opts.get("transaction_type") or ["purchase"]),
+            "payment_method": random.choice(opts.get("payment_method") or ["credit_card"]),
+            "browser": random.choice(opts.get("browser") or ["Chrome"]),
+            "os": random.choice(opts.get("os") or ["Windows"]),
+            "amount": str(round(random.uniform(10.0, 5000.0), 2)),
+            "account_age_days": str(random.randint(1, 3650)),
+            "lat": str(round(random.uniform(29.5, 30.1), 6)),
+            "lon": str(round(random.uniform(-95.8, -95.0), 6)),
+            "timestamp_date": now.strftime("%Y-%m-%d"),
+            "timestamp_time": now.strftime("%H:%M"),
+            "cvv_provided": random.choice([True, False]),
+            "billing_address_match": random.choice([True, False]),
+            "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
+            "user_id": f"user_{random.randint(1000, 9999)}",
+            "ip_address": f"{random.randint(1,255)}.{random.randint(0,255)}.{random.randint(0,255)}.{random.randint(1,255)}",
+            "user_agent": random.choice([
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0",
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) Safari/605.1",
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) Firefox/120.0",
+            ]),
+        }
+        self.form_data[project_name] = form_data
+
     # ==========================================================================
     # TFD BATCH ML EVENT HANDLERS
     # ==========================================================================

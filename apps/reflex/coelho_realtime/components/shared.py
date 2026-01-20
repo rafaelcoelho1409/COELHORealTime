@@ -409,8 +409,19 @@ def batch_ml_run_and_training_box(model_key: str, project_name: str) -> rx.Compo
                     rx.spinner(size="1"),
                     rx.fragment()
                 ),
+                rx.spacer(),
+                rx.button(
+                    rx.icon("refresh-cw", size=12),
+                    on_click=SharedState.refresh_mlflow_runs(project_name),
+                    size="1",
+                    variant="ghost",
+                    cursor="pointer",
+                    title="Refresh runs",
+                    disabled=SharedState.batch_runs_loading[project_name],
+                ),
                 spacing="2",
-                align_items="center"
+                align_items="center",
+                width="100%"
             ),
             rx.cond(
                 SharedState.batch_mlflow_runs[project_name].length() > 0,
@@ -729,6 +740,25 @@ def batch_ml_run_and_training_box(model_key: str, project_name: str) -> rx.Compo
                 spacing="2",
                 align_items="center",
                 width="100%"
+            ),
+            # Last trained run ID display (only shows when a model was trained this session)
+            rx.cond(
+                SharedState.batch_last_trained_run_id[project_name] != "",
+                rx.hstack(
+                    rx.icon("check-circle", size=12, color=rx.color("green", 9)),
+                    rx.text("Last trained:", size="1", color="gray"),
+                    rx.code(
+                        SharedState.batch_last_trained_run_id[project_name],
+                        size="1",
+                        color_scheme="green",
+                        variant="ghost",
+                    ),
+                    spacing="1",
+                    align_items="center",
+                    width="100%",
+                    padding_top="1",
+                ),
+                rx.fragment()
             ),
             spacing="2",
             align_items="start",
@@ -1105,7 +1135,7 @@ def coelho_realtime_navbar() -> rx.Component:
                                                 spacing="2",
                                                 align_items="center"
                                             ),
-                                            href="/tfd/batch"
+                                            href="/tfd/batch/prediction"
                                         )
                                     ),
                                     rx.menu.item(
@@ -1151,7 +1181,7 @@ def coelho_realtime_navbar() -> rx.Component:
                                                 spacing="2",
                                                 align_items="center"
                                             ),
-                                            href="/eta/batch"
+                                            href="/eta/batch/prediction"
                                         )
                                     ),
                                     rx.menu.item(
@@ -1197,7 +1227,7 @@ def coelho_realtime_navbar() -> rx.Component:
                                                 spacing="2",
                                                 align_items="center"
                                             ),
-                                            href="/ecci/batch"
+                                            href="/ecci/batch/prediction"
                                         )
                                     ),
                                     rx.menu.item(
