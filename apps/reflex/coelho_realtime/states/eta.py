@@ -314,7 +314,7 @@ class ETAState(SharedState):
             "gauge_mape": create_gauge_mape(raw["mape"]),
         }
 
-    @rx.var
+    @rx.var(cache=True)
     def eta_prediction_figure(self) -> go.Figure:
         """Generate Plotly figure for ETA prediction display."""
         seconds = self.eta_prediction_seconds
@@ -677,7 +677,7 @@ class ETAState(SharedState):
         """Get batch ETA prediction in minutes."""
         return round(self.eta_batch_prediction_seconds / 60, 2) if self.eta_batch_prediction_seconds > 0 else 0.0
 
-    @rx.var
+    @rx.var(cache=True)
     def eta_batch_prediction_figure(self) -> go.Figure:
         """Generate Plotly figure for batch ETA prediction display."""
         seconds = self.eta_batch_prediction_seconds
@@ -1129,3 +1129,9 @@ class ETAState(SharedState):
             print(f"Error checking batch model availability: {e}")
             async with self:
                 self.batch_model_available[project_name] = False
+
+    @rx.event
+    def clear_large_state_data(self):
+        """Clear large state data to reduce serialization size."""
+        self.yellowbrick_image_base64 = ""
+        self.yellowbrick_error = ""

@@ -68,7 +68,7 @@ class ECCIState(SharedState):
             return results.get("cluster", 0)
         return 0
 
-    @rx.var
+    @rx.var(cache=True)
     def ecci_prediction_figure(self) -> go.Figure:
         """Generate Plotly figure for ECCI cluster prediction display."""
         cluster = self.ecci_predicted_cluster
@@ -129,7 +129,7 @@ class ECCIState(SharedState):
             "n_micro_clusters": metrics.get("metrics.n_micro_clusters", 0),
         }
 
-    @rx.var
+    @rx.var(cache=True)
     def ecci_dashboard_figures(self) -> dict:
         """Generate all ECCI dashboard Plotly figures."""
         raw = self.ecci_metrics_raw
@@ -324,7 +324,7 @@ class ECCIState(SharedState):
             "os",
         ]
 
-    @rx.var
+    @rx.var(cache=True)
     def ecci_cluster_counts_figure(self) -> go.Figure:
         """Generate bar chart for samples per cluster."""
         cluster_counts = self.ecci_cluster_counts
@@ -355,7 +355,7 @@ class ECCIState(SharedState):
         )
         return fig
 
-    @rx.var
+    @rx.var(cache=True)
     def ecci_selected_cluster_feature_figure(self) -> go.Figure:
         """Generate bar chart for predicted cluster's feature distribution."""
         fig = go.Figure()
@@ -393,7 +393,7 @@ class ECCIState(SharedState):
         )
         return fig
 
-    @rx.var
+    @rx.var(cache=True)
     def ecci_all_clusters_feature_figure(self) -> go.Figure:
         """Generate grouped bar chart for all clusters' feature distribution."""
         fig = go.Figure()
@@ -693,7 +693,7 @@ class ECCIState(SharedState):
             return results.get("cluster_id", -1)
         return -1
 
-    @rx.var
+    @rx.var(cache=True)
     def ecci_batch_prediction_figure(self) -> go.Figure:
         """Generate Plotly figure for batch ECCI cluster prediction."""
         cluster_id = self.ecci_batch_predicted_cluster

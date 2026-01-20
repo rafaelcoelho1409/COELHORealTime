@@ -489,7 +489,10 @@ def index() -> rx.Component:
             SharedState.init_batch_page(PROJECT_NAME),
             TFDState.clear_yellowbrick_visualization,
         ],
-        on_unmount=TFDState.cleanup_on_page_leave(PROJECT_NAME),
+        on_unmount=[
+            TFDState.clear_large_state_data,
+            TFDState.cleanup_on_page_leave(PROJECT_NAME),
+        ],
         spacing="0",
         width="100%"
     )

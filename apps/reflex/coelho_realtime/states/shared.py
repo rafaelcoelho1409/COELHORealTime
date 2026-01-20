@@ -595,16 +595,18 @@ class SharedState(rx.State):
         """Get sort direction for current page."""
         return self.sql_sort_direction.get(self.page_name, "asc")
 
-    @rx.var
-    def sql_results_filtered(self) -> list[dict]:
-        """Get filtered and sorted data rows from SQL results."""
-        results = self.current_sql_results
+    def _get_filtered_sql_data(self) -> list[dict]:
+        """Internal helper to filter and sort SQL data (not a computed var)."""
+        results = self.sql_query_results.get(self.page_name, {"columns": [], "data": [], "row_count": 0})
         data = results.get("data", [])
-        search = self.current_sql_search_filter.lower().strip()
-        sort_col = self.current_sql_sort_column
-        sort_dir = self.current_sql_sort_direction
+        if not data:
+            return []
 
-        # Step 1: Filter
+        search = self.sql_search_filter.get(self.page_name, "").lower().strip()
+        sort_col = self.sql_sort_column.get(self.page_name, "")
+        sort_dir = self.sql_sort_direction.get(self.page_name, "asc")
+
+        # Step 1: Filter (only if search is provided)
         if search:
             filtered = []
             for row in data:
@@ -614,7 +616,7 @@ class SharedState(rx.State):
                         break
             data = filtered
 
-        # Step 2: Sort
+        # Step 2: Sort (only if sort column is provided)
         if sort_col and data:
             try:
                 def sort_key(row):
@@ -630,9 +632,29 @@ class SharedState(rx.State):
         return data
 
     @rx.var
+    def sql_results_filtered(self) -> list[dict]:
+        """Get filtered and sorted data rows from SQL results."""
+        return self._get_filtered_sql_data()
+
+    @rx.var
     def sql_filtered_row_count(self) -> int:
         """Get count of filtered rows."""
-        return len(self.sql_results_filtered)
+        # Direct calculation to avoid calling sql_results_filtered twice
+        results = self.sql_query_results.get(self.page_name, {"columns": [], "data": [], "row_count": 0})
+        data = results.get("data", [])
+        if not data:
+            return 0
+        search = self.sql_search_filter.get(self.page_name, "").lower().strip()
+        if not search:
+            return len(data)
+        # Count matching rows without full iteration if no search
+        count = 0
+        for row in data:
+            for value in row.values():
+                if search in str(value).lower():
+                    count += 1
+                    break
+        return count
 
     @rx.var
     def sql_results_columns(self) -> list[str]:
@@ -690,6 +712,11 @@ class SharedState(rx.State):
     @rx.event
     def set_tab(self, tab_value: str):
         """Set the active tab (incremental_ml, batch_ml, or delta_lake_sql)."""
+        # Clear SQL results when leaving the SQL tab to reduce state size
+        if self.tab_name == "delta_lake_sql" and tab_value != "delta_lake_sql":
+            page = self.page_name
+            if page in self.sql_query_results:
+                self.sql_query_results[page] = {"columns": [], "data": [], "row_count": 0}
         self.tab_name = tab_value
 
     @rx.event
@@ -793,7 +820,13 @@ class SharedState(rx.State):
         """
         Called when user navigates away from a page.
         Stops the model if it was running for this page.
+        Also clears large data structures to reduce state size.
         """
+        # Clear SQL results to reduce state serialization size
+        async with self:
+            if project_name in self.sql_query_results:
+                self.sql_query_results[project_name] = {"columns": [], "data": [], "row_count": 0}
+
         if self.activated_model and self._current_page_model_key:
             # Only stop if leaving the page that owns the running model
             if self.activated_model == self._current_page_model_key:

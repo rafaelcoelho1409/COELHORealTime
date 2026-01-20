@@ -459,7 +459,10 @@ def index() -> rx.Component:
             SharedState.init_batch_page(PROJECT_NAME),
             ETAState.clear_yellowbrick_visualization,
         ],
-        on_unmount=ETAState.cleanup_on_page_leave(PROJECT_NAME),
+        on_unmount=[
+            ETAState.clear_large_state_data,
+            ETAState.cleanup_on_page_leave(PROJECT_NAME),
+        ],
         spacing="0",
         width="100%"
     )

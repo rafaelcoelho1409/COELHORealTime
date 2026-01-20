@@ -563,7 +563,7 @@ class TFDState(SharedState):
             return "red" if results.get("prediction", 0) == 1 else "green"
         return "gray"
 
-    @rx.var
+    @rx.var(cache=True)
     def tfd_batch_fraud_gauge(self) -> go.Figure:
         """Generate Plotly gauge chart for batch fraud probability."""
         prob = self.tfd_batch_fraud_probability * 100
@@ -1195,3 +1195,9 @@ class TFDState(SharedState):
             )
 
     # NOTE: get_batch_mlflow_metrics is inherited from SharedState - do not override here
+
+    @rx.event
+    def clear_large_state_data(self):
+        """Clear large state data to reduce serialization size."""
+        self.yellowbrick_image_base64 = ""
+        self.yellowbrick_error = ""
