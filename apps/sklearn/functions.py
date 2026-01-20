@@ -1205,7 +1205,13 @@ class CatBoostRegressorWrapper(BaseEstimator, RegressorMixin):
     def __init__(self, model):
         self.model = model
         # Expose feature_importances_ for FeatureImportances visualizer
-        self.feature_importances_ = model.feature_importances_
+        # Use get_feature_importance() which is more reliable for loaded models
+        try:
+            fi = model.get_feature_importance()
+            self.feature_importances_ = np.array(fi) if fi is not None else None
+        except Exception:
+            # Fallback to property
+            self.feature_importances_ = model.feature_importances_
 
     def fit(self, X, y):
         return self  # Already fitted

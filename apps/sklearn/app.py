@@ -350,6 +350,7 @@ class PredictRequest(BaseModel):
     project_name: str
     model_name: str
     run_id: Optional[str] = None  # Optional: specific run, or None for best
+    # TFD fields
     transaction_id: Optional[str] = None
     user_id: Optional[str] = None
     timestamp: Optional[str] = None
@@ -366,6 +367,24 @@ class PredictRequest(BaseModel):
     account_age_days: Optional[int] = None
     cvv_provided: Optional[bool] = None
     billing_address_match: Optional[bool] = None
+    # ETA fields
+    trip_id: Optional[str] = None
+    driver_id: Optional[str] = None
+    vehicle_id: Optional[str] = None
+    origin: Optional[dict] = None  # {"lat": float, "lon": float}
+    destination: Optional[dict] = None  # {"lat": float, "lon": float}
+    estimated_distance_km: Optional[float] = None
+    weather: Optional[str] = None
+    temperature_celsius: Optional[float] = None
+    day_of_week: Optional[int] = None
+    hour_of_day: Optional[int] = None
+    driver_rating: Optional[float] = None
+    vehicle_type: Optional[str] = None
+    initial_estimated_travel_time_seconds: Optional[int] = None
+    debug_traffic_factor: Optional[float] = None
+    debug_weather_factor: Optional[float] = None
+    debug_incident_delay_seconds: Optional[int] = None
+    debug_driver_factor: Optional[float] = None
 
 
 class MLflowMetricsRequest(BaseModel):
@@ -484,16 +503,27 @@ async def update_healthcheck(update_data: SklearnHealthcheck):
 
 @app.post("/predict")
 async def predict(request: PredictRequest):
-    """Make batch ML prediction using CatBoostClassifier from MLflow.
+    """Make batch ML prediction using CatBoost models from MLflow.
+
+    Supports:
+    - Transaction Fraud Detection: CatBoostClassifier (binary classification)
+    - Estimated Time of Arrival: CatBoostRegressor (regression)
 
     If run_id is provided, loads model from that specific run.
-    Otherwise, uses model cache to get best model based on fbeta_score.
+    Otherwise, uses model cache to get best model based on project-specific metric.
     """
     project_name = request.project_name
     model_name = request.model_name
     requested_run_id = request.run_id  # Optional: specific run to use
-    if model_name != "CatBoostClassifier":
-        raise HTTPException(status_code=400, detail=f"Model {model_name} not supported")
+
+    # Validate model name matches project
+    expected_model = MLFLOW_MODEL_NAMES.get(project_name)
+    if expected_model and model_name != expected_model:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Project {project_name} uses {expected_model}, not {model_name}"
+        )
+
     if project_name == "Transaction Fraud Detection":
         sample = {
             "transaction_id": request.transaction_id,
@@ -516,12 +546,10 @@ async def predict(request: PredictRequest):
         try:
             X = process_sklearn_sample(sample, project_name)
             if requested_run_id:
-                # Load model from specific run (not cached)
                 model = load_model_from_mlflow(project_name, model_name, run_id=requested_run_id)
                 run_id = requested_run_id
                 is_best_model = False
             else:
-                # Get best model from cache (loads from MLflow if expired/missing)
                 model, run_id = model_cache.get_model(project_name)
                 is_best_model = True
             if model is None:
@@ -542,8 +570,61 @@ async def predict(request: PredictRequest):
             raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
+
+    elif project_name == "Estimated Time of Arrival":
+        # Convert origin/destination dicts to string format for process_sklearn_sample
+        origin_str = f"{request.origin.get('lat', 0)},{request.origin.get('lon', 0)}" if request.origin else "0,0"
+        dest_str = f"{request.destination.get('lat', 0)},{request.destination.get('lon', 0)}" if request.destination else "0,0"
+
+        sample = {
+            "trip_id": request.trip_id,
+            "driver_id": request.driver_id,
+            "vehicle_id": request.vehicle_id,
+            "timestamp": request.timestamp,
+            "origin": origin_str,
+            "destination": dest_str,
+            "estimated_distance_km": request.estimated_distance_km,
+            "weather": request.weather,
+            "temperature_celsius": request.temperature_celsius,
+            "day_of_week": request.day_of_week,
+            "hour_of_day": request.hour_of_day,
+            "driver_rating": request.driver_rating,
+            "vehicle_type": request.vehicle_type,
+            "initial_estimated_travel_time_seconds": request.initial_estimated_travel_time_seconds,
+            "debug_traffic_factor": request.debug_traffic_factor,
+            "debug_weather_factor": request.debug_weather_factor,
+            "debug_incident_delay_seconds": request.debug_incident_delay_seconds,
+            "debug_driver_factor": request.debug_driver_factor,
+        }
+        try:
+            X = process_sklearn_sample(sample, project_name)
+            if requested_run_id:
+                model = load_model_from_mlflow(project_name, model_name, run_id=requested_run_id)
+                run_id = requested_run_id
+                is_best_model = False
+            else:
+                model, run_id = model_cache.get_model(project_name)
+                is_best_model = True
+            if model is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No trained model found for {project_name}. Train a model first."
+                )
+            # Regression: predict returns continuous value (ETA in seconds)
+            prediction = model.predict(X)[0]
+            return {
+                "Estimated Time of Arrival": float(prediction),
+                "model_name": model_name,
+                "run_id": run_id,
+                "best_model": is_best_model
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
     else:
-        raise HTTPException(status_code=400, detail=f"Project {project_name} not supported")
+        raise HTTPException(status_code=400, detail=f"Project {project_name} not supported for prediction")
 
 
 @app.get("/best_model/{project_name}")

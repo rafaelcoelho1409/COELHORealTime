@@ -30,7 +30,7 @@ def _form_card() -> rx.Component:
                 on_click=ETAState.predict_batch_eta,
                 size="2",
                 width="100%",
-                disabled=~SharedState.batch_model_available["Estimated Time of Arrival"]
+                disabled=~ETAState.batch_model_available["Estimated Time of Arrival"]
             ),
             rx.button(
                 rx.hstack(
@@ -173,6 +173,72 @@ def _form_card() -> rx.Component:
                     ),
                     spacing="1", align_items="start", width="100%"
                 ),
+                # Driver Rating
+                rx.vstack(
+                    rx.text("Rating", size="1", color="gray"),
+                    rx.input(
+                        type="number",
+                        value=ETAState.eta_form_data.get("driver_rating", ""),
+                        on_change=lambda v: ETAState.update_eta("driver_rating", v),
+                        min=3.5, max=5.0, step=0.1, width="100%"
+                    ),
+                    spacing="1", align_items="start", width="100%"
+                ),
+                # Temperature
+                rx.vstack(
+                    rx.text("Temp C", size="1", color="gray"),
+                    rx.input(
+                        type="number",
+                        value=ETAState.eta_form_data.get("temperature_celsius", ""),
+                        on_change=lambda v: ETAState.update_eta("temperature_celsius", v),
+                        min=-50.0, max=50.0, step=0.1, width="100%"
+                    ),
+                    spacing="1", align_items="start", width="100%"
+                ),
+                # Debug Traffic Factor
+                rx.vstack(
+                    rx.text("Traffic Factor", size="1", color="gray"),
+                    rx.input(
+                        type="number",
+                        value=ETAState.eta_form_data.get("debug_traffic_factor", ""),
+                        on_change=lambda v: ETAState.update_eta("debug_traffic_factor", v),
+                        min=0.3, max=1.9, step=0.1, width="100%"
+                    ),
+                    spacing="1", align_items="start", width="100%"
+                ),
+                # Debug Weather Factor
+                rx.vstack(
+                    rx.text("Weather Factor", size="1", color="gray"),
+                    rx.input(
+                        type="number",
+                        value=ETAState.eta_form_data.get("debug_weather_factor", ""),
+                        on_change=lambda v: ETAState.update_eta("debug_weather_factor", v),
+                        min=1.0, max=2.0, step=0.1, width="100%"
+                    ),
+                    spacing="1", align_items="start", width="100%"
+                ),
+                # Debug Driver Factor
+                rx.vstack(
+                    rx.text("Driver Factor", size="1", color="gray"),
+                    rx.input(
+                        type="number",
+                        value=ETAState.eta_form_data.get("debug_driver_factor", ""),
+                        on_change=lambda v: ETAState.update_eta("debug_driver_factor", v),
+                        min=0.85, max=1.15, step=0.01, width="100%"
+                    ),
+                    spacing="1", align_items="start", width="100%"
+                ),
+                # Debug Incident Delay
+                rx.vstack(
+                    rx.text("Incident (s)", size="1", color="gray"),
+                    rx.input(
+                        type="number",
+                        value=ETAState.eta_form_data.get("debug_incident_delay_seconds", ""),
+                        on_change=lambda v: ETAState.update_eta("debug_incident_delay_seconds", v),
+                        min=0, max=1800, step=1, width="100%"
+                    ),
+                    spacing="1", align_items="start", width="100%"
+                ),
                 columns="3",
                 spacing="2",
                 width="100%"
@@ -180,6 +246,7 @@ def _form_card() -> rx.Component:
             rx.vstack(
                 rx.text(f"Trip ID: {ETAState.eta_form_data.get('trip_id', '')}", size="1", color="gray"),
                 rx.text(f"Estimated Distance: {ETAState.eta_estimated_distance_km} km", size="1", color="gray"),
+                rx.text(f"Initial Estimated Travel Time: {ETAState.eta_initial_estimated_travel_time_seconds} s", size="1", color="gray"),
                 spacing="1",
                 align_items="start",
                 width="100%"
@@ -193,96 +260,91 @@ def _form_card() -> rx.Component:
 
 
 def _prediction_result() -> rx.Component:
-    """Build the prediction result display."""
-    return rx.vstack(
-        rx.hstack(
-            rx.icon("clock", size=20, color=rx.color("accent", 10)),
-            rx.heading("Prediction Result", size="5", weight="bold"),
-            spacing="2",
-            align_items="center",
-            width="100%"
-        ),
-        rx.cond(
-            ETAState.eta_batch_prediction_show,
-            rx.card(
-                rx.vstack(
-                    rx.plotly(data=ETAState.eta_batch_prediction_figure, width="100%"),
-                    rx.hstack(
-                        rx.card(
-                            rx.vstack(
-                                rx.hstack(
-                                    rx.icon("timer", size=14, color="blue"),
-                                    rx.text("Predicted ETA", size="1", color="gray"),
-                                    spacing="1",
-                                    align_items="center"
-                                ),
-                                rx.text(
-                                    f"{ETAState.eta_batch_prediction_minutes} min",
-                                    size="5",
-                                    weight="bold",
-                                    color="blue",
-                                    align="center"
-                                ),
-                                spacing="1",
-                                align_items="center",
-                                width="100%"
-                            ),
-                            variant="surface",
-                            size="1",
-                            width="100%"
-                        ),
-                        rx.card(
-                            rx.vstack(
-                                rx.hstack(
-                                    rx.icon("route", size=14, color="green"),
-                                    rx.text("Distance", size="1", color="gray"),
-                                    spacing="1",
-                                    align_items="center"
-                                ),
-                                rx.text(
-                                    f"{ETAState.eta_estimated_distance_km} km",
-                                    size="5",
-                                    weight="bold",
-                                    color="green",
-                                    align="center"
-                                ),
-                                spacing="1",
-                                align_items="center",
-                                width="100%"
-                            ),
-                            variant="surface",
-                            size="1",
-                            width="100%"
-                        ),
-                        spacing="2",
-                        width="100%"
-                    ),
-                    # Map
+    """Build the prediction result display with Origin/Destination and ETA boxes side by side."""
+    return rx.hstack(
+        # Left: Origin and Destination (Map)
+        rx.card(
+            rx.vstack(
+                rx.hstack(
+                    rx.icon("map-pin", size=16, color=rx.color("accent", 10)),
+                    rx.text("Origin and Destination", size="3", weight="bold"),
+                    spacing="2",
+                    align_items="center"
+                ),
+                rx.box(
                     eta_map(),
-                    spacing="4",
-                    width="100%"
+                    width="100%",
+                    height="280px",
+                    overflow="hidden",
                 ),
-                variant="classic",
-                width="100%"
+                rx.vstack(
+                    rx.text(f"Estimated Distance: {ETAState.eta_estimated_distance_km} km", size="2", color="gray"),
+                    rx.text(f"Initial Estimated Travel Time: {ETAState.eta_initial_estimated_travel_time_seconds} s", size="2", color="gray"),
+                    spacing="1",
+                    width="100%",
+                    padding_top="12px",
+                ),
+                spacing="2",
+                width="100%",
+                height="100%"
             ),
-            rx.cond(
-                SharedState.batch_model_available["Estimated Time of Arrival"],
-                rx.callout(
-                    "Fill in the trip details and click **Predict** to get the estimated arrival time.",
-                    icon="info",
-                    color="blue",
-                    width="100%"
-                ),
-                rx.callout(
-                    "No trained model available. Click **Train** to train the batch model first.",
-                    icon="triangle-alert",
-                    color="orange",
-                    width="100%"
-                )
-            )
+            variant="surface",
+            width="50%",
+            height="400px"
         ),
-        spacing="4",
-        width="100%"
+        # Right: ETA Prediction
+        rx.card(
+            rx.vstack(
+                rx.hstack(
+                    rx.icon("clock", size=16, color=rx.color("accent", 10)),
+                    rx.text("ETA - Prediction", size="3", weight="bold"),
+                    spacing="2",
+                    align_items="center"
+                ),
+                rx.cond(
+                    ETAState.eta_batch_prediction_show,
+                    rx.box(
+                        rx.plotly(data=ETAState.eta_batch_prediction_figure, width="100%"),
+                        width="100%",
+                        flex="1",
+                        display="flex",
+                        align_items="center",
+                        justify_content="center"
+                    ),
+                    rx.box(
+                        rx.cond(
+                            ETAState.batch_model_available["Estimated Time of Arrival"],
+                            rx.callout(
+                                "Click **Predict** to get the estimated time of arrival.",
+                                icon="info",
+                                color="blue",
+                                width="100%"
+                            ),
+                            rx.callout(
+                                "No trained model available. Click **Train** to train the batch model first.",
+                                icon="triangle-alert",
+                                color="orange",
+                                width="100%"
+                            )
+                        ),
+                        width="100%",
+                        flex="1",
+                        display="flex",
+                        align_items="center",
+                        justify_content="center"
+                    )
+                ),
+                spacing="2",
+                width="100%",
+                height="100%"
+            ),
+            variant="surface",
+            width="50%",
+            height="400px"
+        ),
+        spacing="3",
+        width="100%",
+        align_items="stretch"
     )
 
 

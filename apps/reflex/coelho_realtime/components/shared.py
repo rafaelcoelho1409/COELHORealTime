@@ -124,10 +124,17 @@ def metric_info_dialog(metric_key: str, project_key: str = "tfd") -> rx.Componen
 def yellowbrick_info_dialog(visualizer_key: str, project_key: str = "tfd") -> rx.Component:
     """Create an info dialog button for YellowBrick visualizers.
 
-    Shows description, interpretation, fraud context, and when to use
+    Shows description, interpretation, project-specific context, and when to use
     for each YellowBrick visualization.
     """
     info = YELLOWBRICK_INFO.get(project_key, {}).get("visualizers", {}).get(visualizer_key, {})
+
+    # Project-specific configuration
+    context_config = {
+        "tfd": {"key": "fraud_context", "header": "In Fraud Detection", "icon": "shield-alert"},
+        "eta": {"key": "eta_context", "header": "In ETA Prediction", "icon": "clock"},
+    }
+    ctx = context_config.get(project_key, context_config["tfd"])
     if not info:
         return rx.fragment()
 
@@ -207,16 +214,16 @@ def yellowbrick_info_dialog(visualizer_key: str, project_key: str = "tfd") -> rx
                     align="start",
                     width="100%"
                 ),
-                # Fraud context section
+                # Project-specific context section
                 rx.box(
                     rx.vstack(
                         rx.hstack(
-                            rx.icon("shield-alert", size=14),
-                            rx.text("In Fraud Detection", weight="bold", size="2"),
+                            rx.icon(ctx["icon"], size=14),
+                            rx.text(ctx["header"], weight="bold", size="2"),
                             spacing="1",
                             align="center"
                         ),
-                        rx.markdown(info.get("fraud_context", ""), component_map={"p": lambda text: rx.text(text, size="2")}),
+                        rx.markdown(info.get(ctx["key"], ""), component_map={"p": lambda text: rx.text(text, size="2")}),
                         spacing="1",
                         align="start",
                         width="100%"

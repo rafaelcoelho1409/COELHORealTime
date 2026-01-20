@@ -29,10 +29,15 @@ class ETAState(SharedState):
     """
 
     # ==========================================================================
-    # ETA BATCH ML STATE
+    # ETA BATCH ML STATE (YellowBrick visualization - ETA-specific)
+    # Note: batch_model_available, batch_training_loading, etc. are inherited from SharedState
     # ==========================================================================
-    batch_ml_model_name: dict = {
-        "Estimated Time of Arrival": "CatBoost Regressor (Scikit-Learn)",
+    # ETA-specific batch ML state (not in SharedState)
+    batch_ml_state: dict = {
+        "Estimated Time of Arrival": False,
+    }
+    batch_last_trained: dict = {
+        "Estimated Time of Arrival": "",
     }
     # YellowBrick visualization state
     yellowbrick_metric_type: str = "Regression"
@@ -72,25 +77,6 @@ class ETAState(SharedState):
             "RFECV",                   # Recursive feature elimination
             "DroppingCurve",           # Feature dropping impact
         ]
-    }
-    # Batch ML training state
-    batch_training_loading: bool = False
-    batch_model_available: dict = {
-        "Estimated Time of Arrival": False,
-    }
-    batch_training_error: str = ""
-    batch_last_trained: dict = {
-        "Estimated Time of Arrival": "",
-    }
-    batch_training_metrics: dict = {
-        "Estimated Time of Arrival": {},
-    }
-    # Batch ML toggle state
-    batch_ml_state: dict = {
-        "Estimated Time of Arrival": False,
-    }
-    batch_ml_model_key: dict = {
-        "Estimated Time of Arrival": "estimated_time_of_arrival_sklearn.py",
     }
 
     # ==========================================================================
@@ -721,7 +707,7 @@ class ETAState(SharedState):
 
         payload = {
             "project_name": project_name,
-            "model_name": "XGBRegressor",
+            "model_name": "CatBoostRegressor",
             "trip_id": current_form.get("trip_id", ""),
             "driver_id": current_form.get("driver_id", ""),
             "vehicle_id": current_form.get("vehicle_id", ""),
@@ -988,6 +974,33 @@ class ETAState(SharedState):
             )
             return fig
 
+        # Get MSE value and create squared seconds KPI
+        mse_value = get_metric("mean_squared_error")
+
+        def create_kpi_mse(value: float, title: str) -> go.Figure:
+            """Create KPI indicator for MSE (squared seconds)."""
+            # Convert to more readable units if very large
+            if value <= 900:  # 30s^2
+                color = "#3b82f6"
+            elif value <= 3600:  # 60s^2
+                color = "#22c55e"
+            elif value <= 14400:  # 120s^2
+                color = "#eab308"
+            else:
+                color = "#ef4444"
+
+            fig = go.Figure(go.Indicator(
+                mode="number",
+                value=value,
+                title={"text": f"<b>{title}</b>", "font": {"size": 12}},
+                number={"suffix": " s²", "font": {"size": 24, "color": color}, "valueformat": ".0f"}
+            ))
+            fig.update_layout(
+                height=100, margin=dict(l=10, r=10, t=35, b=10),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)"
+            )
+            return fig
+
         return {
             # Primary metrics (KPI indicators) - 4 metrics
             "kpi_mae": create_kpi_time(get_metric("mean_absolute_error"), "MAE"),
@@ -997,7 +1010,8 @@ class ETAState(SharedState):
             # R2 and explained variance (gauges) - 2 metrics
             "gauge_r2": create_gauge_r2(get_metric("r2_score"), "R² Score"),
             "gauge_explained_var": create_gauge_r2(get_metric("explained_variance_score"), "Explained Var"),
-            # Secondary metrics (KPI time) - 2 metrics
+            # Secondary metrics (KPI time) - 3 metrics
+            "kpi_mse": create_kpi_mse(mse_value, "MSE"),
             "kpi_median_ae": create_kpi_time(get_metric("median_absolute_error"), "Median AE"),
             "kpi_max_error": create_kpi_time(get_metric("max_error"), "Max Error"),
             # D2 metrics (bullet charts - higher is better) - 3 metrics
@@ -1107,28 +1121,8 @@ class ETAState(SharedState):
             duration=2000
         )
 
-    @rx.event(background=True)
-    async def check_batch_model_available(self, project_name: str):
-        """Check if a batch (Scikit-Learn) model is available for prediction."""
-        try:
-            from .shared import SKLEARN_BASE_URL
-            response = await httpx_client_post(
-                url=f"{SKLEARN_BASE_URL}/model_available",
-                json={
-                    "project_name": project_name,
-                    "model_name": "CatBoostRegressor"
-                },
-                timeout=30.0
-            )
-            result = response.json()
-            async with self:
-                self.batch_model_available[project_name] = result.get("available", False)
-                if result.get("available"):
-                    self.batch_last_trained[project_name] = result.get("trained_at", "")
-        except Exception as e:
-            print(f"Error checking batch model availability: {e}")
-            async with self:
-                self.batch_model_available[project_name] = False
+    # Note: check_batch_model_available is inherited from SharedState
+    # SharedState._batch_model_names maps "Estimated Time of Arrival" to "CatBoostRegressor"
 
     @rx.event
     def clear_large_state_data(self):

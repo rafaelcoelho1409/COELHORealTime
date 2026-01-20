@@ -9,7 +9,7 @@ This module contains:
 """
 import reflex as rx
 from ..states import ETAState, SharedState, METRIC_INFO
-from .shared import metric_info_dialog, ml_training_switch, batch_ml_run_and_training_box
+from .shared import metric_info_dialog, yellowbrick_info_dialog, ml_training_switch, batch_ml_run_and_training_box
 
 
 # =============================================================================
@@ -192,94 +192,227 @@ def estimated_time_of_arrival_metrics() -> rx.Component:
 
 
 # =============================================================================
-# ETA Batch ML Metrics Dashboard
+# ETA Batch ML Metrics Dashboard - Mapping from Plotly keys to metric keys
 # =============================================================================
+ETA_BATCH_PLOTLY_TO_METRIC_KEY = {
+    # Primary KPIs (error metrics - lower is better)
+    "kpi_mae": "mean_absolute_error",
+    "kpi_rmse": "root_mean_squared_error",
+    "kpi_mse": "mean_squared_error",
+    "kpi_mape": "mean_absolute_percentage_error",
+    "kpi_smape": "symmetric_mean_absolute_percentage_error",
+    # Secondary KPIs (additional error metrics)
+    "kpi_median_ae": "median_absolute_error",
+    "kpi_max_error": "max_error",
+    # Goodness of fit gauges (higher is better, range -inf to 1)
+    "gauge_r2": "r2_score",
+    "gauge_explained_var": "explained_variance_score",
+    # D2 deviance bullets (higher is better, range -inf to 1)
+    "bullet_d2_absolute": "d2_absolute_error_score",
+    "bullet_d2_pinball": "d2_pinball_score",
+    "bullet_d2_tweedie": "d2_tweedie_score",
+}
+
+
+def eta_batch_kpi_card(plotly_key: str) -> rx.Component:
+    """Create a KPI card for ETA batch ML metrics with info button."""
+    metric_key = ETA_BATCH_PLOTLY_TO_METRIC_KEY.get(plotly_key)
+    return rx.card(
+        rx.vstack(
+            rx.hstack(
+                rx.spacer(),
+                metric_info_dialog(metric_key, "eta") if metric_key else rx.fragment(),
+                width="100%",
+                justify="end"
+            ),
+            rx.plotly(data=ETAState.eta_batch_dashboard_figures[plotly_key], width="100%"),
+            spacing="0",
+            width="100%"
+        ),
+        size="1"
+    )
+
+
+def eta_batch_gauge_card(plotly_key: str) -> rx.Component:
+    """Create a gauge card for ETA batch ML metrics with info button."""
+    metric_key = ETA_BATCH_PLOTLY_TO_METRIC_KEY.get(plotly_key)
+    return rx.card(
+        rx.vstack(
+            rx.hstack(
+                rx.spacer(),
+                metric_info_dialog(metric_key, "eta") if metric_key else rx.fragment(),
+                width="100%",
+                justify="end"
+            ),
+            rx.plotly(data=ETAState.eta_batch_dashboard_figures[plotly_key], width="100%"),
+            spacing="0",
+            width="100%"
+        ),
+        size="1"
+    )
+
+
+def eta_batch_bullet_card(plotly_key: str) -> rx.Component:
+    """Create a bullet chart card for ETA batch ML metrics with info button."""
+    metric_key = ETA_BATCH_PLOTLY_TO_METRIC_KEY.get(plotly_key)
+    return rx.card(
+        rx.vstack(
+            rx.hstack(
+                rx.spacer(),
+                metric_info_dialog(metric_key, "eta") if metric_key else rx.fragment(),
+                width="100%",
+                justify="end"
+            ),
+            rx.plotly(data=ETAState.eta_batch_dashboard_figures[plotly_key], width="100%"),
+            spacing="0",
+            width="100%"
+        ),
+        size="1"
+    )
+
+
+def yellowbrick_eta_dynamic_info_button() -> rx.Component:
+    """Create a dynamic info button that shows info for the currently selected YellowBrick visualizer.
+
+    Uses rx.match to render the correct info dialog based on ETAState.yellowbrick_metric_name.
+    """
+    # All ETA regression YellowBrick visualizers
+    all_visualizers = [
+        # Regression
+        "ResidualsPlot", "PredictionError",
+        # Feature Analysis
+        "Rank1D", "Rank2D", "PCA", "Manifold", "JointPlot",
+        # Target
+        "FeatureCorrelation", "FeatureCorrelation_Pearson", "BalancedBinningReference",
+        # Model Selection
+        "FeatureImportances", "CVScores", "ValidationCurve",
+        "LearningCurve", "RFECV", "DroppingCurve",
+    ]
+
+    # Build match cases: (visualizer_name, info_dialog_component)
+    match_cases = [
+        (vis, yellowbrick_info_dialog(vis, "eta"))
+        for vis in all_visualizers
+    ]
+
+    return rx.match(
+        ETAState.yellowbrick_metric_name,
+        *match_cases,
+        rx.fragment()  # Default: no button if no valid selection
+    )
+
+
 def estimated_time_of_arrival_batch_metrics() -> rx.Component:
     """Display batch ML regression metrics for ETA with Plotly dashboard layout.
 
-    Uses eta_batch_dashboard_figures for KPI indicators and gauges:
-    - Primary: MAE, RMSE, MAPE, SMAPE (time/percentage KPIs)
-    - R2: R² Score and Explained Variance gauges
-    - Secondary: Median AE, Max Error (time KPIs)
-    - D2 metrics: Bullet charts for d2_absolute, d2_pinball, d2_tweedie
+    Displays all 12 sklearn regression metrics:
+    - Primary (4): MAE, RMSE, MAPE, SMAPE (error metrics - lower is better)
+    - Goodness of Fit (2): R² Score, Explained Variance (higher is better)
+    - Secondary (3): MSE, Median AE, Max Error (additional error metrics)
+    - Deviance D² (3): D² Absolute, D² Pinball, D² Tweedie (higher is better)
     """
     return rx.vstack(
-        # ROW 1: Primary Metrics (KPI indicators)
-        rx.text("Primary Metrics", size="3", weight="bold", color="gray"),
+        # ---------------------------------------------------------------------
+        # TRAINING DATA INFO - Show total rows processed
+        # ---------------------------------------------------------------------
+        rx.cond(
+            SharedState.batch_training_total_rows["Estimated Time of Arrival"] > 0,
+            rx.callout(
+                rx.hstack(
+                    rx.text("Training Data:", size="2", weight="medium"),
+                    rx.badge(
+                        SharedState.batch_training_total_rows["Estimated Time of Arrival"].to(str) + " rows",
+                        color_scheme="blue",
+                        variant="solid",
+                        size="2"
+                    ),
+                    rx.text("(80% train / 20% test split)", size="1", color="gray"),
+                    spacing="2",
+                    align_items="center"
+                ),
+                icon="database",
+                color="blue",
+                variant="soft",
+                width="100%"
+            ),
+            rx.fragment()
+        ),
+        # ---------------------------------------------------------------------
+        # PRIMARY METRICS - Error metrics (lower is better)
+        # ---------------------------------------------------------------------
+        rx.hstack(
+            rx.icon("target", size=16, color="blue"),
+            rx.text("Primary Error Metrics", size="2", weight="bold"),
+            rx.text("(Lower is better - in seconds or %)", size="1", color="gray"),
+            spacing="2",
+            align_items="center"
+        ),
         rx.grid(
-            rx.card(
-                rx.plotly(data=ETAState.eta_batch_dashboard_figures["kpi_mae"], width="100%"),
-                size="1"
-            ),
-            rx.card(
-                rx.plotly(data=ETAState.eta_batch_dashboard_figures["kpi_rmse"], width="100%"),
-                size="1"
-            ),
-            rx.card(
-                rx.plotly(data=ETAState.eta_batch_dashboard_figures["kpi_mape"], width="100%"),
-                size="1"
-            ),
-            rx.card(
-                rx.plotly(data=ETAState.eta_batch_dashboard_figures["kpi_smape"], width="100%"),
-                size="1"
-            ),
+            eta_batch_kpi_card("kpi_mae"),
+            eta_batch_kpi_card("kpi_rmse"),
+            eta_batch_kpi_card("kpi_mape"),
+            eta_batch_kpi_card("kpi_smape"),
             columns="4",
             spacing="2",
             width="100%"
         ),
-        # ROW 2: R2 and Explained Variance Gauges
-        rx.text("Goodness of Fit", size="3", weight="bold", color="gray"),
+        rx.divider(size="4", width="100%"),
+        # ---------------------------------------------------------------------
+        # GOODNESS OF FIT - R² and Explained Variance (higher is better)
+        # ---------------------------------------------------------------------
         rx.hstack(
-            rx.card(
-                rx.plotly(data=ETAState.eta_batch_dashboard_figures["gauge_r2"], width="100%"),
-                size="1",
-                width="50%"
-            ),
-            rx.card(
-                rx.plotly(data=ETAState.eta_batch_dashboard_figures["gauge_explained_var"], width="100%"),
-                size="1",
-                width="50%"
-            ),
+            rx.icon("bar-chart-3", size=16, color="green"),
+            rx.text("Goodness of Fit", size="2", weight="bold"),
+            rx.text("(Higher is better - range: -∞ to 1)", size="1", color="gray"),
             spacing="2",
-            width="100%"
+            align_items="center"
         ),
-        # ROW 3: Secondary Metrics
-        rx.text("Secondary Metrics", size="3", weight="bold", color="gray"),
         rx.grid(
-            rx.card(
-                rx.plotly(data=ETAState.eta_batch_dashboard_figures["kpi_median_ae"], width="100%"),
-                size="1"
-            ),
-            rx.card(
-                rx.plotly(data=ETAState.eta_batch_dashboard_figures["kpi_max_error"], width="100%"),
-                size="1"
-            ),
+            eta_batch_gauge_card("gauge_r2"),
+            eta_batch_gauge_card("gauge_explained_var"),
             columns="2",
             spacing="2",
             width="100%"
         ),
-        # ROW 4: D2 Metrics (bullet charts)
-        rx.text("Deviance Metrics (D² Scores)", size="3", weight="bold", color="gray"),
-        rx.vstack(
-            rx.card(
-                rx.plotly(data=ETAState.eta_batch_dashboard_figures["bullet_d2_absolute"], width="100%"),
-                size="1",
-                width="100%"
-            ),
-            rx.card(
-                rx.plotly(data=ETAState.eta_batch_dashboard_figures["bullet_d2_pinball"], width="100%"),
-                size="1",
-                width="100%"
-            ),
-            rx.card(
-                rx.plotly(data=ETAState.eta_batch_dashboard_figures["bullet_d2_tweedie"], width="100%"),
-                size="1",
-                width="100%"
-            ),
+        rx.divider(size="4", width="100%"),
+        # ---------------------------------------------------------------------
+        # SECONDARY METRICS - Additional error metrics
+        # ---------------------------------------------------------------------
+        rx.hstack(
+            rx.icon("activity", size=16, color="orange"),
+            rx.text("Secondary Error Metrics", size="2", weight="bold"),
+            rx.text("(Additional insights - MSE, Median, Max)", size="1", color="gray"),
+            spacing="2",
+            align_items="center"
+        ),
+        rx.grid(
+            eta_batch_kpi_card("kpi_mse"),
+            eta_batch_kpi_card("kpi_median_ae"),
+            eta_batch_kpi_card("kpi_max_error"),
+            columns="3",
             spacing="2",
             width="100%"
         ),
-        spacing="4",
+        rx.divider(size="4", width="100%"),
+        # ---------------------------------------------------------------------
+        # D² DEVIANCE METRICS - Bullet charts (higher is better)
+        # ---------------------------------------------------------------------
+        rx.hstack(
+            rx.icon("gauge", size=16, color="purple"),
+            rx.text("Deviance Metrics (D² Scores)", size="2", weight="bold"),
+            rx.text("(Higher is better - robust alternatives to R²)", size="1", color="gray"),
+            spacing="2",
+            align_items="center"
+        ),
+        rx.grid(
+            eta_batch_bullet_card("bullet_d2_absolute"),
+            eta_batch_bullet_card("bullet_d2_pinball"),
+            eta_batch_bullet_card("bullet_d2_tweedie"),
+            columns="3",
+            spacing="2",
+            width="100%"
+        ),
+        spacing="3",
         width="100%"
     )
 

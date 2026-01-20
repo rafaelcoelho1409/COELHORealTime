@@ -6,7 +6,10 @@ from ....components import (
     batch_sub_nav,
     batch_ml_run_and_training_box,
 )
-from ....components.eta import estimated_time_of_arrival_batch_metrics
+from ....components.eta import (
+    estimated_time_of_arrival_batch_metrics,
+    yellowbrick_eta_dynamic_info_button,
+)
 from ....states import ETAState, SharedState
 
 
@@ -30,7 +33,7 @@ def _form_card() -> rx.Component:
                 on_click=ETAState.predict_batch_eta,
                 size="2",
                 width="100%",
-                disabled=~SharedState.batch_model_available["Estimated Time of Arrival"]
+                disabled=~ETAState.batch_model_available["Estimated Time of Arrival"]
             ),
             rx.button(
                 rx.hstack(
@@ -173,6 +176,72 @@ def _form_card() -> rx.Component:
                     ),
                     spacing="1", align_items="start", width="100%"
                 ),
+                # Driver Rating
+                rx.vstack(
+                    rx.text("Rating", size="1", color="gray"),
+                    rx.input(
+                        type="number",
+                        value=ETAState.eta_form_data.get("driver_rating", ""),
+                        on_change=lambda v: ETAState.update_eta("driver_rating", v),
+                        min=3.5, max=5.0, step=0.1, width="100%"
+                    ),
+                    spacing="1", align_items="start", width="100%"
+                ),
+                # Temperature
+                rx.vstack(
+                    rx.text("Temp C", size="1", color="gray"),
+                    rx.input(
+                        type="number",
+                        value=ETAState.eta_form_data.get("temperature_celsius", ""),
+                        on_change=lambda v: ETAState.update_eta("temperature_celsius", v),
+                        min=-50.0, max=50.0, step=0.1, width="100%"
+                    ),
+                    spacing="1", align_items="start", width="100%"
+                ),
+                # Debug Traffic Factor
+                rx.vstack(
+                    rx.text("Traffic Factor", size="1", color="gray"),
+                    rx.input(
+                        type="number",
+                        value=ETAState.eta_form_data.get("debug_traffic_factor", ""),
+                        on_change=lambda v: ETAState.update_eta("debug_traffic_factor", v),
+                        min=0.3, max=1.9, step=0.1, width="100%"
+                    ),
+                    spacing="1", align_items="start", width="100%"
+                ),
+                # Debug Weather Factor
+                rx.vstack(
+                    rx.text("Weather Factor", size="1", color="gray"),
+                    rx.input(
+                        type="number",
+                        value=ETAState.eta_form_data.get("debug_weather_factor", ""),
+                        on_change=lambda v: ETAState.update_eta("debug_weather_factor", v),
+                        min=1.0, max=2.0, step=0.1, width="100%"
+                    ),
+                    spacing="1", align_items="start", width="100%"
+                ),
+                # Debug Driver Factor
+                rx.vstack(
+                    rx.text("Driver Factor", size="1", color="gray"),
+                    rx.input(
+                        type="number",
+                        value=ETAState.eta_form_data.get("debug_driver_factor", ""),
+                        on_change=lambda v: ETAState.update_eta("debug_driver_factor", v),
+                        min=0.85, max=1.15, step=0.01, width="100%"
+                    ),
+                    spacing="1", align_items="start", width="100%"
+                ),
+                # Debug Incident Delay
+                rx.vstack(
+                    rx.text("Incident (s)", size="1", color="gray"),
+                    rx.input(
+                        type="number",
+                        value=ETAState.eta_form_data.get("debug_incident_delay_seconds", ""),
+                        on_change=lambda v: ETAState.update_eta("debug_incident_delay_seconds", v),
+                        min=0, max=1800, step=1, width="100%"
+                    ),
+                    spacing="1", align_items="start", width="100%"
+                ),
                 columns="3",
                 spacing="2",
                 width="100%"
@@ -180,6 +249,7 @@ def _form_card() -> rx.Component:
             rx.vstack(
                 rx.text(f"Trip ID: {ETAState.eta_form_data.get('trip_id', '')}", size="1", color="gray"),
                 rx.text(f"Estimated Distance: {ETAState.eta_estimated_distance_km} km", size="1", color="gray"),
+                rx.text(f"Initial Estimated Travel Time: {ETAState.eta_initial_estimated_travel_time_seconds} s", size="1", color="gray"),
                 spacing="1",
                 align_items="start",
                 width="100%"
@@ -195,16 +265,24 @@ def _form_card() -> rx.Component:
 def _yellowbrick_content(category: str, description: str) -> rx.Component:
     """Build YellowBrick visualization content for a specific category."""
     return rx.cond(
-        SharedState.batch_model_available["Estimated Time of Arrival"],
+        ETAState.batch_model_available["Estimated Time of Arrival"],
         rx.vstack(
             rx.text(description, size="2", color="gray"),
             rx.hstack(
-                rx.select(
-                    ETAState.yellowbrick_metrics_options[category],
-                    value=ETAState.yellowbrick_metric_name,
-                    on_change=lambda v: ETAState.set_yellowbrick_visualization(category, v),
-                    placeholder="Select visualization...",
-                    width="100%"
+                rx.box(
+                    rx.select(
+                        ETAState.yellowbrick_metrics_options[category],
+                        value=ETAState.yellowbrick_metric_name,
+                        on_change=lambda v: ETAState.set_yellowbrick_visualization(category, v),
+                        placeholder="Select visualization...",
+                        width="100%"
+                    ),
+                    flex="1"
+                ),
+                rx.cond(
+                    ETAState.yellowbrick_metric_name != "",
+                    yellowbrick_eta_dynamic_info_button(),
+                    rx.fragment()
                 ),
                 spacing="2",
                 align_items="center",
