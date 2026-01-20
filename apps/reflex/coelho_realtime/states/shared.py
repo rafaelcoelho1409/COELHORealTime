@@ -169,9 +169,31 @@ class SharedState(rx.State):
     tab_name: str = "incremental_ml"
     page_name_mapping: dict = {
         "/": "Home",
+        # Legacy routes (kept for backwards compatibility)
         "/transaction-fraud-detection": "Transaction Fraud Detection",
         "/estimated-time-of-arrival": "Estimated Time of Arrival",
-        "/e-commerce-customer-interactions": "E-Commerce Customer Interactions"
+        "/e-commerce-customer-interactions": "E-Commerce Customer Interactions",
+        # New split routes - TFD
+        "/tfd": "Transaction Fraud Detection",
+        "/tfd/incremental": "Transaction Fraud Detection",
+        "/tfd/batch": "Transaction Fraud Detection",
+        "/tfd/batch/prediction": "Transaction Fraud Detection",
+        "/tfd/batch/metrics": "Transaction Fraud Detection",
+        "/tfd/sql": "Transaction Fraud Detection",
+        # New split routes - ETA
+        "/eta": "Estimated Time of Arrival",
+        "/eta/incremental": "Estimated Time of Arrival",
+        "/eta/batch": "Estimated Time of Arrival",
+        "/eta/batch/prediction": "Estimated Time of Arrival",
+        "/eta/batch/metrics": "Estimated Time of Arrival",
+        "/eta/sql": "Estimated Time of Arrival",
+        # New split routes - ECCI
+        "/ecci": "E-Commerce Customer Interactions",
+        "/ecci/incremental": "E-Commerce Customer Interactions",
+        "/ecci/batch": "E-Commerce Customer Interactions",
+        "/ecci/batch/prediction": "E-Commerce Customer Interactions",
+        "/ecci/batch/metrics": "E-Commerce Customer Interactions",
+        "/ecci/sql": "E-Commerce Customer Interactions",
     }
     project_name: str = "Home"
 
@@ -1540,6 +1562,15 @@ class SharedState(rx.State):
         yield SharedState.check_batch_model_available(project_name)
         # Fetch metrics for selected run (or best if none selected)
         yield SharedState.get_batch_mlflow_metrics(project_name)
+
+    @rx.event
+    def init_sql_page(self, project_name: str):
+        """Initialize Delta Lake SQL page - set current project context.
+
+        Note: The SQL feature uses self.page_name (derived from router URL) to determine
+        the project context, so this method just logs for debugging.
+        """
+        print(f"[DEBUG] init_sql_page called for: {project_name}")
 
     @rx.event(background=True)
     async def fetch_mlflow_runs(self, project_name: str):

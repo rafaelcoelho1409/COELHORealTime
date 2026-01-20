@@ -1075,37 +1075,142 @@ def coelho_realtime_navbar() -> rx.Component:
                             )
                         ),
                         rx.menu.content(
-                            rx.menu.item(
-                                rx.link(
+                            # TFD Sub-menu
+                            rx.menu.sub(
+                                rx.menu.sub_trigger(
                                     rx.hstack(
                                         rx.icon("credit-card", size=16, color=rx.color("accent", 10)),
                                         rx.text("Transaction Fraud Detection", size="3", weight="medium"),
                                         spacing="2",
                                         align_items="center"
+                                    )
+                                ),
+                                rx.menu.sub_content(
+                                    rx.menu.item(
+                                        rx.link(
+                                            rx.hstack(
+                                                rx.icon("activity", size=16, color=rx.color("accent", 10)),
+                                                rx.text("Incremental ML", size="3", weight="medium"),
+                                                spacing="2",
+                                                align_items="center"
+                                            ),
+                                            href="/tfd/incremental"
+                                        )
                                     ),
-                                    href="/transaction-fraud-detection"
+                                    rx.menu.item(
+                                        rx.link(
+                                            rx.hstack(
+                                                rx.icon("layers", size=16, color=rx.color("accent", 10)),
+                                                rx.text("Batch ML", size="3", weight="medium"),
+                                                spacing="2",
+                                                align_items="center"
+                                            ),
+                                            href="/tfd/batch"
+                                        )
+                                    ),
+                                    rx.menu.item(
+                                        rx.link(
+                                            rx.hstack(
+                                                rx.icon("database", size=16, color=rx.color("accent", 10)),
+                                                rx.text("Delta Lake SQL", size="3", weight="medium"),
+                                                spacing="2",
+                                                align_items="center"
+                                            ),
+                                            href="/tfd/sql"
+                                        )
+                                    )
                                 )
                             ),
-                            rx.menu.item(
-                                rx.link(
+                            # ETA Sub-menu
+                            rx.menu.sub(
+                                rx.menu.sub_trigger(
                                     rx.hstack(
                                         rx.icon("clock", size=16, color=rx.color("accent", 10)),
                                         rx.text("Estimated Time of Arrival", size="3", weight="medium"),
                                         spacing="2",
                                         align_items="center"
+                                    )
+                                ),
+                                rx.menu.sub_content(
+                                    rx.menu.item(
+                                        rx.link(
+                                            rx.hstack(
+                                                rx.icon("activity", size=16, color=rx.color("accent", 10)),
+                                                rx.text("Incremental ML", size="3", weight="medium"),
+                                                spacing="2",
+                                                align_items="center"
+                                            ),
+                                            href="/eta/incremental"
+                                        )
                                     ),
-                                    href="/estimated-time-of-arrival"
+                                    rx.menu.item(
+                                        rx.link(
+                                            rx.hstack(
+                                                rx.icon("layers", size=16, color=rx.color("accent", 10)),
+                                                rx.text("Batch ML", size="3", weight="medium"),
+                                                spacing="2",
+                                                align_items="center"
+                                            ),
+                                            href="/eta/batch"
+                                        )
+                                    ),
+                                    rx.menu.item(
+                                        rx.link(
+                                            rx.hstack(
+                                                rx.icon("database", size=16, color=rx.color("accent", 10)),
+                                                rx.text("Delta Lake SQL", size="3", weight="medium"),
+                                                spacing="2",
+                                                align_items="center"
+                                            ),
+                                            href="/eta/sql"
+                                        )
+                                    )
                                 )
                             ),
-                            rx.menu.item(
-                                rx.link(
+                            # ECCI Sub-menu
+                            rx.menu.sub(
+                                rx.menu.sub_trigger(
                                     rx.hstack(
                                         rx.icon("shopping-cart", size=16, color=rx.color("accent", 10)),
                                         rx.text("E-Commerce Customer Interactions", size="3", weight="medium"),
                                         spacing="2",
                                         align_items="center"
+                                    )
+                                ),
+                                rx.menu.sub_content(
+                                    rx.menu.item(
+                                        rx.link(
+                                            rx.hstack(
+                                                rx.icon("activity", size=16, color=rx.color("accent", 10)),
+                                                rx.text("Incremental ML", size="3", weight="medium"),
+                                                spacing="2",
+                                                align_items="center"
+                                            ),
+                                            href="/ecci/incremental"
+                                        )
                                     ),
-                                    href="/e-commerce-customer-interactions"
+                                    rx.menu.item(
+                                        rx.link(
+                                            rx.hstack(
+                                                rx.icon("layers", size=16, color=rx.color("accent", 10)),
+                                                rx.text("Batch ML", size="3", weight="medium"),
+                                                spacing="2",
+                                                align_items="center"
+                                            ),
+                                            href="/ecci/batch"
+                                        )
+                                    ),
+                                    rx.menu.item(
+                                        rx.link(
+                                            rx.hstack(
+                                                rx.icon("database", size=16, color=rx.color("accent", 10)),
+                                                rx.text("Delta Lake SQL", size="3", weight="medium"),
+                                                spacing="2",
+                                                align_items="center"
+                                            ),
+                                            href="/ecci/sql"
+                                        )
+                                    )
                                 )
                             ),
                             size="2"
@@ -1296,6 +1401,7 @@ def coelho_realtime_navbar() -> rx.Component:
 
 
 def page_tabs() -> rx.Component:
+    """Legacy tab navigation - kept for backwards compatibility."""
     return rx.tabs.root(
         rx.tabs.list(
             rx.tabs.trigger(
@@ -1329,6 +1435,112 @@ def page_tabs() -> rx.Component:
         value=SharedState.tab_name,
         on_change=SharedState.set_tab,
         default_value="incremental_ml",
+        width="100%",
+    )
+
+
+def page_sub_nav(base_route: str, active: str) -> rx.Component:
+    """Sub-navigation for project pages (Incremental ML, Batch ML, Delta Lake SQL).
+
+    Uses links for proper routing instead of tabs for better performance.
+    Each sub-page loads only its own components.
+
+    Args:
+        base_route: Base route for the project (e.g., "/tfd", "/eta", "/ecci")
+        active: Currently active sub-page ("incremental", "batch", "sql")
+    """
+    def nav_link(label: str, icon_name: str, route: str, is_active: bool) -> rx.Component:
+        return rx.link(
+            rx.hstack(
+                rx.icon(icon_name, size=14),
+                rx.text(label, size="2", weight="medium"),
+                spacing="2",
+                align="center",
+                justify="center",
+                padding_x="16px",
+                padding_y="8px",
+                border_radius="6px",
+                width="100%",
+                background=rx.cond(
+                    is_active,
+                    rx.color("accent", 3),
+                    "transparent"
+                ),
+                color=rx.cond(
+                    is_active,
+                    rx.color("accent", 11),
+                    rx.color("gray", 11)
+                ),
+                _hover={
+                    "background": rx.color("accent", 4) if not is_active else rx.color("accent", 3),
+                },
+            ),
+            href=route,
+            underline="none",
+            width="100%",
+        )
+
+    return rx.hstack(
+        nav_link("Incremental ML", "activity", f"{base_route}/incremental", active == "incremental"),
+        nav_link("Batch ML", "layers", f"{base_route}/batch/prediction", active == "batch"),
+        nav_link("Delta Lake SQL", "database", f"{base_route}/sql", active == "sql"),
+        spacing="1",
+        padding="4px",
+        background=rx.color("gray", 2),
+        border_radius="8px",
+        width="100%",
+    )
+
+
+def batch_sub_nav(base_route: str, active: str) -> rx.Component:
+    """Sub-navigation for Batch ML sub-pages.
+
+    Provides navigation between:
+    - Prediction: Form + prediction results + training controls
+    - Metrics: sklearn overview + YellowBrick visualizations (with inner tabs)
+
+    Args:
+        base_route: Base route for batch pages (e.g., "/tfd/batch", "/eta/batch")
+        active: Currently active sub-page ("prediction" or "metrics")
+    """
+    def nav_link(label: str, icon_name: str, route: str, is_active: bool) -> rx.Component:
+        return rx.link(
+            rx.hstack(
+                rx.icon(icon_name, size=14),
+                rx.text(label, size="2", weight="medium"),
+                spacing="2",
+                align="center",
+                justify="center",
+                padding_x="16px",
+                padding_y="8px",
+                border_radius="6px",
+                width="100%",
+                background=rx.cond(
+                    is_active,
+                    rx.color("accent", 3),
+                    "transparent"
+                ),
+                color=rx.cond(
+                    is_active,
+                    rx.color("accent", 11),
+                    rx.color("gray", 11)
+                ),
+                _hover={
+                    "background": rx.color("accent", 4) if not is_active else rx.color("accent", 3),
+                },
+            ),
+            href=route,
+            underline="none",
+            width="100%",
+        )
+
+    return rx.hstack(
+        nav_link("Prediction", "target", f"{base_route}/prediction", active == "prediction"),
+        nav_link("Metrics", "bar-chart-2", f"{base_route}/metrics", active == "metrics"),
+        spacing="1",
+        padding="4px",
+        background=rx.color("gray", 2),
+        border_radius="8px",
         width="100%",
     )
 

@@ -17,6 +17,8 @@ Usage:
 from .shared import (
     coelho_realtime_navbar,
     page_tabs,
+    page_sub_nav,
+    batch_sub_nav,
     ml_training_switch,
     batch_ml_training_box,
     batch_ml_run_and_training_box,
@@ -53,6 +55,8 @@ __all__ = [
     # Shared components (migrated)
     "coelho_realtime_navbar",
     "page_tabs",
+    "page_sub_nav",
+    "batch_sub_nav",
     "ml_training_switch",
     "batch_ml_training_box",
     "batch_ml_run_and_training_box",

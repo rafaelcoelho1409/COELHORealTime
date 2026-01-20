@@ -605,6 +605,11 @@ class ETAState(SharedState):
         }
         self.form_data[project_name] = form_data
         self.prediction_results[project_name] = {"eta_seconds": 0.0, "show": False}
+        yield rx.toast.success(
+            "Form randomized",
+            description="All fields filled with random values.",
+            duration=2000,
+        )
 
     # ==========================================================================
     # BATCH ML PREDICTION (Scikit-Learn)
@@ -701,6 +706,13 @@ class ETAState(SharedState):
             "debug_driver_factor": float(current_form.get("debug_driver_factor", 0))
         }
 
+        # Show loading toast
+        yield rx.toast.info(
+            "Making prediction...",
+            description="Estimating arrival time with ML model.",
+            duration=3000,
+        )
+
         try:
             print(f"Making batch ETA prediction with payload: {payload}")
             response = await httpx_client_post(
@@ -711,6 +723,7 @@ class ETAState(SharedState):
             result = response.json()
             print(f"Batch ETA Prediction result: {result}")
             eta_seconds = result.get("Estimated Time of Arrival", 0.0)
+            eta_minutes = round(eta_seconds / 60, 1)
 
             async with self:
                 self.batch_prediction_results = {
@@ -721,6 +734,11 @@ class ETAState(SharedState):
                         "show": True
                     }
                 }
+            yield rx.toast.success(
+                "ETA Predicted",
+                description=f"Estimated arrival time: {eta_minutes} minutes.",
+                duration=3000,
+            )
         except Exception as e:
             print(f"Error making batch ETA prediction: {e}")
             async with self:
@@ -732,6 +750,11 @@ class ETAState(SharedState):
                         "show": False
                     }
                 }
+            yield rx.toast.error(
+                "Prediction failed",
+                description=str(e)[:100],
+                duration=4000,
+            )
 
     # ==========================================================================
     # ETA BATCH ML COMPUTED VARIABLES

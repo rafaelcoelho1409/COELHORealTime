@@ -931,6 +931,11 @@ class TFDState(SharedState):
         }
         self.form_data[project_name] = form_data
         self.prediction_results[project_name] = {"prediction": None, "probability": None, "show": False}
+        yield rx.toast.success(
+            "Form randomized",
+            description="All fields filled with random values.",
+            duration=2000,
+        )
 
     # ==========================================================================
     # TFD BATCH ML EVENT HANDLERS
@@ -1091,6 +1096,12 @@ class TFDState(SharedState):
             "cvv_provided": self._safe_bool(current_form.get("cvv_provided", False)),
             "billing_address_match": self._safe_bool(current_form.get("billing_address_match", False))
         }
+        # Show loading toast
+        yield rx.toast.info(
+            "Making prediction...",
+            description="Analyzing transaction with ML model.",
+            duration=3000,
+        )
         # Make prediction
         try:
             print(f"Making batch prediction with payload: {payload}")
@@ -1101,16 +1112,31 @@ class TFDState(SharedState):
             )
             result = response.json()
             print(f"Batch prediction result: {result}")
+            prediction = result.get("prediction")
+            fraud_prob = result.get("fraud_probability", 0.0)
             async with self:
                 self.batch_prediction_results = {
                     **self.batch_prediction_results,
                     project_name: {
-                        "prediction": result.get("prediction"),
-                        "fraud_probability": result.get("fraud_probability"),
+                        "prediction": prediction,
+                        "fraud_probability": fraud_prob,
                         "model_source": result.get("model_source", "mlflow"),
                         "show": True
                     }
                 }
+            # Show result toast
+            if prediction == 1:
+                yield rx.toast.warning(
+                    "Fraud Detected",
+                    description=f"Transaction flagged as fraudulent ({fraud_prob:.1%} probability).",
+                    duration=4000,
+                )
+            else:
+                yield rx.toast.success(
+                    "Legitimate Transaction",
+                    description=f"Transaction appears legitimate ({1-fraud_prob:.1%} confidence).",
+                    duration=3000,
+                )
         except Exception as e:
             print(f"Error making batch prediction: {e}")
             async with self:
@@ -1123,5 +1149,10 @@ class TFDState(SharedState):
                         "show": False
                     }
                 }
+            yield rx.toast.error(
+                "Prediction failed",
+                description=str(e)[:100],
+                duration=4000,
+            )
 
     # NOTE: get_batch_mlflow_metrics is inherited from SharedState - do not override here

@@ -568,6 +568,11 @@ class ECCIState(SharedState):
         }
         self.form_data[project_name] = form_data
         self.prediction_results[project_name] = {"cluster": 0, "show": False}
+        yield rx.toast.success(
+            "Form randomized",
+            description="All fields filled with random values.",
+            duration=2000,
+        )
 
     # ==========================================================================
     # ECCI CLUSTER ANALYTICS EVENT HANDLERS
@@ -708,6 +713,13 @@ class ECCIState(SharedState):
             "session_event_sequence": int(current_form.get("session_event_sequence", 1))
         }
 
+        # Show loading toast
+        yield rx.toast.info(
+            "Making prediction...",
+            description="Assigning customer to cluster with ML model.",
+            duration=3000,
+        )
+
         try:
             print(f"Making batch ECCI prediction with payload: {payload}")
             response = await httpx_client_post(
@@ -728,6 +740,11 @@ class ECCIState(SharedState):
                         "show": True
                     }
                 }
+            yield rx.toast.success(
+                "Cluster Assigned",
+                description=f"Customer assigned to Cluster {cluster_id}.",
+                duration=3000,
+            )
         except Exception as e:
             print(f"Error making batch ECCI prediction: {e}")
             async with self:
@@ -739,3 +756,8 @@ class ECCIState(SharedState):
                         "show": False
                     }
                 }
+            yield rx.toast.error(
+                "Prediction failed",
+                description=str(e)[:100],
+                duration=4000,
+            )
