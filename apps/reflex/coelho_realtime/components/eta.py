@@ -9,7 +9,7 @@ This module contains:
 """
 import reflex as rx
 from ..states import ETAState, SharedState, METRIC_INFO
-from .shared import metric_info_dialog, ml_training_switch, batch_ml_training_box
+from .shared import metric_info_dialog, ml_training_switch, batch_ml_run_and_training_box
 
 
 # =============================================================================
@@ -904,17 +904,17 @@ def estimated_time_of_arrival_batch_form(model_key: str = None, project_name: st
         width="100%"
     )
 
-    # Build left column with batch ML training box
+    # Build left column with unified run selector + training box (same as TFD)
     if model_key and project_name:
         left_column = rx.vstack(
-            batch_ml_training_box(model_key, project_name),
+            batch_ml_run_and_training_box(model_key, project_name),
             form_card,
             spacing="4",
             width="30%"
         )
     else:
         left_column = rx.vstack(
-            batch_ml_training_box("XGBRegressor", "Estimated Time of Arrival"),
+            batch_ml_run_and_training_box("XGBRegressor", "Estimated Time of Arrival"),
             form_card,
             spacing="4",
             width="30%"
@@ -975,22 +975,6 @@ def estimated_time_of_arrival_batch_form(model_key: str = None, project_name: st
                                     rx.text("ETA - Prediction", size="3", weight="bold"),
                                     spacing="2",
                                     align_items="center"
-                                ),
-                                # Model info badge
-                                rx.hstack(
-                                    rx.badge(
-                                        rx.hstack(
-                                            rx.icon("brain", size=12),
-                                            rx.text("XGBoost Regressor (Scikit-Learn)", size="1"),
-                                            spacing="1",
-                                            align_items="center"
-                                        ),
-                                        color_scheme="purple",
-                                        variant="soft",
-                                        size="1"
-                                    ),
-                                    rx.badge("Batch ML", color_scheme="blue", variant="soft", size="1"),
-                                    spacing="2"
                                 ),
                                 rx.cond(
                                     ETAState.eta_batch_prediction_show,
@@ -1059,7 +1043,7 @@ def estimated_time_of_arrival_batch_form(model_key: str = None, project_name: st
                         align_items="center",
                         spacing="2"
                     ),
-                    # Metrics subtabs
+                    # Metrics subtabs (same structure as TFD)
                     rx.tabs.root(
                         rx.tabs.list(
                             rx.tabs.trigger(
@@ -1071,32 +1055,115 @@ def estimated_time_of_arrival_batch_form(model_key: str = None, project_name: st
                                 ),
                                 value="overview"
                             ),
+                            rx.tabs.trigger(
+                                rx.hstack(
+                                    rx.icon("trending-up", size=14),
+                                    rx.text("Performance"),
+                                    spacing="2",
+                                    align_items="center"
+                                ),
+                                value="performance"
+                            ),
+                            rx.tabs.trigger(
+                                rx.hstack(
+                                    rx.icon("scatter-chart", size=14),
+                                    rx.text("Feature Analysis"),
+                                    spacing="2",
+                                    align_items="center"
+                                ),
+                                value="feature_analysis"
+                            ),
+                            rx.tabs.trigger(
+                                rx.hstack(
+                                    rx.icon("target", size=14),
+                                    rx.text("Target Analysis"),
+                                    spacing="2",
+                                    align_items="center"
+                                ),
+                                value="target_analysis"
+                            ),
+                            rx.tabs.trigger(
+                                rx.hstack(
+                                    rx.icon("settings-2", size=14),
+                                    rx.text("Model Diagnostics"),
+                                    spacing="2",
+                                    align_items="center"
+                                ),
+                                value="model_diagnostics"
+                            ),
                         ),
                         # Subtab 1: Overview (default sklearn metrics)
                         rx.tabs.content(
                             rx.vstack(
-                                # Model info badge
-                                rx.hstack(
-                                    rx.badge(
-                                        rx.hstack(
-                                            rx.icon("brain", size=12),
-                                            rx.text("XGBoost Regressor (Scikit-Learn)", size="1"),
-                                            spacing="1",
-                                            align_items="center"
-                                        ),
-                                        color_scheme="purple",
-                                        variant="soft",
-                                        size="1"
-                                    ),
-                                    rx.badge("Batch ML", color_scheme="blue", variant="soft", size="1"),
-                                    spacing="2"
-                                ),
-                                # Batch metrics display (reuse the same metrics component for now)
                                 estimated_time_of_arrival_metrics(),
                                 spacing="4",
                                 width="100%",
                             ),
                             value="overview"
+                        ),
+                        # Subtab 2: Performance (YellowBrick Regression)
+                        rx.tabs.content(
+                            rx.center(
+                                rx.vstack(
+                                    rx.icon("trending-up", size=40, color=rx.color("gray", 6)),
+                                    rx.text("Regression Performance Visualizations", size="3", weight="medium", color="gray"),
+                                    rx.text("ResidualsPlot, PredictionError", size="2", color="gray"),
+                                    rx.badge("Coming Soon", color_scheme="blue", variant="soft"),
+                                    spacing="2",
+                                    align="center"
+                                ),
+                                height="300px",
+                                width="100%"
+                            ),
+                            value="performance"
+                        ),
+                        # Subtab 3: Feature Analysis (YellowBrick)
+                        rx.tabs.content(
+                            rx.center(
+                                rx.vstack(
+                                    rx.icon("scatter-chart", size=40, color=rx.color("gray", 6)),
+                                    rx.text("Feature Analysis Visualizations", size="3", weight="medium", color="gray"),
+                                    rx.text("Rank1D, Rank2D, PCA, Manifold, ParallelCoordinates", size="2", color="gray"),
+                                    rx.badge("Coming Soon", color_scheme="blue", variant="soft"),
+                                    spacing="2",
+                                    align="center"
+                                ),
+                                height="300px",
+                                width="100%"
+                            ),
+                            value="feature_analysis"
+                        ),
+                        # Subtab 4: Target Analysis (YellowBrick)
+                        rx.tabs.content(
+                            rx.center(
+                                rx.vstack(
+                                    rx.icon("target", size=40, color=rx.color("gray", 6)),
+                                    rx.text("Target Analysis Visualizations", size="3", weight="medium", color="gray"),
+                                    rx.text("FeatureCorrelation, FeatureCorrelation (Pearson)", size="2", color="gray"),
+                                    rx.badge("Coming Soon", color_scheme="blue", variant="soft"),
+                                    spacing="2",
+                                    align="center"
+                                ),
+                                height="300px",
+                                width="100%"
+                            ),
+                            value="target_analysis"
+                        ),
+                        # Subtab 5: Model Diagnostics (YellowBrick)
+                        rx.tabs.content(
+                            rx.center(
+                                rx.vstack(
+                                    rx.icon("settings-2", size=40, color=rx.color("gray", 6)),
+                                    rx.text("Model Diagnostics Visualizations", size="3", weight="medium", color="gray"),
+                                    rx.text("FeatureImportances, LearningCurve, ValidationCurve, CVScores", size="2", color="gray"),
+                                    rx.badge("Coming Soon", color_scheme="blue", variant="soft"),
+                                    spacing="2",
+                                    align="center"
+                                ),
+                                height="300px",
+                                width="100%"
+                            ),
+                            value="model_diagnostics"
                         ),
                         default_value="overview",
                         width="100%"

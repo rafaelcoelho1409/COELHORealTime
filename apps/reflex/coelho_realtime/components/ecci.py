@@ -11,7 +11,7 @@ All components use ECCIState for ECCI-specific state.
 """
 import reflex as rx
 from ..states import ECCIState, SharedState
-from .shared import metric_info_dialog, ml_training_switch, batch_ml_training_box
+from .shared import metric_info_dialog, ml_training_switch, batch_ml_run_and_training_box
 
 
 # =============================================================================
@@ -1168,17 +1168,17 @@ def e_commerce_customer_interactions_batch_form(model_key: str = None, project_n
         width="100%"
     )
 
-    # Build left column with batch ML training box
+    # Build left column with unified run selector + training box (same as TFD)
     if model_key and project_name:
         left_column = rx.vstack(
-            batch_ml_training_box(model_key, project_name),
+            batch_ml_run_and_training_box(model_key, project_name),
             form_card,
             spacing="4",
             width="30%"
         )
     else:
         left_column = rx.vstack(
-            batch_ml_training_box("KMeans", "E-Commerce Customer Interactions"),
+            batch_ml_run_and_training_box("KMeans", "E-Commerce Customer Interactions"),
             form_card,
             spacing="4",
             width="30%"
@@ -1236,22 +1236,6 @@ def e_commerce_customer_interactions_batch_form(model_key: str = None, project_n
                                     rx.text("Predicted Cluster", size="3", weight="bold"),
                                     spacing="2",
                                     align_items="center"
-                                ),
-                                # Model info badge
-                                rx.hstack(
-                                    rx.badge(
-                                        rx.hstack(
-                                            rx.icon("brain", size=12),
-                                            rx.text("KMeans Clustering (Scikit-Learn)", size="1"),
-                                            spacing="1",
-                                            align_items="center"
-                                        ),
-                                        color_scheme="purple",
-                                        variant="soft",
-                                        size="1"
-                                    ),
-                                    rx.badge("Batch ML", color_scheme="blue", variant="soft", size="1"),
-                                    spacing="2"
                                 ),
                                 rx.cond(
                                     ECCIState.ecci_batch_prediction_show,
@@ -1384,7 +1368,7 @@ def e_commerce_customer_interactions_batch_form(model_key: str = None, project_n
                         align_items="center",
                         spacing="2"
                     ),
-                    # Metrics subtabs
+                    # Metrics subtabs (same structure as TFD, adapted for clustering)
                     rx.tabs.root(
                         rx.tabs.list(
                             rx.tabs.trigger(
@@ -1396,32 +1380,90 @@ def e_commerce_customer_interactions_batch_form(model_key: str = None, project_n
                                 ),
                                 value="overview"
                             ),
+                            rx.tabs.trigger(
+                                rx.hstack(
+                                    rx.icon("circle-dot", size=14),
+                                    rx.text("Cluster Analysis"),
+                                    spacing="2",
+                                    align_items="center"
+                                ),
+                                value="cluster_analysis"
+                            ),
+                            rx.tabs.trigger(
+                                rx.hstack(
+                                    rx.icon("scatter-chart", size=14),
+                                    rx.text("Feature Analysis"),
+                                    spacing="2",
+                                    align_items="center"
+                                ),
+                                value="feature_analysis"
+                            ),
+                            rx.tabs.trigger(
+                                rx.hstack(
+                                    rx.icon("settings-2", size=14),
+                                    rx.text("Model Diagnostics"),
+                                    spacing="2",
+                                    align_items="center"
+                                ),
+                                value="model_diagnostics"
+                            ),
                         ),
                         # Subtab 1: Overview (default sklearn metrics)
                         rx.tabs.content(
                             rx.vstack(
-                                # Model info badge
-                                rx.hstack(
-                                    rx.badge(
-                                        rx.hstack(
-                                            rx.icon("brain", size=12),
-                                            rx.text("KMeans Clustering (Scikit-Learn)", size="1"),
-                                            spacing="1",
-                                            align_items="center"
-                                        ),
-                                        color_scheme="purple",
-                                        variant="soft",
-                                        size="1"
-                                    ),
-                                    rx.badge("Batch ML", color_scheme="blue", variant="soft", size="1"),
-                                    spacing="2"
-                                ),
-                                # Batch metrics display (reuse the same metrics component for now)
                                 e_commerce_customer_interactions_metrics(),
                                 spacing="4",
                                 width="100%",
                             ),
                             value="overview"
+                        ),
+                        # Subtab 2: Cluster Analysis (YellowBrick Clustering)
+                        rx.tabs.content(
+                            rx.center(
+                                rx.vstack(
+                                    rx.icon("circle-dot", size=40, color=rx.color("gray", 6)),
+                                    rx.text("Cluster Analysis Visualizations", size="3", weight="medium", color="gray"),
+                                    rx.text("SilhouetteVisualizer, KElbowVisualizer, InterclusterDistance", size="2", color="gray"),
+                                    rx.badge("Coming Soon", color_scheme="blue", variant="soft"),
+                                    spacing="2",
+                                    align="center"
+                                ),
+                                height="300px",
+                                width="100%"
+                            ),
+                            value="cluster_analysis"
+                        ),
+                        # Subtab 3: Feature Analysis (YellowBrick)
+                        rx.tabs.content(
+                            rx.center(
+                                rx.vstack(
+                                    rx.icon("scatter-chart", size=40, color=rx.color("gray", 6)),
+                                    rx.text("Feature Analysis Visualizations", size="3", weight="medium", color="gray"),
+                                    rx.text("Rank1D, Rank2D, PCA, Manifold, ParallelCoordinates, RadViz", size="2", color="gray"),
+                                    rx.badge("Coming Soon", color_scheme="blue", variant="soft"),
+                                    spacing="2",
+                                    align="center"
+                                ),
+                                height="300px",
+                                width="100%"
+                            ),
+                            value="feature_analysis"
+                        ),
+                        # Subtab 4: Model Diagnostics (YellowBrick)
+                        rx.tabs.content(
+                            rx.center(
+                                rx.vstack(
+                                    rx.icon("settings-2", size=40, color=rx.color("gray", 6)),
+                                    rx.text("Model Diagnostics Visualizations", size="3", weight="medium", color="gray"),
+                                    rx.text("FeatureImportances, CVScores", size="2", color="gray"),
+                                    rx.badge("Coming Soon", color_scheme="blue", variant="soft"),
+                                    spacing="2",
+                                    align="center"
+                                ),
+                                height="300px",
+                                width="100%"
+                            ),
+                            value="model_diagnostics"
                         ),
                         default_value="overview",
                         width="100%"

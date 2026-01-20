@@ -1470,11 +1470,11 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
                             rx.tabs.trigger(
                                 rx.hstack(
                                     rx.icon("check-circle", size=14),
-                                    rx.text("Classification"),
+                                    rx.text("Performance"),
                                     spacing="2",
                                     align_items="center"
                                 ),
-                                value="classification"
+                                value="performance"
                             ),
                             rx.tabs.trigger(
                                 rx.hstack(
@@ -1488,20 +1488,20 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
                             rx.tabs.trigger(
                                 rx.hstack(
                                     rx.icon("target", size=14),
-                                    rx.text("Target"),
+                                    rx.text("Target Analysis"),
                                     spacing="2",
                                     align_items="center"
                                 ),
-                                value="target"
+                                value="target_analysis"
                             ),
                             rx.tabs.trigger(
                                 rx.hstack(
                                     rx.icon("settings-2", size=14),
-                                    rx.text("Model Selection"),
+                                    rx.text("Model Diagnostics"),
                                     spacing="2",
                                     align_items="center"
                                 ),
-                                value="model_selection"
+                                value="model_diagnostics"
                             ),
                         ),
                         # Subtab 1: Overview (default sklearn metrics)
@@ -1604,7 +1604,7 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
                             ),
                             value="feature_analysis"
                         ),
-                        # Subtab 3: Target (YellowBrick)
+                        # Subtab 3: Target Analysis (YellowBrick)
                         rx.tabs.content(
                             rx.cond(
                                 TFDState.tfd_batch_model_available,
@@ -1692,9 +1692,9 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
                                     padding_top="1em",
                                 )
                             ),
-                            value="target"
+                            value="target_analysis"
                         ),
-                        # Subtab 4: Classification (YellowBrick)
+                        # Subtab 4: Performance (YellowBrick)
                         rx.tabs.content(
                             rx.cond(
                                 TFDState.tfd_batch_model_available,
@@ -1782,9 +1782,9 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
                                     padding_top="1em",
                                 )
                             ),
-                            value="classification"
+                            value="performance"
                         ),
-                        # Subtab 5: Model Selection (YellowBrick)
+                        # Subtab 5: Model Diagnostics (YellowBrick)
                         rx.tabs.content(
                             rx.cond(
                                 TFDState.tfd_batch_model_available,
@@ -1872,7 +1872,7 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
                                     padding_top="1em",
                                 )
                             ),
-                            value="model_selection"
+                            value="model_diagnostics"
                         ),
                         default_value="overview",
                         on_change=lambda _: TFDState.clear_yellowbrick_visualization(),

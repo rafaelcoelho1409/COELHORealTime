@@ -279,8 +279,8 @@ class SharedState(rx.State):
     # Batch ML model names for display
     batch_ml_model_name: dict = {
         "Transaction Fraud Detection": "CatBoost Classifier",
-        "Estimated Time of Arrival": "CatBoost Regressor (Scikit-Learn)",
-        "E-Commerce Customer Interactions": "KMeans Clustering (Scikit-Learn)",
+        "Estimated Time of Arrival": "CatBoost Regressor",
+        "E-Commerce Customer Interactions": "KMeans (Scikit-Learn)",
     }
 
     # Batch model name mapping for MLflow
