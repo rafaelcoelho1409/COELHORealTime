@@ -17,12 +17,13 @@ from sklearn.model_selection import (
     train_test_split,
     StratifiedKFold,
 )
-from catboost import CatBoostClassifier
+from catboost import CatBoostClassifier, CatBoostRegressor
 from yellowbrick import (
     classifier,
     features,
     target,
     model_selection,
+    regressor,
 )
 import matplotlib
 matplotlib.use('Agg')
@@ -73,7 +74,25 @@ DELTA_PATHS = {
     "E-Commerce Customer Interactions": "s3://lakehouse/delta/e_commerce_customer_interactions",
 }
 
+# =============================================================================
+# Task Type Configuration (determines split strategy, metrics, etc.)
+# =============================================================================
+PROJECT_TASK_TYPES = {
+    "Transaction Fraud Detection": "classification",
+    "Estimated Time of Arrival": "regression",
+    "E-Commerce Customer Interactions": "clustering",
+}
+
+# Target column names per project
+PROJECT_TARGET_COLUMNS = {
+    "Transaction Fraud Detection": "is_fraud",
+    "Estimated Time of Arrival": "simulated_actual_travel_time_seconds",
+    "E-Commerce Customer Interactions": None,  # Clustering has no target
+}
+
+# =============================================================================
 # Feature definitions for Transaction Fraud Detection (DuckDB SQL approach)
+# =============================================================================
 TFD_NUMERICAL_FEATURES = ["amount", "account_age_days", "cvv_provided", "billing_address_match"]
 TFD_CATEGORICAL_FEATURES = [
     "currency", "merchant_id", "payment_method", "product_category",
@@ -82,6 +101,86 @@ TFD_CATEGORICAL_FEATURES = [
 ]
 TFD_ALL_FEATURES = TFD_NUMERICAL_FEATURES + TFD_CATEGORICAL_FEATURES
 TFD_CAT_FEATURE_INDICES = list(range(len(TFD_NUMERICAL_FEATURES), len(TFD_ALL_FEATURES)))
+
+# =============================================================================
+# Feature definitions for Estimated Time of Arrival (ETA) - Regression
+# =============================================================================
+# From notebook 017_sklearn_duckdb_sql_regression.ipynb
+ETA_NUMERICAL_FEATURES = [
+    "estimated_distance_km",
+    "temperature_celsius",
+    "driver_rating",
+    "hour_of_day",
+    "initial_estimated_travel_time_seconds",
+    "debug_traffic_factor",
+    "debug_weather_factor",
+    "debug_incident_delay_seconds",
+    "debug_driver_factor",
+]
+ETA_CATEGORICAL_FEATURES = [
+    # IDs (high cardinality - label encoded)
+    "trip_id",
+    "driver_id",
+    "vehicle_id",
+    # Locations
+    "origin",
+    "destination",
+    # Context
+    "weather",
+    "day_of_week",
+    "vehicle_type",
+    # Temporal (extracted from timestamp)
+    "year",
+    "month",
+    "day",
+    "hour",
+    "minute",
+    "second",
+]
+ETA_ALL_FEATURES = ETA_NUMERICAL_FEATURES + ETA_CATEGORICAL_FEATURES
+ETA_CAT_FEATURE_INDICES = list(range(len(ETA_NUMERICAL_FEATURES), len(ETA_ALL_FEATURES)))
+
+# =============================================================================
+# Feature definitions for E-Commerce Customer Interactions (ECCI) - Clustering
+# =============================================================================
+# Based on River's process_sample for ECCI
+ECCI_NUMERICAL_FEATURES = [
+    "price",
+    "quantity",
+    "session_event_sequence",
+    "time_on_page_seconds",
+]
+ECCI_CATEGORICAL_FEATURES = [
+    "event_type", "product_category", "product_id", "referrer_url",
+    "browser", "os",
+    "year", "month", "day", "hour", "minute", "second",
+]
+ECCI_ALL_FEATURES = ECCI_NUMERICAL_FEATURES + ECCI_CATEGORICAL_FEATURES
+ECCI_CAT_FEATURE_INDICES = list(range(len(ECCI_NUMERICAL_FEATURES), len(ECCI_ALL_FEATURES)))
+
+# =============================================================================
+# Unified Feature Lookup Dictionaries
+# =============================================================================
+PROJECT_NUMERICAL_FEATURES = {
+    "Transaction Fraud Detection": TFD_NUMERICAL_FEATURES,
+    "Estimated Time of Arrival": ETA_NUMERICAL_FEATURES,
+    "E-Commerce Customer Interactions": ECCI_NUMERICAL_FEATURES,
+}
+PROJECT_CATEGORICAL_FEATURES = {
+    "Transaction Fraud Detection": TFD_CATEGORICAL_FEATURES,
+    "Estimated Time of Arrival": ETA_CATEGORICAL_FEATURES,
+    "E-Commerce Customer Interactions": ECCI_CATEGORICAL_FEATURES,
+}
+PROJECT_ALL_FEATURES = {
+    "Transaction Fraud Detection": TFD_ALL_FEATURES,
+    "Estimated Time of Arrival": ETA_ALL_FEATURES,
+    "E-Commerce Customer Interactions": ECCI_ALL_FEATURES,
+}
+PROJECT_CAT_FEATURE_INDICES = {
+    "Transaction Fraud Detection": TFD_CAT_FEATURE_INDICES,
+    "Estimated Time of Arrival": ETA_CAT_FEATURE_INDICES,
+    "E-Commerce Customer Interactions": ECCI_CAT_FEATURE_INDICES,
+}
 
 
 # Persistent DuckDB connection for Delta Lake queries
@@ -219,7 +318,6 @@ def get_best_mlflow_run(project_name: str, model_name: str) -> Optional[str]:
         if experiment is None:
             print(f"No MLflow experiment found for {project_name}")
             return None
-
         # Search for completed runs
         runs_df = mlflow.search_runs(
             experiment_ids=[experiment.experiment_id],
@@ -227,17 +325,14 @@ def get_best_mlflow_run(project_name: str, model_name: str) -> Optional[str]:
             order_by=["start_time DESC"],
             max_results=50,
         )
-
         if runs_df.empty:
             print(f"No FINISHED runs found in MLflow for {project_name}")
             return None
-
         # Filter by model name
         filtered_runs = runs_df[runs_df["tags.mlflow.runName"] == model_name]
         if filtered_runs.empty:
             print(f"No runs found for model {model_name} in {project_name}")
             return None
-
         # Get metric criteria for this project
         criteria = BEST_METRIC_CRITERIA.get(project_name)
         if criteria is None:
@@ -247,11 +342,9 @@ def get_best_mlflow_run(project_name: str, model_name: str) -> Optional[str]:
                 if _run_has_model_artifact(row["run_id"], model_name):
                     return row["run_id"]
             return None
-
         metric_name = criteria["metric_name"]
         maximize = criteria["maximize"]
         metric_column = f"metrics.{metric_name}"
-
         # Check if metric column exists
         if metric_column not in filtered_runs.columns:
             print(f"Metric {metric_name} not found, using latest run with artifacts")
@@ -259,7 +352,6 @@ def get_best_mlflow_run(project_name: str, model_name: str) -> Optional[str]:
                 if _run_has_model_artifact(row["run_id"], model_name):
                     return row["run_id"]
             return None
-
         # Filter runs with the metric and sort
         runs_with_metric = filtered_runs[filtered_runs[metric_column].notna()]
         if runs_with_metric.empty:
@@ -268,11 +360,9 @@ def get_best_mlflow_run(project_name: str, model_name: str) -> Optional[str]:
                 if _run_has_model_artifact(row["run_id"], model_name):
                     return row["run_id"]
             return None
-
         # Sort by metric (best first)
         ascending = not maximize
         sorted_runs = runs_with_metric.sort_values(by=metric_column, ascending=ascending)
-
         # Find the best run with model artifacts
         for _, row in sorted_runs.iterrows():
             run_id = row["run_id"]
@@ -281,10 +371,8 @@ def get_best_mlflow_run(project_name: str, model_name: str) -> Optional[str]:
                 print(f"Best run for {project_name}/{model_name}: {run_id} "
                       f"({metric_name} = {metric_value:.4f}, maximize = {maximize})")
                 return run_id
-
         print(f"No runs with model artifact found for {project_name}/{model_name}")
         return None
-
     except Exception as e:
         print(f"Error finding best MLflow run: {e}")
         return None
@@ -308,7 +396,6 @@ def get_all_mlflow_runs(project_name: str, model_name: str) -> list[dict]:
         if experiment is None:
             print(f"No MLflow experiment found for {project_name}")
             return []
-
         # Search for completed runs
         runs_df = mlflow.search_runs(
             experiment_ids=[experiment.experiment_id],
@@ -316,10 +403,8 @@ def get_all_mlflow_runs(project_name: str, model_name: str) -> list[dict]:
             order_by=["start_time DESC"],
             max_results=100,
         )
-
         if runs_df.empty:
             return []
-
         # Filter by model name if the column exists
         if "tags.mlflow.runName" in runs_df.columns:
             filtered_runs = runs_df[runs_df["tags.mlflow.runName"] == model_name]
@@ -327,14 +412,12 @@ def get_all_mlflow_runs(project_name: str, model_name: str) -> list[dict]:
             filtered_runs = runs_df
         if filtered_runs.empty:
             return []
-
         # Get metric criteria for sorting (each project has different criteria)
         criteria = BEST_METRIC_CRITERIA.get(project_name)
         if criteria:
             metric_name = criteria["metric_name"]
             maximize = criteria["maximize"]
             metric_column = f"metrics.{metric_name}"
-
             if metric_column in filtered_runs.columns:
                 # Sort by metric (best first based on maximize/minimize)
                 ascending = not maximize
@@ -343,13 +426,11 @@ def get_all_mlflow_runs(project_name: str, model_name: str) -> list[dict]:
                     ascending=ascending,
                     na_position='last'
                 )
-
         # Filter only runs with model artifacts
         valid_runs = []
         for idx, row in filtered_runs.iterrows():
             if not _run_has_model_artifact(row["run_id"], model_name):
                 continue
-
             # Extract metrics
             metrics = {}
             for col in row.index:
@@ -358,7 +439,6 @@ def get_all_mlflow_runs(project_name: str, model_name: str) -> list[dict]:
                     val = row[col]
                     if pd.notna(val):
                         metrics[metric_key] = round(float(val), 4)
-
             # Extract params
             params = {}
             for col in row.index:
@@ -367,12 +447,10 @@ def get_all_mlflow_runs(project_name: str, model_name: str) -> list[dict]:
                     val = row[col]
                     if pd.notna(val):
                         params[param_key] = val
-
             # Calculate total rows
             train_samples = int(params.get("train_samples", 0) or 0)
             test_samples = int(params.get("test_samples", 0) or 0)
             total_rows = train_samples + test_samples
-
             valid_runs.append({
                 "run_id": row["run_id"],
                 "run_name": row.get("tags.mlflow.runName", model_name),
@@ -383,10 +461,8 @@ def get_all_mlflow_runs(project_name: str, model_name: str) -> list[dict]:
                 "total_rows": total_rows,
                 "is_best": len(valid_runs) == 0,  # First valid run is best
             })
-
         print(f"Found {len(valid_runs)} valid runs for {project_name}/{model_name}")
         return valid_runs
-
     except Exception as e:
         print(f"Error getting all MLflow runs: {e}")
         return []
@@ -409,7 +485,6 @@ def load_model_from_mlflow(project_name: str, model_name: str, run_id: str = Non
             run_id = get_best_mlflow_run(project_name, model_name)
         if run_id is None:
             return None
-
         # Try loading via MLflow's catboost flavor first (preferred)
         try:
             model_uri = f"runs:/{run_id}/model"
@@ -418,7 +493,6 @@ def load_model_from_mlflow(project_name: str, model_name: str, run_id: str = Non
             return model
         except Exception:
             pass
-
         # Fallback: load from pickle artifact
         artifact_path = f"{model_name}.pkl"
         local_path = mlflow.artifacts.download_artifacts(
@@ -429,7 +503,6 @@ def load_model_from_mlflow(project_name: str, model_name: str, run_id: str = Non
             model = pickle.load(f)
         print(f"Model loaded from MLflow (pickle): {project_name}/{model_name} (run_id={run_id})")
         return model
-
     except Exception as e:
         print(f"Error loading model from MLflow: {e}")
         return None
@@ -450,30 +523,24 @@ def load_encoders_from_mlflow(project_name: str, run_id: str = None) -> Optional
         if not model_name:
             print(f"Unknown project for encoder loading: {project_name}")
             return None
-
         # Use provided run_id or find the best one
         if run_id is None:
             run_id = get_best_mlflow_run(project_name, model_name)
         if run_id is None:
             return None
-
         # Download encoder artifact
         artifact_name = ENCODER_ARTIFACT_NAMES.get(project_name)
         if not artifact_name:
             print(f"No encoder artifact name for {project_name}")
             return None
-
         local_path = mlflow.artifacts.download_artifacts(
             run_id=run_id,
             artifact_path=artifact_name,
         )
-
         with open(local_path, 'rb') as f:
             encoders = pickle.load(f)
-
         print(f"Sklearn encoders loaded from best MLflow run: {project_name} (run_id={run_id})")
         return encoders
-
     except Exception as e:
         print(f"Error loading sklearn encoders from MLflow: {e}")
         return None
@@ -492,7 +559,6 @@ def load_or_create_sklearn_encoders(project_name: str) -> Dict[str, Any]:
     encoders = load_encoders_from_mlflow(project_name)
     if encoders is not None:
         return encoders
-
     # No encoders in MLflow - return default metadata (DuckDB approach)
     print(f"No sklearn encoders in MLflow for {project_name}, using DuckDB defaults.")
     return {
@@ -524,16 +590,13 @@ def load_training_data_from_mlflow(
         if not model_name:
             print(f"Unknown project for training data loading: {project_name}")
             return None
-
         # Use provided run_id or find the best one
         if run_id is None:
             run_id = get_best_mlflow_run(project_name, model_name)
         if run_id is None:
             print(f"No run found for {project_name}")
             return None
-
         print(f"Loading training data from MLflow run: {run_id}")
-
         # Download training data artifacts
         X_train_path = mlflow.artifacts.download_artifacts(
             run_id=run_id,
@@ -551,18 +614,14 @@ def load_training_data_from_mlflow(
             run_id=run_id,
             artifact_path="training_data/y_test.parquet",
         )
-
         # Load parquet files
         X_train = pd.read_parquet(X_train_path)
         X_test = pd.read_parquet(X_test_path)
         y_train = pd.read_parquet(y_train_path)["target"]
         y_test = pd.read_parquet(y_test_path)["target"]
-
         feature_names = X_train.columns.tolist()
-
         print(f"  Loaded: X_train={X_train.shape}, X_test={X_test.shape}")
         return X_train, X_test, y_train, y_test, feature_names
-
     except Exception as e:
         print(f"Error loading training data from MLflow: {e}")
         return None
@@ -596,6 +655,8 @@ def load_data_duckdb(
     """
     if project_name == "Transaction Fraud Detection":
         return _load_tfd_data_duckdb(sample_frac, max_rows)
+    elif project_name == "Estimated Time of Arrival":
+        return _load_eta_data_duckdb(sample_frac, max_rows)
     else:
         raise ValueError(f"Unsupported project for DuckDB loading: {project_name}")
 
@@ -620,7 +681,6 @@ def _load_tfd_data_duckdb(
     - sklearn tools
     """
     delta_path = DELTA_PATHS["Transaction Fraud Detection"]
-
     # Build the SQL query - all preprocessing in one pass
     # Column order MUST match TFD_ALL_FEATURES for correct cat_feature_indices
     # All categorical features are label-encoded using DENSE_RANK() - 1
@@ -657,15 +717,12 @@ def _load_tfd_data_duckdb(
 
     FROM delta_scan('{delta_path}')
     """
-
     # Add sampling clause (DuckDB's efficient sampling at scan time)
     if sample_frac is not None and 0 < sample_frac < 1:
         query += f" USING SAMPLE {sample_frac * 100}%"
-
     # Add limit clause
     if max_rows is not None:
         query += f" LIMIT {max_rows}"
-
     # Execute query
     try:
         print(f"Loading TFD data via DuckDB SQL (single-pass preprocessing)...")
@@ -673,26 +730,20 @@ def _load_tfd_data_duckdb(
             print(f"  Sampling: {sample_frac * 100}%")
         if max_rows:
             print(f"  Max rows: {max_rows}")
-
         conn = _get_duckdb_connection()
         df = conn.execute(query).df()
-
         print(f"  Loaded {len(df)} rows with {len(df.columns)} columns")
-
     except Exception as e:
         print(f"DuckDB query failed, attempting reconnect: {e}")
         conn = _get_duckdb_connection(force_reconnect=True)
         df = conn.execute(query).df()
         print(f"  Loaded {len(df)} rows with {len(df.columns)} columns")
-
     # Split features and target
     y = df["is_fraud"]
     X = df.drop("is_fraud", axis=1)
-
     # All columns are now numeric (integers from DENSE_RANK or float64)
     # No dtype conversion needed - works with CatBoost and YellowBrick
     print(f"  All features numeric: {X.select_dtypes(include=['number']).shape[1]}/{X.shape[1]} columns")
-
     # Metadata for CatBoost
     metadata = {
         "numerical_features": TFD_NUMERICAL_FEATURES,
@@ -700,10 +751,102 @@ def _load_tfd_data_duckdb(
         "cat_feature_indices": TFD_CAT_FEATURE_INDICES,
         "feature_names": TFD_ALL_FEATURES,
     }
-
     print(f"  Features: {len(TFD_NUMERICAL_FEATURES)} numerical, {len(TFD_CATEGORICAL_FEATURES)} label-encoded")
     print(f"  Categorical indices for CatBoost: {TFD_CAT_FEATURE_INDICES}")
+    return X, y, metadata
 
+
+def _load_eta_data_duckdb(
+    sample_frac: float | None = None,
+    max_rows: int | None = None,
+) -> tuple[pd.DataFrame, pd.Series, dict]:
+    """Load Estimated Time of Arrival data with pure DuckDB SQL.
+
+    From notebook 017_sklearn_duckdb_sql_regression.ipynb
+
+    Single SQL query does:
+    - Timestamp extraction (→ year, month, day, hour, minute, second)
+    - Label encoding via DENSE_RANK() - 1 for categorical features
+    - Column selection and ordering (matches ETA_ALL_FEATURES order)
+    - Sampling (if requested)
+
+    Target: simulated_actual_travel_time_seconds (regression)
+    """
+    delta_path = DELTA_PATHS["Estimated Time of Arrival"]
+    # Build the SQL query - all preprocessing in one pass
+    # Column order MUST match ETA_ALL_FEATURES for correct cat_feature_indices
+    query = f"""
+    SELECT
+        -- Numerical features (unchanged)
+        estimated_distance_km,
+        temperature_celsius,
+        driver_rating,
+        hour_of_day,
+        initial_estimated_travel_time_seconds,
+        debug_traffic_factor,
+        debug_weather_factor,
+        debug_incident_delay_seconds,
+        debug_driver_factor,
+
+        -- Categorical features: Label encoded with DENSE_RANK() - 1
+        -- This produces 0-indexed integers compatible with all ML tools
+        DENSE_RANK() OVER (ORDER BY trip_id) - 1 AS trip_id,
+        DENSE_RANK() OVER (ORDER BY driver_id) - 1 AS driver_id,
+        DENSE_RANK() OVER (ORDER BY vehicle_id) - 1 AS vehicle_id,
+        DENSE_RANK() OVER (ORDER BY origin) - 1 AS origin,
+        DENSE_RANK() OVER (ORDER BY destination) - 1 AS destination,
+        DENSE_RANK() OVER (ORDER BY weather) - 1 AS weather,
+        DENSE_RANK() OVER (ORDER BY day_of_week) - 1 AS day_of_week,
+        DENSE_RANK() OVER (ORDER BY vehicle_type) - 1 AS vehicle_type,
+
+        -- Timestamp components (already integers)
+        CAST(date_part('year', CAST(timestamp AS TIMESTAMP)) AS INTEGER) AS year,
+        CAST(date_part('month', CAST(timestamp AS TIMESTAMP)) AS INTEGER) AS month,
+        CAST(date_part('day', CAST(timestamp AS TIMESTAMP)) AS INTEGER) AS day,
+        CAST(date_part('hour', CAST(timestamp AS TIMESTAMP)) AS INTEGER) AS hour,
+        CAST(date_part('minute', CAST(timestamp AS TIMESTAMP)) AS INTEGER) AS minute,
+        CAST(date_part('second', CAST(timestamp AS TIMESTAMP)) AS INTEGER) AS second,
+
+        -- Target (continuous - travel time in seconds)
+        simulated_actual_travel_time_seconds
+
+    FROM delta_scan('{delta_path}')
+    """
+    # Add sampling clause (DuckDB's efficient sampling at scan time)
+    if sample_frac is not None and 0 < sample_frac < 1:
+        query += f" USING SAMPLE {sample_frac * 100}%"
+    # Add limit clause
+    if max_rows is not None:
+        query += f" LIMIT {max_rows}"
+    # Execute query
+    try:
+        print(f"Loading ETA data via DuckDB SQL (single-pass preprocessing)...")
+        if sample_frac:
+            print(f"  Sampling: {sample_frac * 100}%")
+        if max_rows:
+            print(f"  Max rows: {max_rows}")
+        conn = _get_duckdb_connection()
+        df = conn.execute(query).df()
+        print(f"  Loaded {len(df)} rows with {len(df.columns)} columns")
+    except Exception as e:
+        print(f"DuckDB query failed, attempting reconnect: {e}")
+        conn = _get_duckdb_connection(force_reconnect=True)
+        df = conn.execute(query).df()
+        print(f"  Loaded {len(df)} rows with {len(df.columns)} columns")
+    # Split features and target
+    y = df["simulated_actual_travel_time_seconds"]
+    X = df.drop("simulated_actual_travel_time_seconds", axis=1)
+    # All columns are now numeric (integers from DENSE_RANK or float64)
+    print(f"  All features numeric: {X.select_dtypes(include=['number']).shape[1]}/{X.shape[1]} columns")
+    # Metadata for CatBoost
+    metadata = {
+        "numerical_features": ETA_NUMERICAL_FEATURES,
+        "categorical_features": ETA_CATEGORICAL_FEATURES,
+        "cat_feature_indices": ETA_CAT_FEATURE_INDICES,
+        "feature_names": ETA_ALL_FEATURES,
+    }
+    print(f"  Features: {len(ETA_NUMERICAL_FEATURES)} numerical, {len(ETA_CATEGORICAL_FEATURES)} label-encoded")
+    print(f"  Categorical indices for CatBoost: {ETA_CAT_FEATURE_INDICES}")
     return X, y, metadata
 
 
@@ -714,9 +857,13 @@ def process_batch_data_duckdb(
     test_size: float = 0.2,
     random_state: int = 42,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, dict]:
-    """Process batch data using DuckDB SQL (drop-in replacement for process_batch_data).
+    """Process batch data using DuckDB SQL (unified for all projects).
 
-    Combines DuckDB SQL preprocessing with sklearn's stratified train/test split.
+    Combines DuckDB SQL preprocessing with sklearn's train/test split.
+    - Classification (TFD): Stratified split to maintain class balance
+    - Regression (ETA): Random split (stratification not applicable)
+    - Clustering (ECCI): Random split (no target variable)
+
     No StandardScaler - CatBoost doesn't need feature scaling.
 
     Args:
@@ -732,25 +879,37 @@ def process_batch_data_duckdb(
     # Load preprocessed data from DuckDB
     X, y, metadata = load_data_duckdb(project_name, sample_frac, max_rows)
 
-    # Stratified train/test split (keeps class balance)
-    print(f"Splitting data: {1-test_size:.0%} train, {test_size:.0%} test (stratified)...")
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y,
-        test_size=test_size,
-        stratify=y,
-        random_state=random_state,
-    )
+    # Determine split strategy based on task type
+    task_type = PROJECT_TASK_TYPES.get(project_name, "classification")
+
+    if task_type == "classification":
+        # Stratified split for classification (keeps class balance)
+        print(f"Splitting data: {1-test_size:.0%} train, {test_size:.0%} test (stratified)...")
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y,
+            test_size=test_size,
+            stratify=y,
+            random_state=random_state,
+        )
+        # Calculate class balance
+        positive_rate = y_train.sum() / len(y_train) * 100
+        print(f"  Positive class rate in training set: {positive_rate:.2f}%")
+    else:
+        # Random split for regression/clustering (stratification not applicable)
+        print(f"Splitting data: {1-test_size:.0%} train, {test_size:.0%} test (random)...")
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y,
+            test_size=test_size,
+            random_state=random_state,
+        )
+        if task_type == "regression":
+            # Show target statistics for regression
+            print(f"  Target mean: {y_train.mean():.2f}, std: {y_train.std():.2f}")
 
     # Free memory
     del X, y
-
     print(f"  Training set: {len(X_train)} samples")
     print(f"  Test set: {len(X_test)} samples")
-
-    # Calculate class balance
-    fraud_rate = y_train.sum() / len(y_train) * 100
-    print(f"  Fraud rate in training set: {fraud_rate:.2f}%")
-
     return X_train, X_test, y_train, y_test, metadata
 
 
@@ -761,17 +920,15 @@ def process_sklearn_sample(x: dict, project_name: str) -> pd.DataFrame:
     using the same feature order as DuckDB batch training.
 
     Note: No StandardScaler needed since CatBoost (tree-based) doesn't require it.
-    Feature order MUST match TFD_ALL_FEATURES for correct predictions.
+    Feature order MUST match *_ALL_FEATURES for correct predictions.
     """
     if project_name == "Transaction Fraud Detection":
         # Extract device_info JSON
         device_info = x.get("device_info", "{}")
         if isinstance(device_info, str):
             device_info = orjson.loads(device_info)
-
         # Extract timestamp components
         timestamp = pd.to_datetime(x.get("timestamp"))
-
         # Build feature dict in correct order (matches TFD_ALL_FEATURES)
         features = {
             # Numerical features
@@ -796,14 +953,49 @@ def process_sklearn_sample(x: dict, project_name: str) -> pd.DataFrame:
             "minute": timestamp.minute,
             "second": timestamp.second,
         }
-
         df = pd.DataFrame([features])
-
         # Convert categoricals to category dtype
         for col in TFD_CATEGORICAL_FEATURES:
             if col in df.columns:
                 df[col] = df[col].astype("category")
-
+        return df
+    elif project_name == "Estimated Time of Arrival":
+        # Extract timestamp components
+        timestamp = pd.to_datetime(x.get("timestamp"))
+        # Build feature dict in correct order (matches ETA_ALL_FEATURES)
+        features = {
+            # Numerical features
+            "estimated_distance_km": x.get("estimated_distance_km"),
+            "temperature_celsius": x.get("temperature_celsius"),
+            "driver_rating": x.get("driver_rating"),
+            "hour_of_day": x.get("hour_of_day"),
+            "initial_estimated_travel_time_seconds": x.get("initial_estimated_travel_time_seconds"),
+            "debug_traffic_factor": x.get("debug_traffic_factor"),
+            "debug_weather_factor": x.get("debug_weather_factor"),
+            "debug_incident_delay_seconds": x.get("debug_incident_delay_seconds"),
+            "debug_driver_factor": x.get("debug_driver_factor"),
+            # Categorical features (will be label encoded by model)
+            "trip_id": x.get("trip_id"),
+            "driver_id": x.get("driver_id"),
+            "vehicle_id": x.get("vehicle_id"),
+            "origin": x.get("origin"),
+            "destination": x.get("destination"),
+            "weather": x.get("weather"),
+            "day_of_week": x.get("day_of_week"),
+            "vehicle_type": x.get("vehicle_type"),
+            # Timestamp components
+            "year": timestamp.year,
+            "month": timestamp.month,
+            "day": timestamp.day,
+            "hour": timestamp.hour,
+            "minute": timestamp.minute,
+            "second": timestamp.second,
+        }
+        df = pd.DataFrame([features])
+        # Convert categoricals to category dtype
+        for col in ETA_CATEGORICAL_FEATURES:
+            if col in df.columns:
+                df[col] = df[col].astype("category")
         return df
     else:
         raise ValueError(f"Unsupported project: {project_name}")
@@ -823,7 +1015,6 @@ def create_batch_model(project_name: str, **kwargs):
             print(f"Class imbalance ratio: {imbalance_ratio:.2f}:1 (negative:positive)")
             print(f"Fraud rate: {pos_samples / len(y_train) * 100:.2f}%")
             print("Using auto_class_weights='Balanced' for imbalanced data")
-
         # Optimized CatBoost parameters for fraud detection (1M+ rows, ~1% fraud)
         # Based on: https://catboost.ai/docs/en/references/training-parameters/common
         # Research: CatBoost achieves F1=0.92, AUC=0.99 on fraud detection benchmarks
@@ -832,25 +1023,47 @@ def create_batch_model(project_name: str, **kwargs):
             iterations=1000,                # Max trees; early stopping finds optimal
             learning_rate=0.05,             # Good balance for 1M+ rows
             depth=6,                        # CatBoost default, good for most cases
-
             # Imbalanced data handling (critical for fraud detection)
             auto_class_weights='Balanced',  # Weights positive class by neg/pos ratio
-
             # Loss function & evaluation
             loss_function='Logloss',        # Binary cross-entropy
             eval_metric='AUC',              # Best for imbalanced binary classification
-
             # Regularization
             l2_leaf_reg=3,                  # L2 regularization (default=3)
-
             # Boosting type: 'Plain' for large datasets (1M+), 'Ordered' for <100K
             boosting_type='Plain',
-
             # Performance
             task_type='CPU',
             thread_count=-1,                # Use all CPU cores
             random_seed=42,
-
+            # Output
+            verbose=100,                    # Print every 100 iterations
+            allow_writing_files=False,
+        )
+        return model
+    elif project_name == "Estimated Time of Arrival":
+        # CatBoostRegressor for ETA prediction
+        # From notebook 017_sklearn_duckdb_sql_regression.ipynb
+        y_train = kwargs.get("y_train")
+        if y_train is not None:
+            print(f"Target statistics: mean={y_train.mean():.2f}s, std={y_train.std():.2f}s")
+            print(f"Target range: [{y_train.min():.0f}s, {y_train.max():.0f}s]")
+        model = CatBoostRegressor(
+            # Core parameters
+            iterations=1000,                # Max trees; early stopping finds optimal
+            learning_rate=0.05,             # Good balance for large datasets
+            depth=6,                        # CatBoost default
+            # Loss function & evaluation for regression
+            loss_function='RMSE',           # Root Mean Squared Error
+            eval_metric='MAE',              # Mean Absolute Error (interpretable)
+            # Regularization
+            l2_leaf_reg=3,                  # L2 regularization (default=3)
+            # Boosting type: 'Plain' for large datasets (1M+)
+            boosting_type='Plain',
+            # Performance
+            task_type='CPU',
+            thread_count=-1,                # Use all CPU cores
+            random_seed=42,
             # Output
             verbose=100,                    # Print every 100 iterations
             allow_writing_files=False,
@@ -865,7 +1078,7 @@ def create_batch_model(project_name: str, **kwargs):
 # =============================================================================
 
 # Sklearn-compatible wrappers for CatBoost (YellowBrick compatibility)
-from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin
 from sklearn.utils.multiclass import unique_labels
 from yellowbrick.classifier.class_prediction_error import ClassPredictionError as _ClassPredictionErrorBase
 from yellowbrick.exceptions import YellowbrickValueError, ModelError
@@ -883,7 +1096,6 @@ class CatBoostWrapper(BaseEstimator, ClassifierMixin):
     Uses get_feature_importance() for reliable access (works with loaded models).
     """
     _estimator_type = 'classifier'
-
     def __init__(self, model):
         self.model = model
         self.classes_ = np.array(model.classes_)
@@ -895,13 +1107,10 @@ class CatBoostWrapper(BaseEstimator, ClassifierMixin):
         except Exception:
             # Fallback to property
             self.feature_importances_ = model.feature_importances_
-
     def fit(self, X, y):
         return self  # Already fitted
-
     def predict(self, X):
         return self.model.predict(X).flatten()
-
     def predict_proba(self, X):
         return self.model.predict_proba(X)
 
@@ -912,7 +1121,6 @@ class CatBoostWrapperCV(BaseEstimator, ClassifierMixin):
     Exposes feature_importances_ after fitting for RFECV and FeatureImportances.
     """
     _estimator_type = 'classifier'
-
     def __init__(self, iterations=100, depth=6, learning_rate=0.1,
                  auto_class_weights='Balanced', random_state=42):
         self.iterations = iterations
@@ -923,7 +1131,6 @@ class CatBoostWrapperCV(BaseEstimator, ClassifierMixin):
         self.model_ = None
         self.classes_ = None
         self.feature_importances_ = None
-
     def fit(self, X, y):
         self.model_ = CatBoostClassifier(
             iterations=self.iterations,
@@ -937,13 +1144,10 @@ class CatBoostWrapperCV(BaseEstimator, ClassifierMixin):
         self.classes_ = np.array(self.model_.classes_)
         self.feature_importances_ = self.model_.feature_importances_
         return self
-
     def predict(self, X):
         return self.model_.predict(X).flatten()
-
     def predict_proba(self, X):
         return self.model_.predict_proba(X)
-
     def score(self, X, y):
         from sklearn.metrics import accuracy_score
         return accuracy_score(y, self.predict(X))
@@ -954,23 +1158,18 @@ class ClassPredictionErrorFixed(_ClassPredictionErrorBase):
 
     sklearn 1.8 changed _check_targets to return 4 values instead of 3.
     """
-
     def score(self, X, y):
         y_pred = self.predict(X)
-
         # FIX: Handle sklearn 1.8+ which returns 4 values
         result = _check_targets(y, y_pred)
         if len(result) == 4:
             y_type, y_true, y_pred, _ = result  # Ignore sample_weight
         else:
             y_type, y_true, y_pred = result
-
         if y_type not in ("binary", "multiclass"):
             raise YellowbrickValueError("{} is not supported".format(y_type))
-
         indices = unique_labels(y_true, y_pred)
         labels = self._labels()
-
         try:
             super(_ClassPredictionErrorBase, self).score(X, y)
         except ModelError as e:
@@ -978,17 +1177,105 @@ class ClassPredictionErrorFixed(_ClassPredictionErrorBase):
                 raise NotImplementedError("filtering classes is currently not supported")
             else:
                 raise e
-
         if labels is not None and len(labels) > len(indices):
             raise ModelError("y and y_pred contain zero values for one of the specified classes")
-
         self.predictions_ = np.array([
             [(y_pred[y_true == label_t] == label_p).sum() for label_p in indices]
             for label_t in indices
         ])
-
         self.draw()
         return self.score_
+
+
+# =============================================================================
+# Sklearn-compatible Wrappers for CatBoostRegressor (YellowBrick compatibility)
+# From notebook 017_sklearn_duckdb_sql_regression.ipynb
+# =============================================================================
+
+class CatBoostRegressorWrapper(BaseEstimator, RegressorMixin):
+    """Wraps CatBoost regressor to make it sklearn-compatible for YellowBrick.
+
+    Use for visualizers that need a pre-fitted model:
+    - ResidualsPlot
+    - PredictionError
+    - FeatureImportances
+    """
+    _estimator_type = 'regressor'
+
+    def __init__(self, model):
+        self.model = model
+        # Expose feature_importances_ for FeatureImportances visualizer
+        self.feature_importances_ = model.feature_importances_
+
+    def fit(self, X, y):
+        return self  # Already fitted
+
+    def predict(self, X):
+        return self.model.predict(X).flatten()
+
+    def score(self, X, y):
+        """Return R2 score (default sklearn regression metric)."""
+        from sklearn.metrics import r2_score
+        return r2_score(y, self.predict(X))
+
+
+class CatBoostRegressorWrapperCV(BaseEstimator, RegressorMixin):
+    """CatBoost regressor wrapper that supports cross-validation.
+
+    Use for CV-based visualizers that need to re-fit the model:
+    - CVScores
+    - LearningCurve
+    - ValidationCurve
+    """
+    _estimator_type = 'regressor'
+
+    def __init__(self, iterations=500, depth=6, learning_rate=0.05,
+                 l2_leaf_reg=3, random_state=42):
+        self.iterations = iterations
+        self.depth = depth
+        self.learning_rate = learning_rate
+        self.l2_leaf_reg = l2_leaf_reg
+        self.random_state = random_state
+        self.model_ = None
+        self.feature_importances_ = None
+
+    def fit(self, X, y):
+        self.model_ = CatBoostRegressor(
+            iterations=self.iterations,
+            depth=self.depth,
+            learning_rate=self.learning_rate,
+            l2_leaf_reg=self.l2_leaf_reg,
+            loss_function='RMSE',
+            random_seed=self.random_state,
+            verbose=0  # Suppress output during CV
+        )
+        self.model_.fit(X, y)
+        self.feature_importances_ = self.model_.feature_importances_
+        return self
+
+    def predict(self, X):
+        if self.model_ is None:
+            raise RuntimeError("Model not fitted. Call fit() first.")
+        return self.model_.predict(X).flatten()
+
+    def score(self, X, y):
+        """Return R2 score (default sklearn regression metric)."""
+        from sklearn.metrics import r2_score
+        return r2_score(y, self.predict(X))
+
+    def get_params(self, deep=True):
+        return {
+            'iterations': self.iterations,
+            'depth': self.depth,
+            'learning_rate': self.learning_rate,
+            'l2_leaf_reg': self.l2_leaf_reg,
+            'random_state': self.random_state,
+        }
+
+    def set_params(self, **params):
+        for key, value in params.items():
+            setattr(self, key, value)
+        return self
 
 
 def yellowbrick_classification_kwargs(
@@ -1007,7 +1294,6 @@ def yellowbrick_classification_kwargs(
     """
     # Human-readable class names for fraud detection
     class_names = ["Non-Fraud", "Fraud"] if "Fraud" in project_name else binary_classes
-
     kwargs = {
         # ConfusionMatrix: Essential for fraud detection
         "ConfusionMatrix": {
@@ -1083,7 +1369,6 @@ def yellowbrick_classification_visualizers(
         PrecisionRecallCurve,
         DiscriminationThreshold,
     )
-
     # Map visualizer names to classes
     visualizer_map = {
         "ConfusionMatrix": ConfusionMatrix,
@@ -1093,12 +1378,10 @@ def yellowbrick_classification_visualizers(
         "ClassPredictionError": ClassPredictionErrorFixed,  # sklearn 1.8+ fix
         "DiscriminationThreshold": DiscriminationThreshold,
     }
-
     for visualizer_name, params in yb_kwargs.items():
         vis_class = visualizer_map.get(visualizer_name)
         if vis_class is None:
             raise ValueError(f"Unknown visualizer: {visualizer_name}")
-
         if visualizer_name == "DiscriminationThreshold":
             # DiscriminationThreshold needs CV-compatible unfitted wrapper
             cv_estimator = CatBoostWrapperCV(iterations=100, depth=6, learning_rate=0.1)
@@ -1115,7 +1398,78 @@ def yellowbrick_classification_visualizers(
             visualizer = vis_class(wrapped_model, **params)
             visualizer.fit(X_train, y_train)
             visualizer.score(X_test, y_test)
+        return visualizer
+    return None
 
+
+# =============================================================================
+# YellowBrick Regression Visualizers
+# Reference: https://www.scikit-yb.org/en/latest/api/regressor/index.html
+# From notebook 017_sklearn_duckdb_sql_regression.ipynb
+# =============================================================================
+
+def yellowbrick_regression_kwargs(
+    project_name: str,
+    metric_name: str,
+) -> dict:
+    """Get kwargs for YellowBrick regression visualizers.
+
+    Reference: https://www.scikit-yb.org/en/latest/api/regressor/index.html
+
+    Available Regression Visualizers:
+    - ResidualsPlot: Residuals vs predicted values (detect heteroscedasticity)
+    - PredictionError: Actual vs predicted scatter (identity line check)
+
+    NOT Included:
+    - CooksDistance: Matplotlib compatibility issue (use_line_collection removed)
+    - AlphaSelection: For Lasso/Ridge only (not applicable to CatBoost)
+    """
+    kwargs = {
+        "ResidualsPlot": {
+            "hist": True,
+            "qqplot": False,
+            "train_color": "#2196F3",
+            "test_color": "#FF5722",
+            "train_alpha": 0.75,
+            "test_alpha": 0.75,
+            "is_fitted": True,
+        },
+        "PredictionError": {
+            "shared_limits": True,
+            "bestfit": True,
+            "identity": True,
+            "alpha": 0.75,
+            "is_fitted": True,
+        },
+    }
+    return {metric_name: kwargs.get(metric_name, {})}
+
+
+def yellowbrick_regression_visualizers(
+    yb_kwargs: dict,
+    X_train: pd.DataFrame,
+    X_test: pd.DataFrame,
+    y_train: pd.Series,
+    y_test: pd.Series,
+    model=None,
+):
+    """Create and fit YellowBrick regression visualizer."""
+    from yellowbrick.regressor import ResidualsPlot, PredictionError
+    visualizer_map = {
+        "ResidualsPlot": ResidualsPlot,
+        "PredictionError": PredictionError,
+    }
+    for visualizer_name, params in yb_kwargs.items():
+        vis_class = visualizer_map.get(visualizer_name)
+        if vis_class is None:
+            raise ValueError(f"Unknown visualizer: {visualizer_name}")
+        if model is None:
+            raise ValueError("Model required for regression visualizers")
+        wrapped_model = CatBoostRegressorWrapper(model) if 'CatBoost' in type(model).__name__ else model
+        clean_params = {k: v for k, v in params.items() if k != "is_fitted"}
+        visualizer = vis_class(wrapped_model, **clean_params)
+        visualizer.fit(X_train, y_train)
+        visualizer.score(X_test, y_test)
         return visualizer
     return None
 
@@ -1134,7 +1488,7 @@ FEATURE_FIT_THEN_TRANSFORM_VISUALIZERS = ["Rank1D", "Rank2D", "RadViz"]
 def yellowbrick_feature_analysis_kwargs(
     project_name: str,
     metric_name: str,
-    classes: list,
+    classes: list = None,
     feature_names: list = None,
 ) -> dict:
     """
@@ -1142,27 +1496,24 @@ def yellowbrick_feature_analysis_kwargs(
 
     Reference: https://www.scikit-yb.org/en/latest/api/features/index.html
 
+    Classification (TFD): All visualizers available
+    Regression (ETA): ParallelCoordinates & RadViz excluded (require discrete classes)
+
     Available visualizers:
-    | Visualizer          | Fit Method      | Speed   |
-    |---------------------|-----------------|---------|
-    | Rank1D              | fit + transform | Fast    |
-    | Rank2D              | fit + transform | Fast    |
-    | PCA                 | fit_transform   | Fast    |
-    | Manifold            | fit_transform   | SLOW    |
-    | ParallelCoordinates | fit_transform   | Medium  |
-    | RadViz              | fit + transform | Fast    |
-    | JointPlot           | fit             | Fast    |
-
-    Note: All features are numeric (DENSE_RANK encoding in DuckDB SQL),
-    so all visualizers work with all features.
+    | Visualizer          | Fit Method      | Classification | Regression |
+    |---------------------|-----------------|----------------|------------|
+    | Rank1D              | fit + transform | YES            | YES        |
+    | Rank2D              | fit + transform | YES            | YES        |
+    | PCA                 | fit_transform   | YES            | YES        |
+    | Manifold            | fit_transform   | YES            | YES        |
+    | ParallelCoordinates | fit_transform   | YES            | NO         |
+    | RadViz              | fit + transform | YES            | NO         |
+    | JointPlot           | fit             | YES            | YES        |
     """
-    kwargs = {
-        # =================================================================
-        # RANK FEATURES - Detect covariance between features
-        # Docs: https://www.scikit-yb.org/en/latest/api/features/rankd.html
-        # All features are numeric (DENSE_RANK encoded) - works with all
-        # =================================================================
+    task_type = PROJECT_TASK_TYPES.get(project_name, "classification")
+    is_regression = task_type == "regression"
 
+    kwargs = {
         # Rank1D: Single feature ranking using Shapiro-Wilk normality test
         "Rank1D": {
             "algorithm": "shapiro",
@@ -1170,23 +1521,21 @@ def yellowbrick_feature_analysis_kwargs(
             "orient": "h",
             "show_feature_names": True,
         },
-
         # Rank2D: Pairwise feature ranking (correlation matrix)
-        # Algorithms: 'pearson', 'covariance', 'spearman', 'kendalltau'
         "Rank2D": {
             "algorithm": "pearson",
             "features": feature_names,
             "colormap": "RdBu_r",
             "show_feature_names": True,
         },
-
-        # =================================================================
-        # PROJECTION - Reduce dimensionality for visualization
-        # =================================================================
-
         # PCA: Principal Component Analysis projection
-        # Docs: https://www.scikit-yb.org/en/latest/api/features/pca.html
         "PCA": {
+            "scale": True,
+            "projection": 2,
+            "proj_features": False,
+            "alpha": 0.75,
+            "heatmap": False,
+        } if is_regression else {
             "scale": True,
             "projection": 2,
             "proj_features": False,
@@ -1194,11 +1543,14 @@ def yellowbrick_feature_analysis_kwargs(
             "alpha": 0.75,
             "heatmap": False,
         },
-
-        # Manifold: Non-linear dimensionality reduction (SLOW - 30-120s)
-        # Docs: https://www.scikit-yb.org/en/latest/api/features/manifold.html
-        # Algorithms: 'lle', 'ltsa', 'hessian', 'modified', 'isomap', 'mds', 'spectral', 'tsne'
+        # Manifold: Non-linear dimensionality reduction (SLOW)
         "Manifold": {
+            "manifold": "tsne",
+            "n_neighbors": 10,
+            "projection": 2,
+            "alpha": 0.75,
+            "random_state": 42,
+        } if is_regression else {
             "manifold": "tsne",
             "n_neighbors": 10,
             "classes": classes,
@@ -1207,37 +1559,7 @@ def yellowbrick_feature_analysis_kwargs(
             "random_state": 42,
             "target_type": "discrete",
         },
-
-        # =================================================================
-        # MULTI-DIMENSIONAL VISUALIZATION
-        # =================================================================
-
-        # ParallelCoordinates: Each instance as a line across feature axes
-        # Docs: https://www.scikit-yb.org/en/latest/api/features/pcoords.html
-        "ParallelCoordinates": {
-            "classes": classes,
-            "features": feature_names,
-            "normalize": "minmax",
-            "sample": 0.05,
-            "shuffle": True,
-            "alpha": 0.3,
-            "fast": True,
-        },
-
-        # RadViz: Radial visualization (features as points on circle)
-        # Docs: https://www.scikit-yb.org/en/latest/api/features/radviz.html
-        "RadViz": {
-            "classes": classes,
-            "features": feature_names,
-            "alpha": 0.5,
-        },
-
-        # =================================================================
-        # DIRECT DATA VISUALIZATION
-        # =================================================================
-
         # JointPlot: 2D correlation between two features
-        # Docs: https://www.scikit-yb.org/en/latest/api/features/jointplot.html
         "JointPlot": {
             "columns": feature_names[:2] if feature_names and len(feature_names) >= 2 else None,
             "correlation": "pearson",
@@ -1246,6 +1568,24 @@ def yellowbrick_feature_analysis_kwargs(
             "alpha": 0.65,
         },
     }
+
+    # Classification-only visualizers (require discrete class labels)
+    if not is_regression:
+        kwargs["ParallelCoordinates"] = {
+            "classes": classes,
+            "features": feature_names,
+            "normalize": "minmax",
+            "sample": 0.05,
+            "shuffle": True,
+            "alpha": 0.3,
+            "fast": True,
+        }
+        kwargs["RadViz"] = {
+            "classes": classes,
+            "features": feature_names,
+            "alpha": 0.5,
+        }
+
     return {metric_name: kwargs.get(metric_name, {})}
 
 
@@ -1264,7 +1604,6 @@ def yellowbrick_feature_analysis_visualizers(
     """
     for visualizer_name, params in yb_kwargs.items():
         visualizer = getattr(features, visualizer_name)(**params)
-
         # Use correct fit method per YellowBrick documentation
         if visualizer_name in FEATURE_FIT_TRANSFORM_VISUALIZERS:
             visualizer.fit_transform(X, y)
@@ -1277,7 +1616,6 @@ def yellowbrick_feature_analysis_visualizers(
             # Default: fit + transform
             visualizer.fit(X, y)
             visualizer.transform(X)
-
         return visualizer
     return None
 
@@ -1295,42 +1633,51 @@ def yellowbrick_target_kwargs(
 
     Reference: https://www.scikit-yb.org/en/latest/api/target/index.html
 
-    Available visualizers:
-    - ClassBalance: Class distribution (ESSENTIAL for fraud detection)
-    - FeatureCorrelation: Feature-target correlation with mutual information
-    - FeatureCorrelation_Pearson: Feature-target correlation with Pearson
-    - BalancedBinningReference: Optimal bin boundaries (for regression)
+    Classification (TFD):
+    - ClassBalance: Class distribution (shows imbalance)
+    - FeatureCorrelation: mutual_info-classification
+    - FeatureCorrelation_Pearson: Pearson correlation
+
+    Regression (ETA):
+    - FeatureCorrelation: mutual_info-regression
+    - FeatureCorrelation_Pearson: Pearson correlation
+    - BalancedBinningReference: Target distribution binning
     """
-    kwargs = {
-        # ClassBalance: CRITICAL for fraud detection - shows class imbalance
-        # Docs: https://www.scikit-yb.org/en/latest/api/target/class_balance.html
-        "ClassBalance": {
+    task_type = PROJECT_TASK_TYPES.get(project_name, "classification")
+    is_regression = task_type == "regression"
+
+    kwargs = {}
+
+    # Classification-only: ClassBalance
+    if not is_regression:
+        kwargs["ClassBalance"] = {
             "labels": labels if labels else ["Non-Fraud", "Fraud"],
-            "colors": ["#2ecc71", "#e74c3c"],  # Green=non-fraud, Red=fraud
-        },
-        # FeatureCorrelation with Mutual Information (best for classification)
-        # Captures non-linear relationships between features and target
-        # Docs: https://www.scikit-yb.org/en/latest/api/target/feature_correlation.html
-        "FeatureCorrelation": {
-            "method": "mutual_info-classification",  # Best for binary classification
-            "labels": feature_names,
-            "sort": True,  # Sort by correlation (most important first)
-            "color": "#3498db",  # Blue bars
-        },
-        # FeatureCorrelation with Pearson (faster, linear only)
-        "FeatureCorrelation_Pearson": {
-            "method": "pearson",
-            "labels": feature_names,
-            "sort": True,
-            "color": "#9b59b6",  # Purple bars
-        },
-        # BalancedBinningReference: NOT useful for binary classification
-        # Use for regression (ETA) to discretize continuous targets
-        "BalancedBinningReference": {
-            "target": "is_fraud",
-            "bins": 4,
-        },
+            "colors": ["#2ecc71", "#e74c3c"],
+        }
+
+    # FeatureCorrelation with Mutual Information (method depends on task type)
+    kwargs["FeatureCorrelation"] = {
+        "method": "mutual_info-regression" if is_regression else "mutual_info-classification",
+        "labels": feature_names,
+        "sort": True,
+        "color": "#3498db",
     }
+
+    # FeatureCorrelation with Pearson (works for both)
+    kwargs["FeatureCorrelation_Pearson"] = {
+        "method": "pearson",
+        "labels": feature_names,
+        "sort": True,
+        "color": "#9b59b6",
+    }
+
+    # BalancedBinningReference (useful for regression)
+    target_col = PROJECT_TARGET_COLUMNS.get(project_name, "target")
+    kwargs["BalancedBinningReference"] = {
+        "target": target_col,
+        "bins": 10 if is_regression else 4,
+    }
+
     return {metric_name: kwargs.get(metric_name, {})}
 
 
@@ -1353,12 +1700,10 @@ def yellowbrick_target_visualizers(
     visualizer_name_map = {
         "FeatureCorrelation_Pearson": "FeatureCorrelation",
     }
-
     for visualizer_name, params in yb_kwargs.items():
         # Get actual class name (handle _Pearson suffix)
         actual_class_name = visualizer_name_map.get(visualizer_name, visualizer_name)
         visualizer = getattr(target, actual_class_name)(**params)
-
         # Fit based on visualizer type
         if visualizer_name in ["BalancedBinningReference", "ClassBalance"]:
             # Target-only visualizers
@@ -1383,6 +1728,9 @@ def yellowbrick_model_selection_kwargs(
 
     Reference: https://www.scikit-yb.org/en/latest/api/model_selection/index.html
 
+    Classification (TFD): Uses 'f1' scoring metric
+    Regression (ETA): Uses 'r2' scoring metric
+
     All 6 visualizers:
     - FeatureImportances: Feature ranking by importance (FAST)
     - CVScores: Cross-validation scores bar chart (MODERATE)
@@ -1390,68 +1738,45 @@ def yellowbrick_model_selection_kwargs(
     - LearningCurve: Training size vs performance (SLOW)
     - RFECV: Recursive feature elimination with CV (VERY SLOW)
     - DroppingCurve: Feature subset random selection (SLOW)
-
-    CatBoost Compatibility:
-    - FeatureImportances: Uses CatBoostWrapper with is_fitted=True
-    - All others: Use CatBoostWrapperCV for CV-based training
     """
+    task_type = PROJECT_TASK_TYPES.get(project_name, "classification")
+    is_regression = task_type == "regression"
+
+    # Scoring metric based on task type
+    scoring = "r2" if is_regression else "f1"
+
     kwargs = {
-        # =================================================================
-        # PRIMARY: FeatureImportances (FAST, works with CatBoostWrapper)
-        # =================================================================
         "FeatureImportances": {
             "labels": feature_names,
-            "relative": True,              # Show as % of max importance
+            "relative": True,
             "absolute": False,
-            "is_fitted": True,             # CatBoostWrapper compatibility
+            "is_fitted": True,
         },
-
-        # =================================================================
-        # SECONDARY: CVScores (moderate speed with CatBoostWrapperCV)
-        # =================================================================
         "CVScores": {
-            "cv": 5,                       # 5-fold stratified CV
-            "scoring": "f1",               # F1 score for imbalanced data
+            "cv": 5,
+            "scoring": scoring,
         },
-
-        # =================================================================
-        # ValidationCurve: Hyperparameter tuning (SLOW)
-        # Shows how a single hyperparameter affects train/test scores
-        # =================================================================
         "ValidationCurve": {
-            "param_name": "iterations",    # CatBoost iterations param
+            "param_name": "iterations",
             "param_range": np.array([50, 100, 150, 200]),
             "cv": 3,
-            "scoring": "f1",
+            "scoring": scoring,
         },
-
-        # =================================================================
-        # LearningCurve: Training size analysis (SLOW)
-        # =================================================================
         "LearningCurve": {
             "train_sizes": np.linspace(0.1, 1.0, 5),
-            "cv": 3,                       # Reduce folds for speed
-            "scoring": "f1",
+            "cv": 3,
+            "scoring": scoring,
             "random_state": 42,
         },
-
-        # =================================================================
-        # RFECV: Recursive Feature Elimination with CV (VERY SLOW)
-        # Finds optimal number of features
-        # =================================================================
         "RFECV": {
             "cv": 3,
-            "scoring": "f1",
-            "step": 1,                     # Remove 1 feature at a time
+            "scoring": scoring,
+            "step": 1,
         },
-
-        # =================================================================
-        # DroppingCurve: Feature subset analysis (SLOW)
-        # =================================================================
         "DroppingCurve": {
             "feature_sizes": np.linspace(0.1, 1.0, 5),
             "cv": 3,
-            "scoring": "f1",
+            "scoring": scoring,
             "random_state": 42,
         },
     }
@@ -1464,15 +1789,16 @@ def yellowbrick_model_selection_visualizers(
     X_test: pd.DataFrame,
     y_train: pd.Series,
     y_test: pd.Series,
-    model = None,
+    model=None,
+    project_name: str = "Transaction Fraud Detection",
 ):
     """Create and fit YellowBrick model selection visualizer.
 
     Reference: https://www.scikit-yb.org/en/latest/api/model_selection/index.html
 
-    CatBoost Handling:
-    - FeatureImportances: Uses CatBoostWrapper (pre-fitted, sklearn-compatible)
-    - All others: Creates CatBoostWrapperCV for CV-based training
+    CatBoost Handling (selects wrapper based on task type):
+    - Classification: CatBoostWrapper/CatBoostWrapperCV
+    - Regression: CatBoostRegressorWrapper/CatBoostRegressorWrapperCV
     """
     from yellowbrick.model_selection import (
         FeatureImportances,
@@ -1482,8 +1808,6 @@ def yellowbrick_model_selection_visualizers(
         RFECV,
         DroppingCurve,
     )
-
-    # Map visualizer names to classes
     visualizer_map = {
         "FeatureImportances": FeatureImportances,
         "CVScores": CVScores,
@@ -1492,6 +1816,10 @@ def yellowbrick_model_selection_visualizers(
         "RFECV": RFECV,
         "DroppingCurve": DroppingCurve,
     }
+
+    # Determine wrapper type based on task
+    task_type = PROJECT_TASK_TYPES.get(project_name, "classification")
+    is_regression = task_type == "regression"
 
     # Combine data for CV-based visualizers
     X_full = pd.concat([X_train, X_test], ignore_index=True)
@@ -1503,22 +1831,23 @@ def yellowbrick_model_selection_visualizers(
             raise ValueError(f"Unknown visualizer: {visualizer_name}")
 
         if visualizer_name == "FeatureImportances":
-            # FeatureImportances uses CatBoostWrapper (pre-fitted, sklearn-compatible)
             if model is None:
                 raise ValueError("Model required for FeatureImportances")
-            wrapped_estimator = CatBoostWrapper(model) if 'CatBoost' in type(model).__name__ else model
+            # Select wrapper based on task type
+            if 'CatBoost' in type(model).__name__:
+                wrapped_estimator = CatBoostRegressorWrapper(model) if is_regression else CatBoostWrapper(model)
+            else:
+                wrapped_estimator = model
             visualizer = vis_class(wrapped_estimator, **params)
             visualizer.fit(X_train, y_train)
         else:
-            # All other visualizers need CatBoostWrapperCV
-            cv_wrapper = CatBoostWrapperCV(
-                iterations=100,
-                depth=6,
-                learning_rate=0.1,
-            )
+            # CV-based visualizers need unfitted wrapper
+            if is_regression:
+                cv_wrapper = CatBoostRegressorWrapperCV(iterations=100, depth=6, learning_rate=0.1)
+            else:
+                cv_wrapper = CatBoostWrapperCV(iterations=100, depth=6, learning_rate=0.1)
             visualizer = vis_class(cv_wrapper, **params)
             visualizer.fit(X_full, y_full)
-
         return visualizer
     return None
 
@@ -1537,13 +1866,11 @@ class ModelDataManager:
         self.y: pd.Series | None = None
         self.preprocessor_dict: dict | None = None
         self.project_name: str | None = None
-
     def load_data(self, project_name: str):
         """Load and process data for a project using DuckDB SQL."""
         if self.project_name == project_name and self.y_train is not None:
             print(f"Data for {project_name} is already loaded.")
             return
-
         print(f"Loading data for project: {project_name}")
         self.X_train, self.X_test, self.y_train, self.y_test, self.preprocessor_dict = process_batch_data_duckdb(
             project_name
@@ -1567,14 +1894,12 @@ def generate_yellowbrick_image(visualizer) -> str:
     """
     # Finalize the visualization (required for proper rendering)
     visualizer.show()
-
     # Save to buffer
     buf = io.BytesIO()
     visualizer.fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
     buf.seek(0)
     image_base64 = base64.b64encode(buf.read()).decode('utf-8')
     buf.close()
-
     # Cleanup - prevents overlapping plots and memory leaks
     plt.close(visualizer.fig)  # Close specific figure
     plt.clf()                   # Clear current figure state

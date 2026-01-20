@@ -107,3 +107,5 @@ data/postgresql/*
 !data/postgresql/.gitkeep
 catboost_info/
 notebooks/models/
+# YellowBrick generated visualizations (from notebooks)
+apps/reflex/coelho_realtime/assets/yellowbrick/

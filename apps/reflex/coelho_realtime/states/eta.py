@@ -29,6 +29,71 @@ class ETAState(SharedState):
     """
 
     # ==========================================================================
+    # ETA BATCH ML STATE
+    # ==========================================================================
+    batch_ml_model_name: dict = {
+        "Estimated Time of Arrival": "CatBoost Regressor (Scikit-Learn)",
+    }
+    # YellowBrick visualization state
+    yellowbrick_metric_type: str = "Regression"
+    yellowbrick_metric_name: str = "Select visualization..."
+    yellowbrick_image_base64: str = ""
+    yellowbrick_loading: bool = False
+    yellowbrick_error: str = ""
+    _yellowbrick_cancel_requested: bool = False
+    # Detailed metrics options for YellowBrick (regression)
+    yellowbrick_metrics_options: dict[str, list[str]] = {
+        "Regression": [
+            "Select visualization...",
+            "ResidualsPlot",           # Residual distribution analysis
+            "PredictionError",         # Predicted vs actual values
+        ],
+        "Feature Analysis": [
+            "Select visualization...",
+            "Rank1D",                  # Single feature ranking
+            "Rank2D",                  # Pairwise correlation matrix
+            "PCA",                     # Principal Component Analysis
+            "Manifold",                # Non-linear dimensionality reduction
+            "JointPlot",               # 2D correlation between features
+            # ParallelCoordinates and RadViz excluded - not suitable for regression
+        ],
+        "Target": [
+            "Select visualization...",
+            "FeatureCorrelation",      # Mutual info correlation (non-linear)
+            "FeatureCorrelation_Pearson",  # Linear correlation
+            "BalancedBinningReference",    # Target distribution binning
+        ],
+        "Model Selection": [
+            "Select visualization...",
+            "FeatureImportances",      # Feature ranking by importance
+            "CVScores",                # Cross-validation scores
+            "ValidationCurve",         # Hyperparameter tuning
+            "LearningCurve",           # Training size vs performance
+            "RFECV",                   # Recursive feature elimination
+            "DroppingCurve",           # Feature dropping impact
+        ]
+    }
+    # Batch ML training state
+    batch_training_loading: bool = False
+    batch_model_available: dict = {
+        "Estimated Time of Arrival": False,
+    }
+    batch_training_error: str = ""
+    batch_last_trained: dict = {
+        "Estimated Time of Arrival": "",
+    }
+    batch_training_metrics: dict = {
+        "Estimated Time of Arrival": {},
+    }
+    # Batch ML toggle state
+    batch_ml_state: dict = {
+        "Estimated Time of Arrival": False,
+    }
+    batch_ml_model_key: dict = {
+        "Estimated Time of Arrival": "estimated_time_of_arrival_sklearn.py",
+    }
+
+    # ==========================================================================
     # ETA FORM FIELD TYPE MAPPINGS (for automatic conversion)
     # ==========================================================================
     _eta_float_fields = {
@@ -128,7 +193,7 @@ class ETAState(SharedState):
             "time_rolling_mae": metrics.get("metrics.TimeRollingMAE", 0),
         }
 
-    @rx.var
+    @rx.var(cache=True)
     def eta_dashboard_figures(self) -> dict:
         """Generate all ETA dashboard Plotly figures (KPI indicators, gauges)."""
         raw = self.eta_metrics_raw
@@ -667,3 +732,335 @@ class ETAState(SharedState):
                         "show": False
                     }
                 }
+
+    # ==========================================================================
+    # ETA BATCH ML COMPUTED VARIABLES
+    # ==========================================================================
+    @rx.var
+    def eta_batch_ml_enabled(self) -> bool:
+        """Check if ETA batch ML training toggle is enabled."""
+        return self.batch_ml_state.get("Estimated Time of Arrival", False)
+
+    @rx.var
+    def eta_batch_model_available(self) -> bool:
+        """Check if ETA batch model is available for prediction."""
+        return self.batch_model_available.get("Estimated Time of Arrival", False)
+
+    @rx.var
+    def eta_batch_last_trained(self) -> str:
+        """Get the last trained timestamp for ETA batch model."""
+        return self.batch_last_trained.get("Estimated Time of Arrival", "")
+
+    @rx.var
+    def yellowbrick_metric_options(self) -> list[str]:
+        """Get available YellowBrick metric names for current metric type."""
+        return self.yellowbrick_metrics_options.get(self.yellowbrick_metric_type, ["Select visualization..."])
+
+    @rx.var
+    def yellowbrick_metric_types(self) -> list[str]:
+        """Get available YellowBrick metric types."""
+        return list(self.yellowbrick_metrics_options.keys())
+
+    @rx.var
+    def eta_batch_metrics(self) -> dict[str, str]:
+        """Get all ETA batch ML metrics with appropriate formatting.
+
+        - Regression metrics: MAE, RMSE in seconds; R2, MAPE, SMAPE as decimals
+        """
+        raw_metrics = self.batch_mlflow_metrics.get("Estimated Time of Arrival", {})
+        if not isinstance(raw_metrics, dict):
+            return {}
+        # Metrics to format as seconds (time-based)
+        seconds_metrics = {
+            "mean_absolute_error", "mean_squared_error", "root_mean_squared_error",
+            "median_absolute_error", "max_error"
+        }
+        # Metrics to format as percentage
+        percentage_metrics = {
+            "mean_absolute_percentage_error", "symmetric_mean_absolute_percentage_error"
+        }
+        result = {}
+        for key, value in raw_metrics.items():
+            if key.startswith("metrics."):
+                metric_name = key.replace("metrics.", "")
+                if isinstance(value, (int, float)):
+                    if metric_name in seconds_metrics:
+                        result[metric_name] = f"{value:.2f}s"
+                    elif metric_name in percentage_metrics:
+                        result[metric_name] = f"{value:.2f}%"
+                    else:
+                        result[metric_name] = f"{value:.4f}"
+                else:
+                    result[metric_name] = str(value) if value is not None else "N/A"
+        return result
+
+    @rx.var
+    def eta_batch_metric_names(self) -> list[str]:
+        """Get list of batch ML metric names for ETA."""
+        return list(self.eta_batch_metrics.keys())
+
+    @rx.var(cache=True)
+    def eta_batch_dashboard_figures(self) -> dict:
+        """Generate Plotly figures for batch ML metrics dashboard (regression).
+
+        Returns dict with keys:
+        - Primary metrics as KPI indicators: MAE, RMSE, R2, MAPE
+        - Secondary metrics as gauges: explained_variance, median_absolute_error
+        - D2 metrics as bullet charts: d2_absolute_error, d2_pinball, d2_tweedie
+        """
+        raw_metrics = self.batch_mlflow_metrics.get("Estimated Time of Arrival", {})
+        if not isinstance(raw_metrics, dict):
+            raw_metrics = {}
+
+        def get_metric(name: str) -> float:
+            """Extract metric value from raw MLflow metrics."""
+            key = f"metrics.{name}"
+            val = raw_metrics.get(key, 0)
+            return float(val) if val is not None else 0.0
+
+        def create_kpi_time(value: float, title: str, unit: str = "s") -> go.Figure:
+            """Create KPI indicator for time-based metrics (seconds)."""
+            if value <= 30:
+                color = "#3b82f6"  # blue - excellent
+            elif value <= 60:
+                color = "#22c55e"  # green - good
+            elif value <= 120:
+                color = "#eab308"  # yellow - fair
+            else:
+                color = "#ef4444"  # red - poor
+
+            fig = go.Figure(go.Indicator(
+                mode="number",
+                value=value,
+                title={"text": f"<b>{title}</b>", "font": {"size": 12}},
+                number={"suffix": unit, "font": {"size": 24, "color": color}, "valueformat": ".1f"}
+            ))
+            fig.update_layout(
+                height=100, margin=dict(l=10, r=10, t=35, b=10),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)"
+            )
+            return fig
+
+        def create_kpi_pct(value: float, title: str) -> go.Figure:
+            """Create KPI indicator for percentage metrics (MAPE, SMAPE)."""
+            if value <= 10:
+                color = "#3b82f6"  # blue - excellent
+            elif value <= 25:
+                color = "#22c55e"  # green - good
+            elif value <= 50:
+                color = "#eab308"  # yellow - fair
+            else:
+                color = "#ef4444"  # red - poor
+
+            fig = go.Figure(go.Indicator(
+                mode="number",
+                value=value,
+                title={"text": f"<b>{title}</b>", "font": {"size": 12}},
+                number={"suffix": "%", "font": {"size": 24, "color": color}, "valueformat": ".1f"}
+            ))
+            fig.update_layout(
+                height=100, margin=dict(l=10, r=10, t=35, b=10),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)"
+            )
+            return fig
+
+        def create_gauge_r2(value: float, title: str) -> go.Figure:
+            """Create R2 gauge (-1 to 1 scale, higher is better)."""
+            steps = [
+                {"range": [-1, 0], "color": "#ef4444"},
+                {"range": [0, 0.5], "color": "#eab308"},
+                {"range": [0.5, 0.7], "color": "#22c55e"},
+                {"range": [0.7, 1], "color": "#3b82f6"}
+            ]
+            fig = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=value,
+                title={"text": f"<b>{title}</b>", "font": {"size": 12}},
+                number={"valueformat": ".3f", "font": {"size": 20}},
+                gauge={
+                    "axis": {"range": [-1, 1], "tickwidth": 1},
+                    "bar": {"color": "#1e40af"},
+                    "steps": steps,
+                    "threshold": {"value": 0.7, "line": {"color": "black", "width": 2}, "thickness": 0.75}
+                }
+            ))
+            fig.update_layout(
+                height=160, margin=dict(l=20, r=20, t=35, b=10),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)"
+            )
+            return fig
+
+        def create_bullet(value: float, title: str, max_val: float = 1.0, lower_is_better: bool = False) -> go.Figure:
+            """Create bullet chart for D2 metrics (higher is better by default)."""
+            if lower_is_better:
+                steps = [
+                    {"range": [0, max_val * 0.3], "color": "#22c55e"},
+                    {"range": [max_val * 0.3, max_val * 0.6], "color": "#eab308"},
+                    {"range": [max_val * 0.6, max_val], "color": "#ef4444"}
+                ]
+            else:
+                steps = [
+                    {"range": [0, max_val * 0.5], "color": "#ef4444"},
+                    {"range": [max_val * 0.5, max_val * 0.7], "color": "#eab308"},
+                    {"range": [max_val * 0.7, max_val], "color": "#22c55e"}
+                ]
+
+            fig = go.Figure(go.Indicator(
+                mode="number+gauge",
+                value=value,
+                title={"text": f"<b>{title}</b>", "font": {"size": 12}},
+                number={"valueformat": ".4f", "font": {"size": 18}},
+                gauge={
+                    "shape": "bullet",
+                    "axis": {"range": [0, max_val]},
+                    "bar": {"color": "#1e40af"},
+                    "steps": steps,
+                }
+            ))
+            fig.update_layout(
+                height=100, margin=dict(l=120, r=30, t=35, b=10),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)"
+            )
+            return fig
+
+        return {
+            # Primary metrics (KPI indicators) - 4 metrics
+            "kpi_mae": create_kpi_time(get_metric("mean_absolute_error"), "MAE"),
+            "kpi_rmse": create_kpi_time(get_metric("root_mean_squared_error"), "RMSE"),
+            "kpi_mape": create_kpi_pct(get_metric("mean_absolute_percentage_error"), "MAPE"),
+            "kpi_smape": create_kpi_pct(get_metric("symmetric_mean_absolute_percentage_error"), "SMAPE"),
+            # R2 and explained variance (gauges) - 2 metrics
+            "gauge_r2": create_gauge_r2(get_metric("r2_score"), "R² Score"),
+            "gauge_explained_var": create_gauge_r2(get_metric("explained_variance_score"), "Explained Var"),
+            # Secondary metrics (KPI time) - 2 metrics
+            "kpi_median_ae": create_kpi_time(get_metric("median_absolute_error"), "Median AE"),
+            "kpi_max_error": create_kpi_time(get_metric("max_error"), "Max Error"),
+            # D2 metrics (bullet charts - higher is better) - 3 metrics
+            "bullet_d2_absolute": create_bullet(get_metric("d2_absolute_error_score"), "D² Absolute", max_val=1.0),
+            "bullet_d2_pinball": create_bullet(get_metric("d2_pinball_score"), "D² Pinball", max_val=1.0),
+            "bullet_d2_tweedie": create_bullet(get_metric("d2_tweedie_score"), "D² Tweedie", max_val=1.0),
+        }
+
+    # ==========================================================================
+    # ETA BATCH ML YELLOWBRICK EVENT HANDLERS
+    # ==========================================================================
+    @rx.event
+    def set_yellowbrick_metric_type(self, metric_type: str):
+        """Set YellowBrick metric type and reset metric name."""
+        self.yellowbrick_metric_type = metric_type
+        self.yellowbrick_metric_name = "Select visualization..."
+        self.yellowbrick_image_base64 = ""
+        self.yellowbrick_error = ""
+
+    @rx.event
+    def clear_yellowbrick_visualization(self):
+        """Clear YellowBrick visualization state (called on tab change)."""
+        self.yellowbrick_image_base64 = ""
+        self.yellowbrick_error = ""
+        self.yellowbrick_metric_name = "Select visualization..."
+
+    @rx.event
+    def set_yellowbrick_metric_name(self, metric_name: str):
+        """Set YellowBrick metric name."""
+        self.yellowbrick_metric_name = metric_name
+        if metric_name and metric_name != "Select visualization...":
+            return ETAState.fetch_yellowbrick_metric("Estimated Time of Arrival")
+
+    @rx.event
+    def set_yellowbrick_visualization(self, category: str, metric_name: str):
+        """Unified handler for all YellowBrick visualization categories.
+
+        Args:
+            category: The YellowBrick category (e.g., "Regression", "Feature Analysis", etc.)
+            metric_name: The visualization name to display
+        """
+        self.yellowbrick_metric_type = category
+        self.yellowbrick_metric_name = metric_name
+        if metric_name and metric_name != "Select visualization...":
+            return ETAState.fetch_yellowbrick_metric("Estimated Time of Arrival")
+
+    @rx.event(background=True)
+    async def fetch_yellowbrick_metric(self, project_name: str):
+        """Fetch YellowBrick visualization from FastAPI using selected MLflow run."""
+        metric_type = self.yellowbrick_metric_type
+        metric_name = self.yellowbrick_metric_name
+        # Use selected run_id from SharedState (or None for best)
+        run_id = self.selected_batch_run.get(project_name) or None
+
+        if not metric_name or metric_name == "Select visualization...":
+            async with self:
+                self.yellowbrick_image_base64 = ""
+                self.yellowbrick_error = ""
+            return
+
+        async with self:
+            self.yellowbrick_loading = True
+            self.yellowbrick_error = ""
+            self.yellowbrick_image_base64 = ""  # Clear old image while loading new one
+            self._yellowbrick_cancel_requested = False
+
+        try:
+            from .shared import SKLEARN_BASE_URL
+            response = await httpx_client_post(
+                url=f"{SKLEARN_BASE_URL}/yellowbrick_metric",
+                json={
+                    "project_name": project_name,
+                    "metric_type": metric_type,
+                    "metric_name": metric_name,
+                    "run_id": run_id,  # Use selected run's data
+                },
+                timeout=300.0  # 5 minutes for slow visualizations like Manifold
+            )
+            # Check if cancelled before updating UI
+            if self._yellowbrick_cancel_requested:
+                return
+            result = response.json()
+            async with self:
+                self.yellowbrick_image_base64 = result.get("image_base64", "")
+                self.yellowbrick_loading = False
+                self.yellowbrick_error = result.get("error", "")
+        except Exception as e:
+            if self._yellowbrick_cancel_requested:
+                return
+            print(f"Error fetching YellowBrick metric: {e}")
+            async with self:
+                self.yellowbrick_loading = False
+                self.yellowbrick_error = str(e)
+                self.yellowbrick_image_base64 = ""
+
+    @rx.event
+    def cancel_yellowbrick_loading(self):
+        """Cancel the current YellowBrick visualization loading."""
+        self._yellowbrick_cancel_requested = True
+        self.yellowbrick_loading = False
+        self.yellowbrick_error = ""
+        self.yellowbrick_image_base64 = ""
+        self.yellowbrick_metric_name = "Select visualization..."
+        yield rx.toast.info(
+            "Visualization cancelled",
+            description="Loading has been stopped.",
+            duration=2000
+        )
+
+    @rx.event(background=True)
+    async def check_batch_model_available(self, project_name: str):
+        """Check if a batch (Scikit-Learn) model is available for prediction."""
+        try:
+            from .shared import SKLEARN_BASE_URL
+            response = await httpx_client_post(
+                url=f"{SKLEARN_BASE_URL}/model_available",
+                json={
+                    "project_name": project_name,
+                    "model_name": "CatBoostRegressor"
+                },
+                timeout=30.0
+            )
+            result = response.json()
+            async with self:
+                self.batch_model_available[project_name] = result.get("available", False)
+                if result.get("available"):
+                    self.batch_last_trained[project_name] = result.get("trained_at", "")
+        except Exception as e:
+            print(f"Error checking batch model availability: {e}")
+            async with self:
+                self.batch_model_available[project_name] = False

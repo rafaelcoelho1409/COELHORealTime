@@ -25,6 +25,7 @@ dependencies = [
     "setuptools",
     "xgboost",
     "mlflow",
+    "lightgbm",
 ]
 
 [dependency-groups]

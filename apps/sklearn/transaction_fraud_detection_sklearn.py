@@ -62,7 +62,6 @@ signal.signal(signal.SIGINT, signal_handler)
 
 class ShutdownCallback:
     """CatBoost callback to check for shutdown requests during training."""
-
     def after_iteration(self, info):
         """Called after each iteration. Return True to stop training."""
         if _shutdown_requested:
@@ -129,18 +128,14 @@ def main(sample_frac: float | None, max_rows: int | None):
         print(f"Data sampling: {sample_frac * 100}%")
     if max_rows:
         print(f"Max rows: {max_rows}")
-
     update_status("Initializing training...", progress=5, stage="init")
-
     try:
         # Configure MLflow
         print(f"Connecting to MLflow at http://{MLFLOW_HOST}:5000")
         mlflow.set_tracking_uri(f"http://{MLFLOW_HOST}:5000")
         mlflow.set_experiment(PROJECT_NAME)
         print(f"MLflow experiment '{PROJECT_NAME}' set successfully")
-
         update_status("Loading data from Delta Lake...", progress=10, stage="loading_data")
-
         # Load and process data using DuckDB SQL
         load_start = time.time()
         print("\n=== Loading and Preprocessing Data ===")
@@ -155,7 +150,6 @@ def main(sample_frac: float | None, max_rows: int | None):
         print(f"\nData loading/preprocessing completed in {load_time:.2f} seconds")
         print(f"Training set: {len(X_train)} samples")
         print(f"Test set: {len(X_test)} samples")
-
         total_rows = len(X_train) + len(X_test)
         update_status(
             f"Data loaded: {len(X_train):,} train, {len(X_test):,} test samples",
@@ -163,20 +157,15 @@ def main(sample_frac: float | None, max_rows: int | None):
             stage="data_loaded",
             total_rows=total_rows
         )
-
         # Check for shutdown after data loading
         check_shutdown("data_loading")
-
         # Create model
         print("\nCreating model...")
         model = create_batch_model(PROJECT_NAME, y_train = y_train)
         print(f"Categorical feature indices: {cat_feature_indices}")
-
         # Check for shutdown after model creation
         check_shutdown("model_creation")
-
         update_status("Training CatBoost model...", progress=30, stage="training", total_rows=total_rows)
-
         # Train model with early stopping, native categorical handling, and shutdown callback
         print("Training model...")
         model.fit(
@@ -189,12 +178,9 @@ def main(sample_frac: float | None, max_rows: int | None):
             callbacks = [ShutdownCallback()],  # Check for shutdown during training
         )
         print("Model training complete.")
-
         # Check for shutdown after training (in case callback didn't trigger exit)
         check_shutdown("training")
-
         update_status("Evaluating model performance...", progress=70, stage="evaluating", total_rows=total_rows)
-
         # Evaluate model
         print("\nEvaluating model...")
         y_pred = model.predict(X_test)
@@ -312,10 +298,8 @@ def main(sample_frac: float | None, max_rows: int | None):
         print("\nMetrics:")
         for name, value in metrics_to_log.items():
             print(f"  {name}: {value:.4f}")
-
         # Check for shutdown after evaluation (before MLflow logging)
         check_shutdown("evaluation")
-
         # Send metrics preview to status
         update_status(
             "Logging to MLflow...",
@@ -329,7 +313,6 @@ def main(sample_frac: float | None, max_rows: int | None):
             },
             total_rows=total_rows
         )
-
         # Log to MLflow
         print("\nLogging to MLflow...")
         with mlflow.start_run(run_name=MODEL_NAME):
@@ -373,7 +356,6 @@ def main(sample_frac: float | None, max_rows: int | None):
                     pickle.dump(preprocessor_dict, f)
                 mlflow.log_artifact(model_path)
                 mlflow.log_artifact(encoder_path)
-
                 # Save training data for YellowBrick visualization reproducibility
                 # Uses snappy compression (fast decompression, industry default)
                 print("Saving training data artifacts...")
@@ -386,14 +368,12 @@ def main(sample_frac: float | None, max_rows: int | None):
                 mlflow.log_artifact(os.path.join(tmpdir, "y_train.parquet"), artifact_path="training_data")
                 mlflow.log_artifact(os.path.join(tmpdir, "y_test.parquet"), artifact_path="training_data")
                 print(f"  Saved: X_train={X_train.shape}, X_test={X_test.shape}")
-
             # Log model using MLflow's catboost flavor
             mlflow.catboost.log_model(model, "model")
             run_id = mlflow.active_run().info.run_id
             print(f"MLflow run ID: {run_id}")
         training_time = time.time() - start_time
         print(f"\nTraining completed successfully in {training_time:.2f} seconds")
-
         update_status(
             f"Training complete! Time: {training_time:.1f}s",
             progress=100,

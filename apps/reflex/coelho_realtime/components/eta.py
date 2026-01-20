@@ -192,6 +192,99 @@ def estimated_time_of_arrival_metrics() -> rx.Component:
 
 
 # =============================================================================
+# ETA Batch ML Metrics Dashboard
+# =============================================================================
+def estimated_time_of_arrival_batch_metrics() -> rx.Component:
+    """Display batch ML regression metrics for ETA with Plotly dashboard layout.
+
+    Uses eta_batch_dashboard_figures for KPI indicators and gauges:
+    - Primary: MAE, RMSE, MAPE, SMAPE (time/percentage KPIs)
+    - R2: R² Score and Explained Variance gauges
+    - Secondary: Median AE, Max Error (time KPIs)
+    - D2 metrics: Bullet charts for d2_absolute, d2_pinball, d2_tweedie
+    """
+    return rx.vstack(
+        # ROW 1: Primary Metrics (KPI indicators)
+        rx.text("Primary Metrics", size="3", weight="bold", color="gray"),
+        rx.grid(
+            rx.card(
+                rx.plotly(data=ETAState.eta_batch_dashboard_figures["kpi_mae"], width="100%"),
+                size="1"
+            ),
+            rx.card(
+                rx.plotly(data=ETAState.eta_batch_dashboard_figures["kpi_rmse"], width="100%"),
+                size="1"
+            ),
+            rx.card(
+                rx.plotly(data=ETAState.eta_batch_dashboard_figures["kpi_mape"], width="100%"),
+                size="1"
+            ),
+            rx.card(
+                rx.plotly(data=ETAState.eta_batch_dashboard_figures["kpi_smape"], width="100%"),
+                size="1"
+            ),
+            columns="4",
+            spacing="2",
+            width="100%"
+        ),
+        # ROW 2: R2 and Explained Variance Gauges
+        rx.text("Goodness of Fit", size="3", weight="bold", color="gray"),
+        rx.hstack(
+            rx.card(
+                rx.plotly(data=ETAState.eta_batch_dashboard_figures["gauge_r2"], width="100%"),
+                size="1",
+                width="50%"
+            ),
+            rx.card(
+                rx.plotly(data=ETAState.eta_batch_dashboard_figures["gauge_explained_var"], width="100%"),
+                size="1",
+                width="50%"
+            ),
+            spacing="2",
+            width="100%"
+        ),
+        # ROW 3: Secondary Metrics
+        rx.text("Secondary Metrics", size="3", weight="bold", color="gray"),
+        rx.grid(
+            rx.card(
+                rx.plotly(data=ETAState.eta_batch_dashboard_figures["kpi_median_ae"], width="100%"),
+                size="1"
+            ),
+            rx.card(
+                rx.plotly(data=ETAState.eta_batch_dashboard_figures["kpi_max_error"], width="100%"),
+                size="1"
+            ),
+            columns="2",
+            spacing="2",
+            width="100%"
+        ),
+        # ROW 4: D2 Metrics (bullet charts)
+        rx.text("Deviance Metrics (D² Scores)", size="3", weight="bold", color="gray"),
+        rx.vstack(
+            rx.card(
+                rx.plotly(data=ETAState.eta_batch_dashboard_figures["bullet_d2_absolute"], width="100%"),
+                size="1",
+                width="100%"
+            ),
+            rx.card(
+                rx.plotly(data=ETAState.eta_batch_dashboard_figures["bullet_d2_pinball"], width="100%"),
+                size="1",
+                width="100%"
+            ),
+            rx.card(
+                rx.plotly(data=ETAState.eta_batch_dashboard_figures["bullet_d2_tweedie"], width="100%"),
+                size="1",
+                width="100%"
+            ),
+            spacing="2",
+            width="100%"
+        ),
+        spacing="4",
+        width="100%"
+    )
+
+
+# =============================================================================
 # ETA Incremental ML Form
 # =============================================================================
 def estimated_time_of_arrival_form(model_key: str = None, project_name: str = None) -> rx.Component:
@@ -1092,10 +1185,10 @@ def estimated_time_of_arrival_batch_form(model_key: str = None, project_name: st
                                 value="model_diagnostics"
                             ),
                         ),
-                        # Subtab 1: Overview (default sklearn metrics)
+                        # Subtab 1: Overview (batch sklearn metrics)
                         rx.tabs.content(
                             rx.vstack(
-                                estimated_time_of_arrival_metrics(),
+                                estimated_time_of_arrival_batch_metrics(),
                                 spacing="4",
                                 width="100%",
                             ),
@@ -1103,65 +1196,337 @@ def estimated_time_of_arrival_batch_form(model_key: str = None, project_name: st
                         ),
                         # Subtab 2: Performance (YellowBrick Regression)
                         rx.tabs.content(
-                            rx.center(
+                            rx.cond(
+                                ETAState.eta_batch_model_available,
+                                # Model available - show visualization selector
                                 rx.vstack(
-                                    rx.icon("trending-up", size=40, color=rx.color("gray", 6)),
-                                    rx.text("Regression Performance Visualizations", size="3", weight="medium", color="gray"),
-                                    rx.text("ResidualsPlot, PredictionError", size="2", color="gray"),
-                                    rx.badge("Coming Soon", color_scheme="blue", variant="soft"),
-                                    spacing="2",
-                                    align="center"
+                                    rx.text("Select a visualization to display.", size="2", color="gray"),
+                                    rx.select(
+                                        ETAState.yellowbrick_metrics_options["Regression"],
+                                        value=ETAState.yellowbrick_metric_name,
+                                        on_change=lambda v: ETAState.set_yellowbrick_visualization("Regression", v),
+                                        placeholder="Select visualization...",
+                                        width="100%"
+                                    ),
+                                    # Loading spinner with stop button
+                                    rx.cond(
+                                        ETAState.yellowbrick_loading,
+                                        rx.vstack(
+                                            rx.hstack(
+                                                rx.spinner(size="3"),
+                                                rx.text("Loading visualization...", size="2", color="gray"),
+                                                spacing="2",
+                                                align_items="center",
+                                            ),
+                                            rx.button(
+                                                rx.hstack(
+                                                    rx.icon("square", size=12),
+                                                    rx.text("Stop", size="1"),
+                                                    spacing="1",
+                                                    align_items="center"
+                                                ),
+                                                on_click=ETAState.cancel_yellowbrick_loading,
+                                                size="1",
+                                                color_scheme="red",
+                                                variant="soft"
+                                            ),
+                                            spacing="3",
+                                            align_items="center",
+                                            justify="center",
+                                            width="100%",
+                                            padding="4em"
+                                        ),
+                                        rx.fragment()
+                                    ),
+                                    # Error display
+                                    rx.cond(
+                                        ETAState.yellowbrick_error != "",
+                                        rx.callout(
+                                            ETAState.yellowbrick_error,
+                                            icon="triangle-alert",
+                                            color="red",
+                                            width="100%"
+                                        ),
+                                        rx.fragment()
+                                    ),
+                                    # Image display
+                                    rx.cond(
+                                        ETAState.yellowbrick_image_base64 != "",
+                                        rx.image(
+                                            src=f"data:image/png;base64,{ETAState.yellowbrick_image_base64}",
+                                            width="100%",
+                                            alt="YellowBrick visualization"
+                                        ),
+                                        rx.fragment()
+                                    ),
+                                    spacing="4",
+                                    width="100%",
+                                    padding_top="1em",
                                 ),
-                                height="300px",
-                                width="100%"
+                                # No model - show message
+                                rx.vstack(
+                                    rx.callout(
+                                        "Train a model first to view visualizations. Click Train above.",
+                                        icon="info",
+                                        color="blue",
+                                        width="100%"
+                                    ),
+                                    spacing="4",
+                                    width="100%",
+                                    padding_top="1em",
+                                )
                             ),
                             value="performance"
                         ),
                         # Subtab 3: Feature Analysis (YellowBrick)
                         rx.tabs.content(
-                            rx.center(
+                            rx.cond(
+                                ETAState.eta_batch_model_available,
+                                # Model available - show visualization selector
                                 rx.vstack(
-                                    rx.icon("scatter-chart", size=40, color=rx.color("gray", 6)),
-                                    rx.text("Feature Analysis Visualizations", size="3", weight="medium", color="gray"),
-                                    rx.text("Rank1D, Rank2D, PCA, Manifold, ParallelCoordinates", size="2", color="gray"),
-                                    rx.badge("Coming Soon", color_scheme="blue", variant="soft"),
-                                    spacing="2",
-                                    align="center"
+                                    rx.text("Select a visualization to display.", size="2", color="gray"),
+                                    rx.select(
+                                        ETAState.yellowbrick_metrics_options["Feature Analysis"],
+                                        value=ETAState.yellowbrick_metric_name,
+                                        on_change=lambda v: ETAState.set_yellowbrick_visualization("Feature Analysis", v),
+                                        placeholder="Select visualization...",
+                                        width="100%"
+                                    ),
+                                    # Loading spinner with stop button
+                                    rx.cond(
+                                        ETAState.yellowbrick_loading,
+                                        rx.vstack(
+                                            rx.hstack(
+                                                rx.spinner(size="3"),
+                                                rx.text("Loading visualization...", size="2", color="gray"),
+                                                spacing="2",
+                                                align_items="center",
+                                            ),
+                                            rx.button(
+                                                rx.hstack(
+                                                    rx.icon("square", size=12),
+                                                    rx.text("Stop", size="1"),
+                                                    spacing="1",
+                                                    align_items="center"
+                                                ),
+                                                on_click=ETAState.cancel_yellowbrick_loading,
+                                                size="1",
+                                                color_scheme="red",
+                                                variant="soft"
+                                            ),
+                                            spacing="3",
+                                            align_items="center",
+                                            justify="center",
+                                            width="100%",
+                                            padding="4em"
+                                        ),
+                                        rx.fragment()
+                                    ),
+                                    # Error display
+                                    rx.cond(
+                                        ETAState.yellowbrick_error != "",
+                                        rx.callout(
+                                            ETAState.yellowbrick_error,
+                                            icon="triangle-alert",
+                                            color="red",
+                                            width="100%"
+                                        ),
+                                        rx.fragment()
+                                    ),
+                                    # Image display
+                                    rx.cond(
+                                        ETAState.yellowbrick_image_base64 != "",
+                                        rx.image(
+                                            src=f"data:image/png;base64,{ETAState.yellowbrick_image_base64}",
+                                            width="100%",
+                                            alt="YellowBrick visualization"
+                                        ),
+                                        rx.fragment()
+                                    ),
+                                    spacing="4",
+                                    width="100%",
+                                    padding_top="1em",
                                 ),
-                                height="300px",
-                                width="100%"
+                                # No model - show message
+                                rx.vstack(
+                                    rx.callout(
+                                        "Train a model first to view visualizations. Click Train above.",
+                                        icon="info",
+                                        color="blue",
+                                        width="100%"
+                                    ),
+                                    spacing="4",
+                                    width="100%",
+                                    padding_top="1em",
+                                )
                             ),
                             value="feature_analysis"
                         ),
                         # Subtab 4: Target Analysis (YellowBrick)
                         rx.tabs.content(
-                            rx.center(
+                            rx.cond(
+                                ETAState.eta_batch_model_available,
+                                # Model available - show visualization selector
                                 rx.vstack(
-                                    rx.icon("target", size=40, color=rx.color("gray", 6)),
-                                    rx.text("Target Analysis Visualizations", size="3", weight="medium", color="gray"),
-                                    rx.text("FeatureCorrelation, FeatureCorrelation (Pearson)", size="2", color="gray"),
-                                    rx.badge("Coming Soon", color_scheme="blue", variant="soft"),
-                                    spacing="2",
-                                    align="center"
+                                    rx.text("Select a visualization to display.", size="2", color="gray"),
+                                    rx.select(
+                                        ETAState.yellowbrick_metrics_options["Target"],
+                                        value=ETAState.yellowbrick_metric_name,
+                                        on_change=lambda v: ETAState.set_yellowbrick_visualization("Target", v),
+                                        placeholder="Select visualization...",
+                                        width="100%"
+                                    ),
+                                    # Loading spinner with stop button
+                                    rx.cond(
+                                        ETAState.yellowbrick_loading,
+                                        rx.vstack(
+                                            rx.hstack(
+                                                rx.spinner(size="3"),
+                                                rx.text("Loading visualization...", size="2", color="gray"),
+                                                spacing="2",
+                                                align_items="center",
+                                            ),
+                                            rx.button(
+                                                rx.hstack(
+                                                    rx.icon("square", size=12),
+                                                    rx.text("Stop", size="1"),
+                                                    spacing="1",
+                                                    align_items="center"
+                                                ),
+                                                on_click=ETAState.cancel_yellowbrick_loading,
+                                                size="1",
+                                                color_scheme="red",
+                                                variant="soft"
+                                            ),
+                                            spacing="3",
+                                            align_items="center",
+                                            justify="center",
+                                            width="100%",
+                                            padding="4em"
+                                        ),
+                                        rx.fragment()
+                                    ),
+                                    # Error display
+                                    rx.cond(
+                                        ETAState.yellowbrick_error != "",
+                                        rx.callout(
+                                            ETAState.yellowbrick_error,
+                                            icon="triangle-alert",
+                                            color="red",
+                                            width="100%"
+                                        ),
+                                        rx.fragment()
+                                    ),
+                                    # Image display
+                                    rx.cond(
+                                        ETAState.yellowbrick_image_base64 != "",
+                                        rx.image(
+                                            src=f"data:image/png;base64,{ETAState.yellowbrick_image_base64}",
+                                            width="100%",
+                                            alt="YellowBrick visualization"
+                                        ),
+                                        rx.fragment()
+                                    ),
+                                    spacing="4",
+                                    width="100%",
+                                    padding_top="1em",
                                 ),
-                                height="300px",
-                                width="100%"
+                                # No model - show message
+                                rx.vstack(
+                                    rx.callout(
+                                        "Train a model first to view visualizations. Click Train above.",
+                                        icon="info",
+                                        color="blue",
+                                        width="100%"
+                                    ),
+                                    spacing="4",
+                                    width="100%",
+                                    padding_top="1em",
+                                )
                             ),
                             value="target_analysis"
                         ),
                         # Subtab 5: Model Diagnostics (YellowBrick)
                         rx.tabs.content(
-                            rx.center(
+                            rx.cond(
+                                ETAState.eta_batch_model_available,
+                                # Model available - show visualization selector
                                 rx.vstack(
-                                    rx.icon("settings-2", size=40, color=rx.color("gray", 6)),
-                                    rx.text("Model Diagnostics Visualizations", size="3", weight="medium", color="gray"),
-                                    rx.text("FeatureImportances, LearningCurve, ValidationCurve, CVScores", size="2", color="gray"),
-                                    rx.badge("Coming Soon", color_scheme="blue", variant="soft"),
-                                    spacing="2",
-                                    align="center"
+                                    rx.text("Select a visualization to display.", size="2", color="gray"),
+                                    rx.select(
+                                        ETAState.yellowbrick_metrics_options["Model Selection"],
+                                        value=ETAState.yellowbrick_metric_name,
+                                        on_change=lambda v: ETAState.set_yellowbrick_visualization("Model Selection", v),
+                                        placeholder="Select visualization...",
+                                        width="100%"
+                                    ),
+                                    # Loading spinner with stop button
+                                    rx.cond(
+                                        ETAState.yellowbrick_loading,
+                                        rx.vstack(
+                                            rx.hstack(
+                                                rx.spinner(size="3"),
+                                                rx.text("Loading visualization...", size="2", color="gray"),
+                                                spacing="2",
+                                                align_items="center",
+                                            ),
+                                            rx.button(
+                                                rx.hstack(
+                                                    rx.icon("square", size=12),
+                                                    rx.text("Stop", size="1"),
+                                                    spacing="1",
+                                                    align_items="center"
+                                                ),
+                                                on_click=ETAState.cancel_yellowbrick_loading,
+                                                size="1",
+                                                color_scheme="red",
+                                                variant="soft"
+                                            ),
+                                            spacing="3",
+                                            align_items="center",
+                                            justify="center",
+                                            width="100%",
+                                            padding="4em"
+                                        ),
+                                        rx.fragment()
+                                    ),
+                                    # Error display
+                                    rx.cond(
+                                        ETAState.yellowbrick_error != "",
+                                        rx.callout(
+                                            ETAState.yellowbrick_error,
+                                            icon="triangle-alert",
+                                            color="red",
+                                            width="100%"
+                                        ),
+                                        rx.fragment()
+                                    ),
+                                    # Image display
+                                    rx.cond(
+                                        ETAState.yellowbrick_image_base64 != "",
+                                        rx.image(
+                                            src=f"data:image/png;base64,{ETAState.yellowbrick_image_base64}",
+                                            width="100%",
+                                            alt="YellowBrick visualization"
+                                        ),
+                                        rx.fragment()
+                                    ),
+                                    spacing="4",
+                                    width="100%",
+                                    padding_top="1em",
                                 ),
-                                height="300px",
-                                width="100%"
+                                # No model - show message
+                                rx.vstack(
+                                    rx.callout(
+                                        "Train a model first to view visualizations. Click Train above.",
+                                        icon="info",
+                                        color="blue",
+                                        width="100%"
+                                    ),
+                                    spacing="4",
+                                    width="100%",
+                                    padding_top="1em",
+                                )
                             ),
                             value="model_diagnostics"
                         ),

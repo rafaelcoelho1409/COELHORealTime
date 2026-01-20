@@ -292,7 +292,7 @@ class TFDState(SharedState):
             "logloss": float(metrics.get('metrics.LogLoss') or 0),
         }
 
-    @rx.var
+    @rx.var(cache=True)
     def tfd_dashboard_figures(self) -> dict:
         """Generate all TFD dashboard Plotly figures (KPI indicators, gauges, confusion matrix)."""
         raw = self.tfd_metrics_raw
@@ -660,7 +660,7 @@ class TFDState(SharedState):
         """Get list of batch ML metric names for TFD."""
         return list(self.tfd_batch_metrics.keys())
 
-    @rx.var
+    @rx.var(cache=True)
     def tfd_batch_dashboard_figures(self) -> dict:
         """Generate Plotly figures for batch ML metrics dashboard.
 
