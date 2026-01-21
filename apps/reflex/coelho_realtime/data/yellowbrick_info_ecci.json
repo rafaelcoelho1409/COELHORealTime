@@ -1,0 +1,241 @@
+{
+  "project": "E-Commerce Customer Interactions",
+  "model": "KMeans (Batch ML)",
+  "task": "Clustering",
+  "visualizers": {
+    "KElbowVisualizer": {
+      "name": "K-Elbow Visualizer",
+      "category": "Clustering",
+      "description": "Plots the distortion score (within-cluster sum of squared distances) against different values of K. Helps identify the 'elbow' point where adding more clusters yields diminishing returns.",
+      "interpretation": "Look for the 'elbow' - where the curve bends sharply and starts to flatten. Before the elbow, adding clusters significantly reduces distortion. After it, improvements are marginal.",
+      "ecci_context": "For customer segmentation, the elbow method helps find the natural number of customer groups. Too few clusters oversimplify behavior patterns; too many create noise and marketing complexity.",
+      "when_to_use": "Use when choosing the number of clusters for KMeans. Essential first step before analyzing cluster quality with other visualizers.",
+      "parameters": "`k`: Range of K values to test, `metric`: distortion (default), silhouette, calinski_harabasz"
+    },
+    "SilhouetteVisualizer": {
+      "name": "Silhouette Visualizer",
+      "category": "Clustering",
+      "description": "Shows silhouette coefficients for each sample, grouped by cluster. Each cluster appears as a 'knife shape' where width indicates cluster size and coefficient indicates sample fit quality.",
+      "interpretation": "Uniform knife shapes of similar width indicate well-balanced clusters. Samples with negative silhouette scores may be misassigned. Wide variation within a cluster suggests internal heterogeneity.",
+      "ecci_context": "Reveals which customer segments are well-defined vs. ambiguous. Negative scores indicate customers that might fit better in other segments - potential for re-assignment or finer segmentation.",
+      "when_to_use": "Use after KMeans training to validate cluster quality. Essential for understanding how well samples fit their assigned clusters.",
+      "parameters": "`colors`: Color palette for clusters, `ax`: Matplotlib axes object"
+    },
+    "InterclusterDistance": {
+      "name": "Intercluster Distance Map",
+      "category": "Clustering",
+      "description": "A 2D embedding showing cluster centers as circles. Circle size represents cluster membership count, and positions show relative distances between cluster centers.",
+      "interpretation": "Well-separated circles indicate distinct clusters. Overlapping or very close circles suggest similar clusters that might be merged. Large circles are dominant segments.",
+      "ecci_context": "Visualizes how distinct customer segments are from each other. Overlapping clusters might indicate similar browsing/purchase patterns that could be combined for simpler marketing.",
+      "when_to_use": "Use to understand cluster relationships and whether clusters represent truly distinct customer behaviors or could be consolidated.",
+      "parameters": "`embedding`: Dimensionality reduction method (MDS, TSNE), `legend`: Show cluster legends"
+    },
+    "Rank1D": {
+      "name": "Rank 1D (Feature Ranking)",
+      "category": "Feature Analysis",
+      "description": "Ranks individual features using a statistical test. By default uses Shapiro-Wilk test to measure how normally distributed each feature is.",
+      "interpretation": "Higher scores indicate features that deviate more from normal distribution. Features with non-normal distributions might benefit from transformation or may indicate interesting patterns.",
+      "ecci_context": "Identifies which customer features have unusual distributions. For example, price or time_on_page might be heavily skewed, indicating different customer types (browsers vs. buyers).",
+      "when_to_use": "Use during feature engineering to understand individual feature characteristics. Helps identify features that might need transformation (log, sqrt, etc.).",
+      "parameters": "`algorithm`: Ranking algorithm (shapiro, variance), `orient`: Horizontal or vertical bars"
+    },
+    "Rank2D": {
+      "name": "Rank 2D (Feature Correlation Matrix)",
+      "category": "Feature Analysis",
+      "description": "A heatmap showing pairwise relationships between features. Supports Pearson correlation, Spearman rank correlation, covariance, and Kendall tau.",
+      "interpretation": "Red = positive correlation, Blue = negative correlation, White = no correlation. Look for: (1) highly correlated feature pairs (redundancy), (2) unexpected correlations that might indicate feature interactions.",
+      "ecci_context": "Identify redundant features (e.g., price and quantity might correlate). Check if derived features (hour, day) correlate with event_type. Unusual correlations might reveal customer behavior patterns.",
+      "when_to_use": "Use for multicollinearity detection before clustering. Helps select features and understand feature relationships.",
+      "parameters": "`algorithm`: Correlation method (pearson, spearman, covariance, kendalltau), `colormap`: Color scheme"
+    },
+    "PCA": {
+      "name": "PCA (Principal Component Analysis)",
+      "category": "Feature Analysis",
+      "description": "Projects high-dimensional data onto 2 principal components for visualization. Each point is a customer interaction, colored by cluster assignment.",
+      "interpretation": "If clusters form visually distinct groups, the clustering captures meaningful variance. Overlapping clusters indicate features may not fully separate customer behaviors.",
+      "ecci_context": "Shows whether customer segments have fundamentally different feature patterns. Clear separation = distinct customer types. Heavy overlap = subtle differences requiring more features or different algorithms.",
+      "when_to_use": "Use as a quick sanity check for cluster separability. Fast to compute and gives immediate visual feedback on clustering quality.",
+      "parameters": "`scale`: Standardize features before PCA, `projection`: Number of components (2 or 3), `classes`: Cluster names for legend"
+    },
+    "Manifold": {
+      "name": "Manifold (t-SNE/UMAP)",
+      "category": "Feature Analysis",
+      "description": "Non-linear dimensionality reduction that preserves local structure. t-SNE is effective at revealing clusters that linear methods (PCA) might miss.",
+      "interpretation": "Points close together are similar in the original high-dimensional space. Look for: (1) distinct cluster islands, (2) sub-groups within clusters, (3) outliers far from any cluster.",
+      "ecci_context": "Can reveal **customer sub-segments** - different behavior patterns (heavy browsers, quick buyers, comparison shoppers) might form separate groups. More powerful than PCA but SLOW (30-120 seconds).",
+      "when_to_use": "Use for deep exploration of data structure when PCA doesn't show clear patterns. Run on sampled data first due to computational cost.",
+      "parameters": "`manifold`: Algorithm (tsne, umap, isomap, mds), `n_neighbors`: Neighborhood size, `random_state`: Reproducibility seed"
+    },
+    "ParallelCoordinates": {
+      "name": "Parallel Coordinates",
+      "category": "Feature Analysis",
+      "description": "Each feature is a vertical axis. Each customer interaction is a line connecting its values across all features. Lines are colored by cluster.",
+      "interpretation": "Look for feature ranges where cluster lines separate. If lines from different clusters cross similarly, that feature doesn't help discrimination.",
+      "ecci_context": "Identify **feature ranges that distinguish customer segments**: e.g., high time_on_page + low quantity = browsers, high quantity + Electronics = bulk buyers.",
+      "when_to_use": "Use to understand multi-dimensional patterns and feature interactions. Best with normalized features and sampling (too many lines = visual noise).",
+      "parameters": "`normalize`: Scaling method (minmax, standard), `sample`: Fraction of data to plot, `alpha`: Line transparency"
+    },
+    "RadViz": {
+      "name": "RadViz (Radial Visualization)",
+      "category": "Feature Analysis",
+      "description": "Features are arranged as points on a circle. Each customer interaction is positioned based on its feature values - pulled toward features with high values.",
+      "interpretation": "If cluster points group in specific regions, those nearby features characterize that segment. Points near the center have balanced feature values.",
+      "ecci_context": "Quickly identifies which features 'pull' customer segments to specific regions. Good for discovering feature combinations that characterize segments (e.g., mobile users cluster near OS + browser).",
+      "when_to_use": "Use for quick visual cluster separability check. Works best with normalized features and moderate number of features (5-15).",
+      "parameters": "`alpha`: Point transparency, `classes`: Cluster names for legend"
+    },
+    "JointPlot": {
+      "name": "Joint Plot (2D Feature Correlation)",
+      "category": "Feature Analysis",
+      "description": "Scatter plot showing relationship between two features with marginal histograms. Includes correlation coefficient.",
+      "interpretation": "The scatter plot shows feature co-occurrence patterns. Marginal histograms show individual distributions. Correlation coefficient quantifies linear relationship.",
+      "ecci_context": "Explore specific feature pairs: e.g., price vs quantity (do high-value customers buy more?), time_on_page vs event_type (do browsers spend more time?).",
+      "when_to_use": "Use for deep-dive into specific feature pairs after Rank2D identifies interesting correlations. Good for hypothesis testing about customer behavior.",
+      "parameters": "`columns`: Two feature names to plot, `correlation`: Method (pearson, spearman), `kind`: Plot type (scatter, hex)"
+    },
+    "ClassBalance": {
+      "name": "Class Balance (Cluster Distribution)",
+      "category": "Target",
+      "description": "Bar chart showing the count (or proportion) of samples in each cluster. Shows how evenly distributed customers are across segments.",
+      "interpretation": "Equal-height bars = balanced clusters. Very unequal bars indicate dominant segments and rare customer types.",
+      "ecci_context": "**Critical for marketing resource allocation!** A cluster with 80% of customers needs different attention than one with 2%. Small clusters might be high-value niches or outliers to investigate.",
+      "when_to_use": "Always visualize first. Understanding cluster balance is fundamental to marketing strategy and resource allocation.",
+      "parameters": "`labels`: Cluster names for x-axis, `colors`: Bar colors per cluster"
+    },
+    "FeatureCorrelation": {
+      "name": "Feature Correlation (Mutual Information)",
+      "category": "Target",
+      "description": "Bar chart showing correlation between each feature and the cluster assignment. Uses mutual information which captures non-linear relationships.",
+      "interpretation": "Higher bars = stronger predictors of cluster assignment. Unlike Pearson correlation, mutual information captures any statistical dependency.",
+      "ecci_context": "Identifies which features most strongly define customer segments. Top features should make business sense (event_type, product_category). Unexpected top features might indicate algorithmic quirks.",
+      "when_to_use": "Use to understand what drives cluster separation. Features with near-zero mutual information might be removable without losing cluster quality.",
+      "parameters": "`method`: mutual_info-classification, `labels`: Feature names, `sort`: Order by importance"
+    },
+    "FeatureCorrelation_Pearson": {
+      "name": "Feature Correlation (Pearson)",
+      "category": "Target",
+      "description": "Bar chart showing linear correlation between each feature and the cluster assignment. Faster than mutual information but only captures linear relationships.",
+      "interpretation": "Positive values = feature increases with cluster ID, Negative = decreases. Values near zero = no linear relationship (but non-linear relationship might exist).",
+      "ecci_context": "Quick linear analysis - which features linearly separate clusters? Compare with Mutual Information: features with low Pearson but high MI have non-linear relationships worth exploring.",
+      "when_to_use": "Use as a fast complement to Mutual Information. Useful when you suspect linear relationships or want quick feature screening.",
+      "parameters": "`method`: pearson, `labels`: Feature names, `sort`: Order by absolute correlation"
+    },
+    "BalancedBinningReference": {
+      "name": "Balanced Binning Reference",
+      "category": "Target",
+      "description": "Histogram of a continuous feature with vertical lines showing optimal bin boundaries for balanced binning. Helps understand feature distributions.",
+      "interpretation": "Shows feature distribution and suggested quantile-based bins. For continuous features, helps decide discretization strategies.",
+      "ecci_context": "**Useful for price/time_on_page analysis.** Shows how these continuous features are distributed across customers. Can inform feature engineering (binning price into categories).",
+      "when_to_use": "Use for continuous feature analysis when considering discretization. Helps understand continuous feature distributions.",
+      "parameters": "`bins`: Number of bins to create, `target`: Target column name"
+    },
+    "FeatureImportances": {
+      "name": "Feature Importances",
+      "category": "Model Selection",
+      "description": "Horizontal bar chart ranking features by their importance in the model. For KMeans, this shows which features contribute most to cluster separation.",
+      "interpretation": "Longer bars = more important features. The model relies more heavily on top features. Bottom features might be removable without losing cluster quality.",
+      "ecci_context": "Reveals what KMeans learned: which features drive customer segmentation? Top features should align with business intuition (event_type, product_category). Unexpected rankings warrant investigation.",
+      "when_to_use": "Use after training to interpret the model. Essential for model debugging, feature selection, and explaining segments to stakeholders.",
+      "parameters": "`labels`: Feature names, `relative`: Show as percentage of max importance, `absolute`: Show raw importance values"
+    },
+    "CVScores": {
+      "name": "Cross-Validation Scores",
+      "category": "Model Selection",
+      "description": "Bar chart showing model performance (silhouette score) across different cross-validation folds. Includes mean score and standard deviation.",
+      "interpretation": "Consistent bars = stable clustering. High variance across folds = model is sensitive to data split, suggesting overfitting or unstable clusters.",
+      "ecci_context": "Verifies cluster stability across different subsets of customers. High variance might mean segments aren't consistent across time periods or customer samples.",
+      "when_to_use": "Use to verify clustering stability and get confidence intervals on quality estimates. Essential before using segments for marketing.",
+      "parameters": "`cv`: Number of folds, `scoring`: Metric to evaluate (silhouette, calinski_harabasz)"
+    },
+    "ValidationCurve": {
+      "name": "Validation Curve",
+      "category": "Model Selection",
+      "description": "Shows how training and validation scores change as a hyperparameter varies. Helps identify optimal hyperparameter values and detect overfitting.",
+      "interpretation": "Gap between train/test = overfitting. Both decreasing = underfitting. Find the hyperparameter value where test score peaks before train-test gap widens.",
+      "ecci_context": "Tune KMeans parameters: n_clusters (primary), n_init (robustness), max_iter (convergence). Helps find the sweet spot for customer segmentation quality.",
+      "when_to_use": "Use for hyperparameter tuning to find optimal complexity. Run for key hyperparameters like n_clusters.",
+      "parameters": "`param_name`: Hyperparameter to tune, `param_range`: Values to test, `cv`: Cross-validation folds"
+    },
+    "LearningCurve": {
+      "name": "Learning Curve",
+      "category": "Model Selection",
+      "description": "Shows how training and validation scores change as training set size increases. Helps diagnose if more data would improve the clustering.",
+      "interpretation": "Converging curves with gap = more data won't help much. Curves still far apart = more data would help improve cluster quality.",
+      "ecci_context": "Determines if collecting more customer interaction data would improve segmentation. If curves converge early, focus on feature engineering instead of data collection.",
+      "when_to_use": "Use when deciding whether to invest in data collection or model complexity. Helps set expectations for improvement potential.",
+      "parameters": "`train_sizes`: Fractions of training data to test, `cv`: Cross-validation folds, `scoring`: Metric to plot"
+    },
+    "RFECV": {
+      "name": "Recursive Feature Elimination (RFECV)",
+      "category": "Model Selection",
+      "description": "Recursively removes least important features and tracks cross-validation score. Identifies the optimal number of features to use.",
+      "interpretation": "The curve shows score vs number of features. Peak indicates optimal feature count. Flat plateau means extra features don't hurt but don't help.",
+      "ecci_context": "Find minimal feature set for customer segmentation: fewer features = simpler segments to explain and act upon. Important for interpretable marketing segments.",
+      "when_to_use": "Use for feature selection when you want to simplify the model. Computationally expensive (VERY SLOW) - run on sampled data.",
+      "parameters": "`cv`: Cross-validation folds, `scoring`: Metric to optimize, `step`: Features to remove per iteration"
+    },
+    "DroppingCurve": {
+      "name": "Dropping Curve (Feature Robustness)",
+      "category": "Model Selection",
+      "description": "Shows how model performance changes when random subsets of features are used. Tests model robustness to missing features.",
+      "interpretation": "Gradual decline = model is robust, features are redundant. Sharp decline = model relies heavily on specific features. Flat = many features are unnecessary.",
+      "ecci_context": "Tests if customer segmentation is robust when some features are missing (common in production due to data quality issues). Identifies critical features that must be present.",
+      "when_to_use": "Use to test production robustness and understand feature redundancy. Helps plan for graceful degradation when features are unavailable.",
+      "parameters": "`feature_sizes`: Fractions of features to test, `cv`: Cross-validation folds, `random_state`: Reproducibility"
+    },
+    "FreqDistVisualizer": {
+      "name": "Frequency Distribution Visualizer",
+      "category": "Text Analysis",
+      "description": "Bar chart showing the most frequent terms in the text corpus (search queries). Displays term frequency distribution with optional filtering.",
+      "interpretation": "Tall bars indicate common search terms. Long tail shows rare terms. The distribution shape (Zipfian) reveals vocabulary diversity.",
+      "ecci_context": "Reveals **what customers search for most**. Top terms inform product placement, SEO strategy, and inventory decisions. Rare terms might indicate unmet needs or niche markets.",
+      "when_to_use": "Use to understand search query patterns before building text-based features. Essential for search optimization and product discovery.",
+      "parameters": "`n`: Number of top terms to show, `orient`: Horizontal or vertical bars, `stopwords`: Terms to exclude"
+    },
+    "TSNEVisualizer": {
+      "name": "t-SNE Text Visualizer",
+      "category": "Text Analysis",
+      "description": "t-SNE projection of text documents (search queries) showing semantic similarity. Documents close together have similar word usage patterns.",
+      "interpretation": "Clusters indicate groups of semantically similar search queries. Isolated points are unique queries. Spread indicates vocabulary diversity.",
+      "ecci_context": "Reveals **search intent clusters**: product searches, deal hunting, comparison shopping. Helps understand how customers naturally group their search behavior.",
+      "when_to_use": "Use for exploring text data structure when you suspect natural groupings in search queries. Computationally expensive.",
+      "parameters": "`perplexity`: Balance of local vs global structure, `n_iter`: Optimization iterations"
+    },
+    "UMAPVisualizer": {
+      "name": "UMAP Text Visualizer",
+      "category": "Text Analysis",
+      "description": "UMAP projection of text documents showing semantic similarity. Faster than t-SNE and often preserves more global structure.",
+      "interpretation": "Similar to t-SNE but with better preservation of global relationships. Clusters represent query groups, distances between clusters are more meaningful.",
+      "ecci_context": "Like t-SNE but faster and better at showing relationships between query clusters. Use when you want to understand both local patterns and overall search landscape.",
+      "when_to_use": "Use as a faster alternative to t-SNE, especially for larger text corpora. Better when global structure matters.",
+      "parameters": "`n_neighbors`: Local neighborhood size, `min_dist`: Minimum distance between points, `metric`: Distance metric"
+    },
+    "DispersionPlot": {
+      "name": "Dispersion Plot",
+      "category": "Text Analysis",
+      "description": "Shows where specific words appear across documents. Each row is a word, each column represents document position, dots show occurrences.",
+      "interpretation": "Evenly dispersed words appear throughout the corpus. Clustered dots indicate words concentrated in specific documents/periods.",
+      "ecci_context": "Track how search terms evolve over time or customer sessions. Seasonal terms (holiday, sale) should cluster; evergreen terms should disperse evenly.",
+      "when_to_use": "Use to understand temporal or positional patterns in search queries. Good for detecting seasonal trends or campaign effects.",
+      "parameters": "`words`: Specific words to track, `ignore_case`: Case-insensitive matching"
+    },
+    "WordCorrelationPlot": {
+      "name": "Word Correlation Plot",
+      "category": "Text Analysis",
+      "description": "Heatmap showing pairwise correlation between words based on co-occurrence. Reveals which words tend to appear together in search queries.",
+      "interpretation": "High positive correlation = words often appear together. Negative correlation = words rarely co-occur. Zero = independent usage.",
+      "ecci_context": "Discovers **common search patterns**: 'cheap + phone', 'gift + box'. Informs bundling opportunities, autocomplete suggestions, and related product recommendations.",
+      "when_to_use": "Use to discover word associations and common phrase patterns. Valuable for search UX improvement and product bundling.",
+      "parameters": "`terms`: Words to analyze, `method`: Correlation method (pearson, spearman)"
+    },
+    "PosTagVisualizer": {
+      "name": "Part-of-Speech Tag Visualizer",
+      "category": "Text Analysis",
+      "description": "Bar chart showing the distribution of part-of-speech tags (nouns, verbs, adjectives, etc.) in the text corpus.",
+      "interpretation": "High noun frequency = specific product searches. High adjective frequency = attribute-focused searches (cheap, best, red). Verbs might indicate intent (buy, compare).",
+      "ecci_context": "Reveals **search intent structure**: Noun-heavy = product-focused, Adjective-heavy = quality-conscious customers, Verb-heavy = action-oriented searches.",
+      "when_to_use": "Use to understand the linguistic structure of search queries. Informs query processing and intent classification strategies.",
+      "parameters": "`tags`: Specific POS tags to include, `normalize`: Show percentages vs counts"
+    }
+  }
+}

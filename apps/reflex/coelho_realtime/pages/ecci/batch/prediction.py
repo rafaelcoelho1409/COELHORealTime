@@ -175,12 +175,66 @@ def _form_card() -> rx.Component:
                     ),
                     spacing="1", align_items="start", width="100%"
                 ),
+                # Quantity
+                rx.vstack(
+                    rx.text("Quantity", size="1", color="gray"),
+                    rx.input(
+                        type="number",
+                        value=ECCIState.ecci_form_data.get("quantity", ""),
+                        on_change=lambda v: ECCIState.update_ecci("quantity", v),
+                        min=1,
+                        step=1,
+                        width="100%"
+                    ),
+                    spacing="1", align_items="start", width="100%"
+                ),
+                # Time on Page
+                rx.vstack(
+                    rx.text("Time (s)", size="1", color="gray"),
+                    rx.input(
+                        type="number",
+                        value=ECCIState.ecci_form_data.get("time_on_page_seconds", ""),
+                        on_change=lambda v: ECCIState.update_ecci("time_on_page_seconds", v),
+                        min=0,
+                        step=1,
+                        width="100%"
+                    ),
+                    spacing="1", align_items="start", width="100%"
+                ),
+                # Session Event Sequence
+                rx.vstack(
+                    rx.text("Sequence", size="1", color="gray"),
+                    rx.input(
+                        type="number",
+                        value=ECCIState.ecci_form_data.get("session_event_sequence", ""),
+                        on_change=lambda v: ECCIState.update_ecci("session_event_sequence", v),
+                        min=1,
+                        step=1,
+                        width="100%"
+                    ),
+                    spacing="1", align_items="start", width="100%"
+                ),
+                # Referrer URL
+                rx.vstack(
+                    rx.text("Referrer", size="1", color="gray"),
+                    rx.input(
+                        value=ECCIState.ecci_form_data.get("referrer_url", ""),
+                        on_change=lambda v: ECCIState.update_ecci("referrer_url", v),
+                        placeholder="google.com",
+                        width="100%"
+                    ),
+                    spacing="1", align_items="start", width="100%"
+                ),
                 columns="3",
                 spacing="2",
                 width="100%"
             ),
+            # Display fields (read-only info)
             rx.vstack(
-                rx.text(f"User ID: {ECCIState.ecci_form_data.get('user_id', '')}", size="1", color="gray"),
+                rx.text(f"Customer ID: {ECCIState.ecci_form_data.get('customer_id', '')}", size="1", color="gray"),
+                rx.text(f"Event ID: {ECCIState.ecci_form_data.get('event_id', '')}", size="1", color="gray"),
+                rx.text(f"Page URL: {ECCIState.ecci_form_data.get('page_url', '')}", size="1", color="gray"),
+                rx.text(f"Search Query: {ECCIState.ecci_form_data.get('search_query', '')}", size="1", color="gray"),
                 rx.text(f"Session ID: {ECCIState.ecci_form_data.get('session_id', '')}", size="1", color="gray"),
                 spacing="1",
                 align_items="start",
@@ -195,54 +249,76 @@ def _form_card() -> rx.Component:
 
 
 def _prediction_result() -> rx.Component:
-    """Build the prediction result display."""
+    """Build the prediction result display - matches Incremental ML design."""
     return rx.vstack(
-        rx.hstack(
-            rx.icon("users", size=20, color=rx.color("accent", 10)),
-            rx.heading("Prediction Result", size="5", weight="bold"),
-            spacing="2",
-            align_items="center",
-            width="100%"
-        ),
+        # Customer Location Map (always visible)
+        ecci_map(),
+        # Prediction cards in 2-column layout
         rx.cond(
             ECCIState.ecci_batch_prediction_show,
-            rx.card(
-                rx.vstack(
-                    rx.plotly(data=ECCIState.ecci_batch_prediction_figure, width="100%"),
-                    rx.hstack(
-                        rx.card(
-                            rx.vstack(
-                                rx.hstack(
-                                    rx.icon("users", size=14, color="purple"),
-                                    rx.text("Cluster Assignment", size="1", color="gray"),
-                                    spacing="1",
-                                    align_items="center"
-                                ),
-                                rx.text(
-                                    f"Cluster {ECCIState.ecci_batch_predicted_cluster}",
-                                    size="5",
-                                    weight="bold",
-                                    color="purple",
-                                    align="center"
-                                ),
-                                spacing="1",
-                                align_items="center",
-                                width="100%"
+            rx.vstack(
+                rx.hstack(
+                    # Left: Predicted Cluster (50%)
+                    rx.card(
+                        rx.vstack(
+                            rx.hstack(
+                                rx.icon("users", size=16, color="purple"),
+                                rx.heading("Predicted Cluster", size="3", weight="bold"),
+                                spacing="2",
+                                align_items="center"
                             ),
-                            variant="surface",
-                            size="1",
+                            rx.plotly(data=ECCIState.ecci_batch_prediction_figure, width="100%"),
+                            spacing="2",
+                            align_items="center",
                             width="100%"
                         ),
-                        spacing="2",
-                        width="100%"
+                        width="50%"
                     ),
-                    ecci_map(),
+                    # Right: Cluster Behavior (50%)
+                    rx.card(
+                        rx.vstack(
+                            rx.hstack(
+                                rx.icon("bar-chart-3", size=16, color="blue"),
+                                rx.heading("Cluster Behavior", size="3", weight="bold"),
+                                spacing="2",
+                                align_items="center"
+                            ),
+                            rx.text("Select a feature to see its distribution in the predicted cluster:", size="2", color="gray"),
+                            rx.select(
+                                ECCIState.ecci_feature_options,
+                                value=ECCIState.ecci_selected_feature,
+                                on_change=ECCIState.set_ecci_selected_feature,
+                                width="100%"
+                            ),
+                            rx.plotly(data=ECCIState.ecci_selected_cluster_feature_figure, width="100%"),
+                            spacing="2",
+                            align_items="start",
+                            width="100%"
+                        ),
+                        width="50%"
+                    ),
                     spacing="4",
                     width="100%"
                 ),
-                variant="classic",
+                # Cluster interpretation info
+                rx.callout(
+                    rx.vstack(
+                        rx.text("**Cluster Interpretation:**", weight="bold"),
+                        rx.text(
+                            "The predicted cluster represents a group of customers with similar interaction patterns. "
+                            "Use the 'Cluster Behavior' chart to understand the characteristics of this cluster."
+                        ),
+                        spacing="1",
+                        align_items="start"
+                    ),
+                    icon="info",
+                    color="purple",
+                    width="100%"
+                ),
+                spacing="4",
                 width="100%"
             ),
+            # No prediction yet - show appropriate callout
             rx.cond(
                 SharedState.batch_model_available["E-Commerce Customer Interactions"],
                 rx.callout(

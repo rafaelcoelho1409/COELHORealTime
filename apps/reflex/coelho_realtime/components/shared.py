@@ -133,6 +133,7 @@ def yellowbrick_info_dialog(visualizer_key: str, project_key: str = "tfd") -> rx
     context_config = {
         "tfd": {"key": "fraud_context", "header": "In Fraud Detection", "icon": "shield-alert"},
         "eta": {"key": "eta_context", "header": "In ETA Prediction", "icon": "clock"},
+        "ecci": {"key": "ecci_context", "header": "In Customer Clustering", "icon": "shopping-cart"},
     }
     ctx = context_config.get(project_key, context_config["tfd"])
     if not info:

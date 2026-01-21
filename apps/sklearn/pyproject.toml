@@ -32,6 +32,12 @@ dependencies = [
     "matplotlib",
     "boto3",
     "setuptools",  # Provides distutils compatibility for yellowbrick on Python 3.13 (LooseVersion)
+    # UMAP visualization (requires numba/llvmlite - specify versions for Python 3.13 compatibility)
+    "umap-learn>=0.5.7",
+    "numba>=0.60.0",
+    "llvmlite>=0.43.0",
+    # Text analysis (NLTK for PosTagVisualizer)
+    "nltk>=3.9.2",
     # Caching
     "redis",  # YellowBrick visualization caching
 ]

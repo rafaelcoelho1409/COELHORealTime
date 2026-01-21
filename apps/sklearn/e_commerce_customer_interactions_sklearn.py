@@ -32,9 +32,12 @@ import pandas as pd
 from sklearn import metrics
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
+import duckdb
 from functions import (
     load_ecci_event_data_duckdb,
+    get_ecci_label_encodings,
     ECCI_ALL_FEATURES,
+    DELTA_PATHS,
 )
 
 
@@ -182,9 +185,10 @@ def main(sample_frac: float | None, max_rows: int | None, n_clusters: int | None
         load_start = time.time()
         print("\n=== Loading and Preprocessing Data ===")
         print("Event-level data with DENSE_RANK encoding (like TFD/ETA)...")
-        df, feature_names = load_ecci_event_data_duckdb(
+        df, feature_names, search_queries = load_ecci_event_data_duckdb(
             sample_frac=sample_frac,
             max_rows=max_rows,
+            include_search_queries=True,
         )
         load_time = time.time() - load_start
         print(f"\nData loading/preprocessing completed in {load_time:.2f} seconds")
@@ -329,15 +333,19 @@ def main(sample_frac: float | None, max_rows: int | None, n_clusters: int | None
                 with open(model_path, 'wb') as f:
                     pickle.dump(model, f)
                 mlflow.log_artifact(model_path)
-                # Save scaler (needed for inference)
+                # Save scaler and label encodings (needed for inference)
+                print("Getting label encodings for categorical features...")
+                label_encodings = get_ecci_label_encodings()
                 encoder_path = os.path.join(tmpdir, ENCODER_ARTIFACT_NAME)
                 preprocessor_dict = {
                     "scaler": scaler,
                     "feature_names": feature_names,
+                    "label_encodings": label_encodings,  # value -> int mappings
                 }
                 with open(encoder_path, 'wb') as f:
                     pickle.dump(preprocessor_dict, f)
                 mlflow.log_artifact(encoder_path)
+                print(f"  Saved label encodings for {len(label_encodings)} categorical features")
                 # Save training data for YellowBrick visualization reproducibility
                 # Uses snappy compression (fast decompression, industry default)
                 print("Saving training data artifacts...")
@@ -358,6 +366,18 @@ def main(sample_frac: float | None, max_rows: int | None, n_clusters: int | None
                 centers_df.to_parquet(os.path.join(tmpdir, "cluster_centers.parquet"), compression="snappy")
                 mlflow.log_artifact(os.path.join(tmpdir, "cluster_centers.parquet"), artifact_path="training_data")
                 print(f"  Saved: cluster_centers={centers_df.shape}")
+                # Save search queries for YellowBrick text analysis
+                # Uses pre-loaded search_queries from initial data load (same DuckDB connection)
+                print("Saving search queries for text analysis...")
+                if search_queries:
+                    search_queries_path = os.path.join(tmpdir, "search_queries.txt")
+                    with open(search_queries_path, 'w') as f:
+                        for q in search_queries:
+                            f.write(q + '\n')
+                    mlflow.log_artifact(search_queries_path, artifact_path="training_data")
+                    print(f"  Saved: search_queries={len(search_queries)} unique queries")
+                else:
+                    print("  Warning: No search queries available for text analysis")
             # Log model using MLflow's sklearn flavor
             mlflow.sklearn.log_model(model, "model")
             run_id = mlflow.active_run().info.run_id

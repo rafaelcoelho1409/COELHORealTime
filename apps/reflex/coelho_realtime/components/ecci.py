@@ -11,7 +11,7 @@ All components use ECCIState for ECCI-specific state.
 """
 import reflex as rx
 from ..states import ECCIState, SharedState
-from .shared import metric_info_dialog, ml_training_switch, batch_ml_run_and_training_box
+from .shared import metric_info_dialog, yellowbrick_info_dialog, ml_training_switch, batch_ml_run_and_training_box
 
 
 # =============================================================================
@@ -71,6 +71,41 @@ def ecci_gauge_card_with_info(plotly_key: str, metric_key: str) -> rx.Component:
         ),
         size="1",
         width="50%"
+    )
+
+
+def yellowbrick_ecci_dynamic_info_button() -> rx.Component:
+    """Create a dynamic info button that shows info for the currently selected YellowBrick visualizer.
+
+    Uses rx.match to render the correct info dialog based on ECCIState.yellowbrick_metric_name.
+    """
+    # All possible YellowBrick visualizers for ECCI
+    all_visualizers = [
+        # Clustering
+        "KElbowVisualizer", "SilhouetteVisualizer", "InterclusterDistance",
+        # Feature Analysis
+        "Rank1D", "Rank2D", "PCA", "Manifold",
+        "ParallelCoordinates", "RadViz", "JointPlot",
+        # Target
+        "ClassBalance", "FeatureCorrelation", "FeatureCorrelation_Pearson", "BalancedBinningReference",
+        # Model Selection
+        "FeatureImportances", "CVScores", "ValidationCurve",
+        "LearningCurve", "RFECV", "DroppingCurve",
+        # Text Analysis
+        "FreqDistVisualizer", "TSNEVisualizer", "UMAPVisualizer",
+        "DispersionPlot", "WordCorrelationPlot", "PosTagVisualizer",
+    ]
+
+    # Build match cases: (visualizer_name, info_dialog_component)
+    match_cases = [
+        (vis, yellowbrick_info_dialog(vis, "ecci"))
+        for vis in all_visualizers
+    ]
+
+    return rx.match(
+        ECCIState.yellowbrick_metric_name,
+        *match_cases,
+        rx.fragment()  # Default: no button if no valid selection
     )
 
 
@@ -1239,13 +1274,11 @@ def e_commerce_customer_interactions_batch_form(model_key: str = None, project_n
                                 ),
                                 rx.cond(
                                     ECCIState.ecci_batch_prediction_show,
-                                    rx.box(
-                                        rx.plotly(data=ECCIState.ecci_batch_prediction_figure, width="100%"),
+                                    rx.vstack(
+                                        rx.plotly(data=ECCIState.ecci_batch_prediction_figure, width="100%", height="100%"),
+                                        spacing="2",
                                         width="100%",
-                                        flex="1",
-                                        display="flex",
-                                        align_items="center",
-                                        justify_content="center"
+                                        flex="1"
                                     ),
                                     rx.box(
                                         rx.cond(

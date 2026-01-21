@@ -28,6 +28,7 @@ import time
 from datetime import datetime
 from functions import (
     process_sklearn_sample,
+    apply_ecci_label_encodings,
     load_or_create_sklearn_encoders,
     yellowbrick_classification_kwargs,
     yellowbrick_classification_visualizers,
@@ -39,10 +40,15 @@ from functions import (
     yellowbrick_target_visualizers,
     yellowbrick_model_selection_kwargs,
     yellowbrick_model_selection_visualizers,
+    yellowbrick_clustering_kwargs,
+    yellowbrick_clustering_visualizers,
+    yellowbrick_text_analysis_kwargs,
+    yellowbrick_text_analysis_visualizers,
     TFD_CAT_FEATURE_INDICES,
     ETA_CAT_FEATURE_INDICES,
     MLFLOW_MODEL_NAMES,
     PROJECT_TASK_TYPES,
+    DELTA_PATHS,
     load_model_from_mlflow,
     load_encoders_from_mlflow,
     get_best_mlflow_run,
@@ -66,6 +72,7 @@ PROJECT_NAMES_BATCH = [
 MODEL_SCRIPTS = {
     "transaction_fraud_detection_sklearn.py": "Transaction Fraud Detection",
     "estimated_time_of_arrival_sklearn.py": "Estimated Time of Arrival",
+    "e_commerce_customer_interactions_sklearn.py": "E-Commerce Customer Interactions",
 }
 
 
@@ -385,6 +392,19 @@ class PredictRequest(BaseModel):
     debug_weather_factor: Optional[float] = None
     debug_incident_delay_seconds: Optional[int] = None
     debug_driver_factor: Optional[float] = None
+    # ECCI fields
+    customer_id: Optional[str] = None
+    event_id: Optional[str] = None
+    session_id: Optional[str] = None
+    event_type: Optional[str] = None
+    product_id: Optional[str] = None
+    price: Optional[float] = None
+    quantity: Optional[int] = None
+    page_url: Optional[str] = None
+    referrer_url: Optional[str] = None
+    search_query: Optional[str] = None
+    time_on_page_seconds: Optional[int] = None
+    session_event_sequence: Optional[int] = None
 
 
 class MLflowMetricsRequest(BaseModel):
@@ -503,11 +523,12 @@ async def update_healthcheck(update_data: SklearnHealthcheck):
 
 @app.post("/predict")
 async def predict(request: PredictRequest):
-    """Make batch ML prediction using CatBoost models from MLflow.
+    """Make batch ML prediction using models from MLflow.
 
     Supports:
     - Transaction Fraud Detection: CatBoostClassifier (binary classification)
     - Estimated Time of Arrival: CatBoostRegressor (regression)
+    - E-Commerce Customer Interactions: KMeans (clustering)
 
     If run_id is provided, loads model from that specific run.
     Otherwise, uses model cache to get best model based on project-specific metric.
@@ -614,6 +635,75 @@ async def predict(request: PredictRequest):
             prediction = model.predict(X)[0]
             return {
                 "Estimated Time of Arrival": float(prediction),
+                "model_name": model_name,
+                "run_id": run_id,
+                "best_model": is_best_model
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    elif project_name == "E-Commerce Customer Interactions":
+        # Clustering prediction: assign event to cluster using KMeans
+        sample = {
+            "customer_id": request.customer_id,
+            "event_id": request.event_id,
+            "session_id": request.session_id,
+            "timestamp": request.timestamp,
+            "event_type": request.event_type,
+            "product_id": request.product_id,
+            "product_category": request.product_category,
+            "price": request.price,
+            "quantity": request.quantity,
+            "page_url": request.page_url,
+            "referrer_url": request.referrer_url,
+            "search_query": request.search_query,
+            "time_on_page_seconds": request.time_on_page_seconds,
+            "device_info": request.device_info,
+            "session_event_sequence": request.session_event_sequence,
+        }
+        try:
+            # Process sample to match training features
+            X = process_sklearn_sample(sample, project_name)
+            # Load model and scaler
+            if requested_run_id:
+                model = load_model_from_mlflow(project_name, model_name, run_id=requested_run_id)
+                encoders = load_encoders_from_mlflow(project_name, run_id=requested_run_id)
+                run_id = requested_run_id
+                is_best_model = False
+            else:
+                model, run_id = model_cache.get_model(project_name)
+                encoders = load_encoders_from_mlflow(project_name, run_id=run_id)
+                is_best_model = True
+            if model is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No trained model found for {project_name}. Train a model first."
+                )
+            # Get scaler and label encodings from encoders (required for clustering)
+            scaler = encoders.get("scaler") if encoders else None
+            label_encodings = encoders.get("label_encodings") if encoders else None
+            if scaler is None:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Scaler not found in model artifacts. Retrain the model."
+                )
+            # Apply label encodings to convert string categoricals to integers
+            if label_encodings:
+                X = apply_ecci_label_encodings(X, label_encodings)
+            else:
+                # Fallback: If no label_encodings, model was trained with old script
+                # Try to proceed with default 0 for categoricals
+                print("Warning: No label_encodings found. Prediction may be inaccurate.")
+                for col in ["event_type", "product_category", "product_id", "referrer_url", "browser", "os"]:
+                    if col in X.columns:
+                        X[col] = 0  # Default to 0 (unknown)
+            # Scale features and predict cluster
+            X_scaled = scaler.transform(X)
+            cluster_id = int(model.predict(X_scaled)[0])
+            return {
+                "cluster_id": cluster_id,
                 "model_name": model_name,
                 "run_id": run_id,
                 "best_model": is_best_model
@@ -775,6 +865,8 @@ def _get_visualization_artifact_path(metric_type: str, metric_name: str) -> str:
     - Feature Analysis → features
     - Target → target
     - Model Selection → model_selection
+    - Clustering → cluster
+    - Text Analysis → text
 
     Returns: visualizations/{module}/{metric_name}.png
     """
@@ -784,6 +876,8 @@ def _get_visualization_artifact_path(metric_type: str, metric_name: str) -> str:
         "Feature Analysis": "features",
         "Target": "target",
         "Model Selection": "model_selection",
+        "Clustering": "cluster",
+        "Text Analysis": "text",
     }
     module_name = module_map.get(metric_type, metric_type.lower().replace(" ", "_"))
     return f"visualizations/{module_name}/{metric_name}.png"
@@ -838,6 +932,63 @@ def _save_artifact(run_id: str, artifact_path: str, data: bytes) -> bool:
     except Exception as e:
         print(f"Failed to save artifact {artifact_path}: {e}")
         return False
+
+
+def _load_search_queries_from_mlflow(run_id: str, project_name: str) -> list[str]:
+    """Load search queries from MLflow artifacts for text analysis.
+
+    First tries to load from MLflow artifact 'training_data/search_queries.txt'.
+    If not available, loads directly from Delta Lake.
+
+    Args:
+        run_id: MLflow run ID
+        project_name: MLflow experiment name
+
+    Returns:
+        List of search query strings (non-empty)
+    """
+    import duckdb
+    from functions import DELTA_PATHS
+
+    # First try to load from MLflow artifact (if training script saved it)
+    try:
+        search_queries_path = mlflow.artifacts.download_artifacts(
+            run_id=run_id,
+            artifact_path="training_data/search_queries.txt",
+        )
+        with open(search_queries_path, 'r') as f:
+            search_queries = [line.strip() for line in f if line.strip()]
+        print(f"Loaded {len(search_queries)} search queries from MLflow artifact")
+        return search_queries
+    except Exception as e:
+        print(f"Search queries not found in MLflow artifacts: {e}")
+
+    # Fallback: Load directly from Delta Lake
+    print("Loading search queries from Delta Lake...")
+    try:
+        delta_path = DELTA_PATHS.get(project_name)
+        if not delta_path:
+            raise ValueError(f"No Delta path configured for {project_name}")
+
+        conn = duckdb.connect()
+        conn.execute("INSTALL delta; LOAD delta;")
+        query = f"""
+        SELECT DISTINCT search_query
+        FROM delta_scan('{delta_path}')
+        WHERE search_query IS NOT NULL
+          AND search_query != ''
+          AND LENGTH(search_query) > 2
+        LIMIT 5000
+        """
+        df = conn.execute(query).df()
+        conn.close()
+
+        search_queries = df['search_query'].astype(str).tolist()
+        search_queries = [q.strip() for q in search_queries if q.strip()]
+        print(f"Loaded {len(search_queries)} search queries from Delta Lake")
+        return search_queries
+    except Exception as e:
+        raise ValueError(f"Failed to load search queries: {e}")
 
 
 def _sync_generate_yellowbrick_plot(
@@ -941,6 +1092,30 @@ def _sync_generate_yellowbrick_plot(
             yb_vis = yellowbrick_model_selection_visualizers(
                 yb_kwargs, X_train, X_test, y_train, y_test, model=model,
                 project_name=project_name
+            )
+        elif metric_type == "Clustering":
+            # Clustering visualizers (ECCI only)
+            model_name = MLFLOW_MODEL_NAMES.get(project_name)
+            model = load_model_from_mlflow(project_name, model_name, run_id=run_id)
+            n_clusters = model.n_clusters if hasattr(model, 'n_clusters') else 5
+            yb_kwargs = yellowbrick_clustering_kwargs(
+                project_name, metric_name, n_clusters=n_clusters
+            )
+            yb_vis = yellowbrick_clustering_visualizers(
+                yb_kwargs, X, y, model=model, n_clusters=n_clusters
+            )
+        elif metric_type == "Text Analysis":
+            # Text analysis visualizers (ECCI only - search queries)
+            # Load search queries from the training data (stored as separate artifact)
+            try:
+                search_queries = _load_search_queries_from_mlflow(run_id, project_name)
+            except Exception as e:
+                raise ValueError(f"Failed to load search queries: {e}")
+            # Get cluster labels for coloring (if y is cluster assignments)
+            cluster_labels = y.values if y is not None else None
+            yb_kwargs = yellowbrick_text_analysis_kwargs(project_name, metric_name)
+            yb_vis = yellowbrick_text_analysis_visualizers(
+                yb_kwargs, search_queries, cluster_labels=cluster_labels
             )
         else:
             raise ValueError(f"Unknown metric type: {metric_type}")

@@ -18,209 +18,6 @@ BASE_ROUTE = "/tfd"
 BATCH_ROUTE = "/tfd/batch"
 
 
-def _form_card() -> rx.Component:
-    """Build the transaction form card (same as prediction page)."""
-    return rx.card(
-        rx.vstack(
-            rx.hstack(
-                rx.icon("credit-card", size=20, color=rx.color("accent", 10)),
-                rx.heading("Transaction Details", size="4", weight="bold"),
-                spacing="2",
-                align_items="center"
-            ),
-            rx.button(
-                "Predict",
-                on_click=TFDState.predict_batch_tfd,
-                size="2",
-                width="100%",
-                disabled=~SharedState.batch_model_available["Transaction Fraud Detection"]
-            ),
-            rx.button(
-                rx.hstack(
-                    rx.icon("shuffle", size=14),
-                    rx.text("Randomize All Fields", size="2"),
-                    spacing="1",
-                    align_items="center"
-                ),
-                on_click=TFDState.randomize_tfd_form,
-                variant="soft",
-                color_scheme="blue",
-                size="2",
-                width="100%"
-            ),
-            rx.divider(),
-            rx.grid(
-                rx.vstack(
-                    rx.text("Amount", size="1", color="gray"),
-                    rx.input(
-                        type="number",
-                        value=TFDState.tfd_form_data.get("amount", ""),
-                        on_change=lambda v: TFDState.update_tfd("amount", v),
-                        step=0.01,
-                        width="100%"
-                    ),
-                    spacing="1", align_items="start", width="100%"
-                ),
-                rx.vstack(
-                    rx.text("Account Age", size="1", color="gray"),
-                    rx.input(
-                        type="number",
-                        value=TFDState.tfd_form_data.get("account_age_days", ""),
-                        on_change=lambda v: TFDState.update_tfd("account_age_days", v),
-                        min=0, step=1, width="100%"
-                    ),
-                    spacing="1", align_items="start", width="100%"
-                ),
-                rx.vstack(
-                    rx.text("Currency", size="1", color="gray"),
-                    rx.select(
-                        TFDState.tfd_options["currency"],
-                        value=TFDState.tfd_form_data.get("currency", ""),
-                        on_change=lambda v: TFDState.update_tfd("currency", v),
-                        width="100%"
-                    ),
-                    spacing="1", align_items="start", width="100%"
-                ),
-                rx.vstack(
-                    rx.text("Date", size="1", color="gray"),
-                    rx.input(
-                        type="date",
-                        value=TFDState.tfd_form_data.get("timestamp_date", ""),
-                        on_change=lambda v: TFDState.update_tfd("timestamp_date", v),
-                        width="100%"
-                    ),
-                    spacing="1", align_items="start", width="100%"
-                ),
-                rx.vstack(
-                    rx.text("Time", size="1", color="gray"),
-                    rx.input(
-                        type="time",
-                        value=TFDState.tfd_form_data.get("timestamp_time", ""),
-                        on_change=lambda v: TFDState.update_tfd("timestamp_time", v),
-                        width="100%"
-                    ),
-                    spacing="1", align_items="start", width="100%"
-                ),
-                rx.vstack(
-                    rx.text("Merchant ID", size="1", color="gray"),
-                    rx.select(
-                        TFDState.tfd_options["merchant_id"],
-                        value=TFDState.tfd_form_data.get("merchant_id", ""),
-                        on_change=lambda v: TFDState.update_tfd("merchant_id", v),
-                        width="100%"
-                    ),
-                    spacing="1", align_items="start", width="100%"
-                ),
-                rx.vstack(
-                    rx.text("Category", size="1", color="gray"),
-                    rx.select(
-                        TFDState.tfd_options["product_category"],
-                        value=TFDState.tfd_form_data.get("product_category", ""),
-                        on_change=lambda v: TFDState.update_tfd("product_category", v),
-                        width="100%"
-                    ),
-                    spacing="1", align_items="start", width="100%"
-                ),
-                rx.vstack(
-                    rx.text("Type", size="1", color="gray"),
-                    rx.select(
-                        TFDState.tfd_options["transaction_type"],
-                        value=TFDState.tfd_form_data.get("transaction_type", ""),
-                        on_change=lambda v: TFDState.update_tfd("transaction_type", v),
-                        width="100%"
-                    ),
-                    spacing="1", align_items="start", width="100%"
-                ),
-                rx.vstack(
-                    rx.text("Payment", size="1", color="gray"),
-                    rx.select(
-                        TFDState.tfd_options["payment_method"],
-                        value=TFDState.tfd_form_data.get("payment_method", ""),
-                        on_change=lambda v: TFDState.update_tfd("payment_method", v),
-                        width="100%"
-                    ),
-                    spacing="1", align_items="start", width="100%"
-                ),
-                rx.vstack(
-                    rx.text("Latitude", size="1", color="gray"),
-                    rx.input(
-                        type="number",
-                        value=TFDState.tfd_form_data.get("lat", ""),
-                        on_change=lambda v: TFDState.update_tfd("lat", v),
-                        min=-90.0, max=90.0, step=0.0001, width="100%"
-                    ),
-                    spacing="1", align_items="start", width="100%"
-                ),
-                rx.vstack(
-                    rx.text("Longitude", size="1", color="gray"),
-                    rx.input(
-                        type="number",
-                        value=TFDState.tfd_form_data.get("lon", ""),
-                        on_change=lambda v: TFDState.update_tfd("lon", v),
-                        min=-180.0, max=180.0, step=0.0001, width="100%"
-                    ),
-                    spacing="1", align_items="start", width="100%"
-                ),
-                rx.vstack(
-                    rx.text("Browser", size="1", color="gray"),
-                    rx.select(
-                        TFDState.tfd_options["browser"],
-                        value=TFDState.tfd_form_data.get("browser", ""),
-                        on_change=lambda v: TFDState.update_tfd("browser", v),
-                        width="100%"
-                    ),
-                    spacing="1", align_items="start", width="100%"
-                ),
-                rx.vstack(
-                    rx.text("OS", size="1", color="gray"),
-                    rx.select(
-                        TFDState.tfd_options["os"],
-                        value=TFDState.tfd_form_data.get("os", ""),
-                        on_change=lambda v: TFDState.update_tfd("os", v),
-                        width="100%"
-                    ),
-                    spacing="1", align_items="start", width="100%"
-                ),
-                rx.vstack(
-                    rx.text("CVV", size="1", color="gray"),
-                    rx.checkbox(
-                        "Provided",
-                        checked=TFDState.tfd_form_data.get("cvv_provided", False),
-                        on_change=lambda v: TFDState.update_tfd("cvv_provided", v),
-                        size="1"
-                    ),
-                    spacing="1", align_items="start", width="100%"
-                ),
-                rx.vstack(
-                    rx.text("Billing", size="1", color="gray"),
-                    rx.checkbox(
-                        "Address Match",
-                        checked=TFDState.tfd_form_data.get("billing_address_match", False),
-                        on_change=lambda v: TFDState.update_tfd("billing_address_match", v),
-                        size="1"
-                    ),
-                    spacing="1", align_items="start", width="100%"
-                ),
-                columns="3",
-                spacing="2",
-                width="100%"
-            ),
-            rx.vstack(
-                rx.text(f"Transaction ID: {TFDState.tfd_form_data.get('transaction_id', '')}", size="1", color="gray"),
-                rx.text(f"User ID: {TFDState.tfd_form_data.get('user_id', '')}", size="1", color="gray"),
-                rx.text(f"IP Address: {TFDState.tfd_form_data.get('ip_address', '')}", size="1", color="gray"),
-                spacing="1",
-                align_items="start",
-                width="100%"
-            ),
-            spacing="2",
-            align_items="start",
-            width="100%"
-        ),
-        width="100%"
-    )
-
-
 def _yellowbrick_content(category: str, description: str) -> rx.Component:
     """Build YellowBrick visualization content for a specific category."""
     return rx.cond(
@@ -329,11 +126,11 @@ def _sklearn_overview_tab() -> rx.Component:
 
 
 def _performance_tab() -> rx.Component:
-    """Build the YellowBrick Performance tab content (Classification visualizations)."""
+    """Build the YellowBrick Classification tab content (Classification visualizations)."""
     return rx.vstack(
         rx.hstack(
             rx.icon("circle-check", size=20, color=rx.color("accent", 10)),
-            rx.heading("Performance", size="5", weight="bold"),
+            rx.heading("Classification", size="5", weight="bold"),
             spacing="2",
             align_items="center"
         ),
@@ -413,7 +210,7 @@ def _metrics_tabs() -> rx.Component:
     return rx.tabs.root(
         rx.tabs.list(
             rx.tabs.trigger("Overview", value="overview", flex="1"),
-            rx.tabs.trigger("Performance", value="performance", flex="1"),
+            rx.tabs.trigger("Classification", value="performance", flex="1"),
             rx.tabs.trigger("Explainability", value="explainability", flex="1"),
             rx.tabs.trigger("Feature Analysis", value="features", flex="1"),
             rx.tabs.trigger("Target Analysis", value="target", flex="1"),
@@ -462,10 +259,9 @@ def index() -> rx.Component:
         ),
         rx.box(
             rx.hstack(
-                # Left column - Training controls + Form
+                # Left column - Training controls only (form is on Prediction tab)
                 rx.vstack(
                     batch_ml_run_and_training_box("CatBoostClassifier", PROJECT_NAME),
-                    _form_card(),
                     spacing="4",
                     width="30%"
                 ),

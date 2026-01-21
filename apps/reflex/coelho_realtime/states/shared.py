@@ -79,6 +79,7 @@ def load_yellowbrick_info(project_key: str) -> dict:
 YELLOWBRICK_INFO = {
     "tfd": load_yellowbrick_info("tfd"),
     "eta": load_yellowbrick_info("eta"),
+    "ecci": load_yellowbrick_info("ecci"),
 }
 
 

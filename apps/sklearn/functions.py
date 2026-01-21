@@ -32,6 +32,79 @@ import duckdb
 import orjson
 
 
+# =============================================================================
+# NUMPY 1.22+ COMPATIBILITY FIX FOR YELLOWBRICK INTERCLUSTERDISTANCE
+# Issue: YellowBrick uses np.percentile(interpolation=...) but NumPy 1.22+
+#        renamed this parameter to 'method'
+# Fix: Monkey-patch the percentile_index function in yellowbrick.cluster.icdm
+# =============================================================================
+try:
+    import yellowbrick.cluster.icdm as icdm_module
+
+    def _patched_percentile_index(a, q):
+        """
+        Returns the index of the value at the Qth percentile in array a.
+        NumPy 1.22+ compatible version using 'method' instead of 'interpolation'.
+        """
+        idx = int(np.percentile(np.arange(len(a)), q, method='nearest'))
+        return idx
+
+    icdm_module.percentile_index = _patched_percentile_index
+except Exception:
+    pass  # Ignore if module not available
+
+# =============================================================================
+# NUMPY 2.0+ COMPATIBILITY FIX FOR YELLOWBRICK DISPERSIONPLOT
+# Issue: YellowBrick uses np.stack(generator) but NumPy 2.0+ requires sequences
+# Fix: Monkey-patch DispersionPlot.fit to convert generators to lists
+# From notebook 018_sklearn_duckdb_sql_clustering.ipynb
+# =============================================================================
+try:
+    from yellowbrick.text.dispersion import DispersionPlot as _DispersionPlotClass
+    from yellowbrick.exceptions import YellowbrickValueError as _YBValueError
+
+    def _patched_dispersion_fit(self, X, y=None, **kwargs):
+        """
+        Patched fit method for NumPy 2.0+ compatibility.
+        Converts generators to lists before calling np.stack.
+        """
+        if y is not None:
+            self.classes_ = np.unique(y)
+        else:
+            self.classes_ = np.array([self.NULL_CLASS])
+
+        # Create an index for the target words
+        self.indexed_words_ = np.flip(self.search_terms, axis=0)
+        if self.ignore_case:
+            self.indexed_words_ = np.array([w.lower() for w in self.indexed_words_])
+
+        # FIX: Convert generator to list before np.stack
+        try:
+            dispersion_data = list(self._compute_dispersion(X, y))
+            if len(dispersion_data) == 0:
+                raise ValueError('Empty')
+            offsets_positions_categories = np.stack(dispersion_data)
+        except ValueError:
+            raise _YBValueError('No search terms were found in the corpus')
+
+        # FIX: Convert zip to list before np.stack
+        word_positions = np.stack(
+            list(zip(
+                offsets_positions_categories[:, 0].astype(int),
+                offsets_positions_categories[:, 1].astype(int),
+            ))
+        )
+
+        self.word_categories_ = offsets_positions_categories[:, 2]
+        self._check_missing_words(word_positions)
+        self.draw(word_positions, **kwargs)
+        return self
+
+    _DispersionPlotClass.fit = _patched_dispersion_fit
+except Exception:
+    pass  # Ignore if module not available
+
+
 # MinIO (S3-compatible) configuration for Delta Lake
 MINIO_HOST = os.environ.get("MINIO_HOST", "localhost")
 MINIO_ENDPOINT = f"http://{MINIO_HOST}:9000"
@@ -608,6 +681,10 @@ def load_training_data_from_mlflow(
     This ensures YellowBrick visualizations use the EXACT same data
     that was used to train the selected model, guaranteeing 100% reproducibility.
 
+    Handles different data formats:
+    - Classification/Regression (TFD, ETA): X_train, X_test, y_train, y_test parquet files
+    - Clustering (ECCI): X_scaled.parquet with cluster_label column
+
     Args:
         project_name: MLflow experiment name
         run_id: Optional specific run ID. If None, uses get_best_mlflow_run().
@@ -615,6 +692,8 @@ def load_training_data_from_mlflow(
     Returns:
         Tuple of (X_train, X_test, y_train, y_test, feature_names) or None if not found.
     """
+    from sklearn.model_selection import train_test_split
+
     try:
         model_name = MLFLOW_MODEL_NAMES.get(project_name)
         if not model_name:
@@ -627,7 +706,37 @@ def load_training_data_from_mlflow(
             print(f"No run found for {project_name}")
             return None
         print(f"Loading training data from MLflow run: {run_id}")
-        # Download training data artifacts
+
+        # Check if this is a clustering project (ECCI)
+        task_type = PROJECT_TASK_TYPES.get(project_name)
+        if task_type == "clustering":
+            # ECCI clustering format: X_scaled.parquet with cluster_label column
+            try:
+                X_scaled_path = mlflow.artifacts.download_artifacts(
+                    run_id=run_id,
+                    artifact_path="training_data/X_scaled.parquet",
+                )
+                df = pd.read_parquet(X_scaled_path)
+                # Extract cluster labels and features
+                if 'cluster_label' in df.columns:
+                    y = df['cluster_label']
+                    X = df.drop(columns=['cluster_label'])
+                else:
+                    # Fallback: use all columns as features, no labels
+                    X = df
+                    y = pd.Series([0] * len(df))
+                feature_names = X.columns.tolist()
+                # Split for YellowBrick visualizers that need train/test
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X, y, test_size=0.2, random_state=42
+                )
+                print(f"  Loaded ECCI clustering data: X_train={X_train.shape}, X_test={X_test.shape}")
+                return X_train, X_test, y_train, y_test, feature_names
+            except Exception as e:
+                print(f"Error loading ECCI clustering data: {e}")
+                return None
+
+        # Standard format for classification/regression (TFD, ETA)
         X_train_path = mlflow.artifacts.download_artifacts(
             run_id=run_id,
             artifact_path="training_data/X_train.parquet",
@@ -883,7 +992,8 @@ def _load_eta_data_duckdb(
 def load_ecci_event_data_duckdb(
     sample_frac: float | None = None,
     max_rows: int | None = None,
-) -> tuple[pd.DataFrame, list[str]]:
+    include_search_queries: bool = False,
+) -> tuple[pd.DataFrame, list[str]] | tuple[pd.DataFrame, list[str], list[str]]:
     """Load E-Commerce Customer Interactions data with event-level approach.
 
     From notebook 018_sklearn_duckdb_sql_clustering.ipynb (event-level version)
@@ -898,9 +1008,14 @@ def load_ecci_event_data_duckdb(
     - NULL handling with COALESCE
     - Sampling (if requested)
 
+    Args:
+        sample_frac: Fraction of data to sample (0.0-1.0)
+        max_rows: Maximum number of rows to load
+        include_search_queries: If True, also returns search queries for text analysis
+
     Returns:
-        DataFrame with one row per event, all numeric features
-        List of feature names (ECCI_ALL_FEATURES order)
+        If include_search_queries=False: (DataFrame, feature_names)
+        If include_search_queries=True: (DataFrame, feature_names, search_queries)
     """
     delta_path = DELTA_PATHS["E-Commerce Customer Interactions"]
 
@@ -965,7 +1080,83 @@ def load_ecci_event_data_duckdb(
     print(f"  All features numeric: {df.select_dtypes(include=['number']).shape[1]}/{df.shape[1]} columns")
     print(f"  Features: {len(ECCI_NUMERICAL_FEATURES)} numerical, {len(ECCI_CATEGORICAL_FEATURES)} label-encoded")
 
-    return df, feature_names
+    if not include_search_queries:
+        return df, feature_names
+
+    # Load search queries for text analysis (using same connection)
+    search_queries = []
+    try:
+        search_query = f"""
+        SELECT DISTINCT search_query
+        FROM delta_scan('{delta_path}')
+        WHERE search_query IS NOT NULL
+          AND search_query != ''
+          AND LENGTH(search_query) > 2
+        LIMIT 5000
+        """
+        search_df = conn.execute(search_query).df()
+        search_queries = search_df['search_query'].astype(str).str.strip().tolist()
+        print(f"  Loaded {len(search_queries)} unique search queries for text analysis")
+    except Exception as e:
+        print(f"  Warning: Could not load search queries: {e}")
+
+    return df, feature_names, search_queries
+
+
+def get_ecci_label_encodings() -> dict[str, dict[str, int]]:
+    """Get DENSE_RANK label encodings for ECCI categorical features.
+
+    Queries the Delta table to get the value -> integer mappings that match
+    the DENSE_RANK() - 1 encoding used in load_ecci_event_data_duckdb().
+
+    Returns:
+        Dict mapping feature_name -> {value: encoded_int}
+        Example: {"event_type": {"page_view": 0, "add_to_cart": 1, ...}}
+    """
+    delta_path = DELTA_PATHS["E-Commerce Customer Interactions"]
+
+    # Features that need encoding (exclude timestamp components which are already integers)
+    features_to_encode = ["event_type", "product_category", "product_id", "referrer_url"]
+    device_features = ["browser", "os"]
+
+    encodings = {}
+    conn = _get_duckdb_connection()
+
+    # Get encodings for direct categorical features
+    for feature in features_to_encode:
+        query = f"""
+        SELECT DISTINCT
+            COALESCE({feature}, 'unknown') AS value,
+            DENSE_RANK() OVER (ORDER BY COALESCE({feature}, 'unknown')) - 1 AS encoded
+        FROM delta_scan('{delta_path}')
+        ORDER BY encoded
+        """
+        try:
+            result = conn.execute(query).df()
+            encodings[feature] = dict(zip(result['value'].astype(str), result['encoded'].astype(int)))
+            print(f"  {feature}: {len(encodings[feature])} unique values")
+        except Exception as e:
+            print(f"  Warning: Could not encode {feature}: {e}")
+            encodings[feature] = {}
+
+    # Get encodings for device_info JSON fields
+    for feature in device_features:
+        query = f"""
+        SELECT DISTINCT
+            COALESCE(device_info->>'{feature}', 'unknown') AS value,
+            DENSE_RANK() OVER (ORDER BY COALESCE(device_info->>'{feature}', 'unknown')) - 1 AS encoded
+        FROM delta_scan('{delta_path}')
+        ORDER BY encoded
+        """
+        try:
+            result = conn.execute(query).df()
+            encodings[feature] = dict(zip(result['value'].astype(str), result['encoded'].astype(int)))
+            print(f"  {feature}: {len(encodings[feature])} unique values")
+        except Exception as e:
+            print(f"  Warning: Could not encode {feature}: {e}")
+            encodings[feature] = {}
+
+    return encodings
 
 
 def process_batch_data_duckdb(
@@ -1123,20 +1314,22 @@ def process_sklearn_sample(x: dict, project_name: str) -> pd.DataFrame:
         # Extract timestamp components
         timestamp = pd.to_datetime(x.get("timestamp"))
         # Build feature dict in correct order (matches ECCI_ALL_FEATURES)
+        # Categorical features are kept as strings here - apply_ecci_label_encodings()
+        # should be called after this to convert them to integers
         features = {
             # Numerical features
-            "price": x.get("price", 0),
-            "quantity": x.get("quantity", 0),
-            "session_event_sequence": x.get("session_event_sequence", 0),
-            "time_on_page_seconds": x.get("time_on_page_seconds", 0),
-            # Categorical features (will be encoded by scaler or use raw values)
-            "event_type": x.get("event_type"),
-            "product_category": x.get("product_category"),
-            "product_id": x.get("product_id"),
-            "referrer_url": x.get("referrer_url"),
-            "browser": device_info.get("browser"),
-            "os": device_info.get("os"),
-            # Timestamp components
+            "price": float(x.get("price", 0) or 0),
+            "quantity": int(x.get("quantity", 0) or 0),
+            "session_event_sequence": int(x.get("session_event_sequence", 0) or 0),
+            "time_on_page_seconds": int(x.get("time_on_page_seconds", 0) or 0),
+            # Categorical features (will be encoded by apply_ecci_label_encodings)
+            "event_type": str(x.get("event_type") or "unknown"),
+            "product_category": str(x.get("product_category") or "unknown"),
+            "product_id": str(x.get("product_id") or "unknown"),
+            "referrer_url": str(x.get("referrer_url") or "unknown"),
+            "browser": str(device_info.get("browser") or "unknown"),
+            "os": str(device_info.get("os") or "unknown"),
+            # Timestamp components (already integers)
             "year": timestamp.year,
             "month": timestamp.month,
             "day": timestamp.day,
@@ -1145,13 +1338,42 @@ def process_sklearn_sample(x: dict, project_name: str) -> pd.DataFrame:
             "second": timestamp.second,
         }
         df = pd.DataFrame([features])
-        # Convert categoricals to category dtype
-        for col in ECCI_CATEGORICAL_FEATURES:
-            if col in df.columns:
-                df[col] = df[col].astype("category")
         return df
     else:
         raise ValueError(f"Unsupported project: {project_name}")
+
+
+def apply_ecci_label_encodings(df: pd.DataFrame, label_encodings: dict) -> pd.DataFrame:
+    """Apply DENSE_RANK label encodings to ECCI categorical features.
+
+    Converts string categorical values to integers matching the DENSE_RANK
+    encoding used during training. Unknown values default to 0.
+
+    Args:
+        df: DataFrame with string categorical columns
+        label_encodings: Dict of {feature_name: {value: encoded_int}}
+
+    Returns:
+        DataFrame with categorical columns converted to integers
+    """
+    df = df.copy()
+
+    # Features that need encoding (exclude timestamp components)
+    features_to_encode = ["event_type", "product_category", "product_id", "referrer_url", "browser", "os"]
+
+    for feature in features_to_encode:
+        if feature in df.columns and feature in label_encodings:
+            encoding_map = label_encodings[feature]
+            # Convert string to encoded integer, default to 0 for unknown
+            df[feature] = df[feature].apply(
+                lambda v: encoding_map.get(str(v), 0)
+            )
+
+    # Ensure all columns are numeric
+    for col in df.columns:
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+
+    return df
 
 
 # =============================================================================
@@ -1958,6 +2180,10 @@ def yellowbrick_model_selection_visualizers(
     CatBoost Handling (selects wrapper based on task type):
     - Classification: CatBoostWrapper/CatBoostWrapperCV
     - Regression: CatBoostRegressorWrapper/CatBoostRegressorWrapperCV
+
+    Clustering Handling (ECCI):
+    - Uses RandomForestClassifier trained on cluster labels as pseudo-targets
+    - This reveals which features are most predictive of cluster membership
     """
     from yellowbrick.model_selection import (
         FeatureImportances,
@@ -1967,6 +2193,8 @@ def yellowbrick_model_selection_visualizers(
         RFECV,
         DroppingCurve,
     )
+    from sklearn.ensemble import RandomForestClassifier
+
     visualizer_map = {
         "FeatureImportances": FeatureImportances,
         "CVScores": CVScores,
@@ -1979,6 +2207,7 @@ def yellowbrick_model_selection_visualizers(
     # Determine wrapper type based on task
     task_type = PROJECT_TASK_TYPES.get(project_name, "classification")
     is_regression = task_type == "regression"
+    is_clustering = task_type == "clustering"
 
     # Combine data for CV-based visualizers
     X_full = pd.concat([X_train, X_test], ignore_index=True)
@@ -1989,7 +2218,38 @@ def yellowbrick_model_selection_visualizers(
         if vis_class is None:
             raise ValueError(f"Unknown visualizer: {visualizer_name}")
 
-        if visualizer_name == "FeatureImportances":
+        if is_clustering:
+            # For clustering: use RandomForestClassifier on cluster labels
+            # This reveals which features are most predictive of cluster membership
+            if visualizer_name == "FeatureImportances":
+                # Train RandomForest on cluster labels
+                rf_model = RandomForestClassifier(
+                    n_estimators=100,
+                    max_depth=10,
+                    random_state=42,
+                    n_jobs=-1
+                )
+                rf_model.fit(X_train, y_train)
+                visualizer = vis_class(rf_model, **params)
+                visualizer.fit(X_train, y_train)
+            else:
+                # CV-based visualizers use fresh RandomForest
+                rf_cv = RandomForestClassifier(
+                    n_estimators=50,
+                    max_depth=8,
+                    random_state=42,
+                    n_jobs=-1
+                )
+                # Adjust params for RandomForest (no 'iterations' param)
+                cv_params = {k: v for k, v in params.items() if k != "param_name" or k != "param_range"}
+                if visualizer_name == "ValidationCurve":
+                    cv_params["param_name"] = "n_estimators"
+                    cv_params["param_range"] = np.array([20, 50, 100, 150])
+                visualizer = vis_class(rf_cv, **cv_params)
+                visualizer.fit(X_full, y_full)
+            return visualizer
+
+        elif visualizer_name == "FeatureImportances":
             if model is None:
                 raise ValueError("Model required for FeatureImportances")
             # Select wrapper based on task type
@@ -2008,6 +2268,345 @@ def yellowbrick_model_selection_visualizers(
             visualizer = vis_class(cv_wrapper, **params)
             visualizer.fit(X_full, y_full)
         return visualizer
+    return None
+
+
+# =============================================================================
+# YellowBrick Clustering Visualizers (ECCI)
+# Reference: https://www.scikit-yb.org/en/latest/api/cluster/index.html
+# =============================================================================
+def yellowbrick_clustering_kwargs(
+    project_name: str,
+    metric_name: str,
+    n_clusters: int = 5,
+) -> dict:
+    """Get kwargs for YellowBrick clustering visualizers.
+
+    Reference: https://www.scikit-yb.org/en/latest/api/cluster/index.html
+
+    Visualizers:
+    - KElbowVisualizer: Find optimal K via elbow method (MODERATE)
+    - SilhouetteVisualizer: Per-cluster silhouette scores (FAST)
+    - InterclusterDistance: Cluster separation visualization (MODERATE)
+    """
+    kwargs = {
+        # KElbowVisualizer - Find optimal K using elbow method
+        "KElbowVisualizer": {
+            "k": (2, 12),
+            "metric": "silhouette",
+            "timings": False,
+            "locate_elbow": True,
+            "force_model": True,  # Required for sklearn 1.4+ compatibility
+        },
+        # SilhouetteVisualizer - Per-cluster silhouette scores
+        "SilhouetteVisualizer": {
+            "colors": "yellowbrick",
+            "is_fitted": True,  # Use pre-trained model
+            "force_model": True,  # Required for sklearn 1.4+ compatibility
+        },
+        # InterclusterDistance - Cluster separation (MDS/t-SNE)
+        "InterclusterDistance": {
+            "embedding": "mds",
+            "legend": True,
+            "force_model": True,  # Required for sklearn 1.4+ compatibility
+        },
+    }
+    return {metric_name: kwargs.get(metric_name, {})}
+
+
+def yellowbrick_clustering_visualizers(
+    yb_kwargs: dict,
+    X: pd.DataFrame,
+    y: pd.Series = None,
+    model=None,
+    n_clusters: int = 5,
+):
+    """Create and fit YellowBrick clustering visualizer.
+
+    Reference: https://www.scikit-yb.org/en/latest/api/cluster/index.html
+
+    Fit methods:
+    - KElbowVisualizer: fit(X) - trains fresh models for each K
+    - SilhouetteVisualizer: fit(X, is_fitted=True) - uses pre-trained model
+    - InterclusterDistance: fit(X) - uses pre-trained model
+    """
+    from yellowbrick.cluster import KElbowVisualizer, SilhouetteVisualizer, InterclusterDistance
+    from sklearn.cluster import KMeans
+
+    visualizer_map = {
+        "KElbowVisualizer": KElbowVisualizer,
+        "SilhouetteVisualizer": SilhouetteVisualizer,
+        "InterclusterDistance": InterclusterDistance,
+    }
+
+    for visualizer_name, params in yb_kwargs.items():
+        vis_class = visualizer_map.get(visualizer_name)
+        if vis_class is None:
+            raise ValueError(f"Unknown clustering visualizer: {visualizer_name}")
+
+        if visualizer_name == "KElbowVisualizer":
+            # KElbow must create fresh models to test different K values
+            visualizer = vis_class(KMeans(random_state=42), **params)
+            visualizer.fit(X)
+        elif visualizer_name == "SilhouetteVisualizer":
+            # Use pre-trained model with is_fitted=True
+            if model is None:
+                model = KMeans(n_clusters=n_clusters, random_state=42)
+                model.fit(X)
+            kw_copy = params.copy()
+            is_fitted = kw_copy.pop("is_fitted", True)
+            visualizer = vis_class(model, is_fitted=is_fitted, **kw_copy)
+            visualizer.fit(X)
+        elif visualizer_name == "InterclusterDistance":
+            # Use pre-trained model
+            if model is None:
+                model = KMeans(n_clusters=n_clusters, random_state=42)
+                model.fit(X)
+            visualizer = vis_class(model, **params)
+            visualizer.fit(X)
+        else:
+            visualizer = vis_class(**params)
+            visualizer.fit(X)
+        return visualizer
+    return None
+
+
+# =============================================================================
+# YellowBrick Text Analysis Visualizers (ECCI)
+# Reference: https://www.scikit-yb.org/en/latest/api/text/index.html
+# =============================================================================
+def yellowbrick_text_analysis_kwargs(
+    project_name: str,
+    metric_name: str,
+) -> dict:
+    """Get kwargs for YellowBrick text analysis visualizers.
+
+    Reference: https://www.scikit-yb.org/en/latest/api/text/index.html
+
+    Visualizers:
+    - FreqDistVisualizer: Token frequency distribution (FAST)
+    - TSNEVisualizer: t-SNE document clustering (SLOW)
+    - UMAPVisualizer: UMAP document clustering (MODERATE, optional)
+    - DispersionPlot: Word dispersion across documents (FAST)
+    - WordCorrelationPlot: Word correlation matrix (FAST)
+    - PosTagVisualizer: POS tag distribution (FAST, requires NLTK)
+    """
+    kwargs = {
+        # FreqDistVisualizer - Token frequency distribution
+        "FreqDistVisualizer": {
+            "n": 50,
+            "orient": "h",
+            "color": "#3498db",
+        },
+        # TSNEVisualizer - t-SNE document clustering
+        "TSNEVisualizer": {
+            "decompose": "svd",
+            "decompose_by": 50,
+            "random_state": 42,
+            "colormap": "viridis",
+        },
+        # UMAPVisualizer - UMAP document clustering
+        "UMAPVisualizer": {
+            "random_state": 42,
+            "colormap": "plasma",
+            "metric": "cosine",
+        },
+        # DispersionPlot - Word dispersion across documents
+        # DispersionPlot - Word dispersion across documents
+        # NOTE: Requires TOKENIZED documents (list of word lists)
+        "DispersionPlot": {
+            "annotate_docs": False,
+            "ignore_case": True,
+            "colormap": "coolwarm",
+        },
+        # WordCorrelationPlot - Word correlation matrix
+        "WordCorrelationPlot": {
+            "colormap": "RdBu",
+        },
+        # PosTagVisualizer - POS tag distribution
+        # PosTagVisualizer - POS tag distribution
+        # Uses parser='nltk' to automatically parse raw text
+        "PosTagVisualizer": {
+            "parser": "nltk",
+            "frequency": True,  # Show frequency not raw counts
+            "colormap": "tab20",
+        },
+    }
+    return {metric_name: kwargs.get(metric_name, {})}
+
+
+def yellowbrick_text_analysis_visualizers(
+    yb_kwargs: dict,
+    search_queries: list[str],
+    cluster_labels: np.ndarray = None,
+):
+    """Create and fit YellowBrick text analysis visualizer.
+
+    Reference: https://www.scikit-yb.org/en/latest/api/text/index.html
+
+    Args:
+        yb_kwargs: Visualizer kwargs dict
+        search_queries: List of search query strings
+        cluster_labels: Optional cluster labels for coloring
+
+    Fit methods per visualizer:
+    - FreqDistVisualizer: fit(word_counts) - requires CountVectorizer
+    - TSNEVisualizer: fit(tfidf_matrix, cluster_labels)
+    - UMAPVisualizer: fit(tfidf_matrix, cluster_labels)
+    - DispersionPlot: fit(tokenized_docs)
+    - WordCorrelationPlot: fit(raw_docs)
+    - PosTagVisualizer: fit(raw_docs)
+    """
+    from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
+
+    # Import text visualizers (handle optional dependencies)
+    try:
+        from yellowbrick.text import FreqDistVisualizer, TSNEVisualizer, DispersionPlot, WordCorrelationPlot
+        FREQ_AVAILABLE = True
+    except ImportError:
+        FREQ_AVAILABLE = False
+        raise ImportError("YellowBrick text module not available")
+
+    try:
+        from yellowbrick.text import UMAPVisualizer
+        UMAP_AVAILABLE = True
+    except ImportError:
+        UMAP_AVAILABLE = False
+
+    try:
+        from yellowbrick.text import PosTagVisualizer
+        import nltk
+        # Ensure required NLTK data is downloaded for PosTagVisualizer
+        # From notebook 018_sklearn_duckdb_sql_clustering.ipynb
+        try:
+            nltk.data.find('tokenizers/punkt_tab')
+        except LookupError:
+            nltk.download('punkt_tab', quiet=True)
+        try:
+            nltk.data.find('taggers/averaged_perceptron_tagger_eng')
+        except LookupError:
+            nltk.download('averaged_perceptron_tagger_eng', quiet=True)
+        try:
+            nltk.data.find('corpora/treebank')
+        except LookupError:
+            nltk.download('treebank', quiet=True)
+        try:
+            nltk.data.find('taggers/universal_tagset')
+        except LookupError:
+            nltk.download('universal_tagset', quiet=True)
+        POS_AVAILABLE = True
+    except ImportError:
+        POS_AVAILABLE = False
+
+    # Filter empty queries
+    valid_queries = [q for q in search_queries if q and q.strip()]
+    if len(valid_queries) < 10:
+        raise ValueError(f"Insufficient search queries ({len(valid_queries)}). Need at least 10 for visualization.")
+
+    for visualizer_name, params in yb_kwargs.items():
+        if visualizer_name == "FreqDistVisualizer":
+            # Vectorize text for frequency distribution
+            vectorizer = CountVectorizer(
+                max_features=params.get("n", 50),
+                stop_words="english",
+                min_df=2
+            )
+            word_counts = vectorizer.fit_transform(valid_queries)
+            vocab = vectorizer.get_feature_names_out()
+            visualizer = FreqDistVisualizer(features=vocab, **params)
+            visualizer.fit(word_counts)
+            return visualizer
+
+        elif visualizer_name == "TSNEVisualizer":
+            # TF-IDF for t-SNE (limit samples for speed)
+            sample_size = min(len(valid_queries), 500)
+            sample_queries = valid_queries[:sample_size]
+            sample_labels = cluster_labels[:sample_size] if cluster_labels is not None else None
+
+            tfidf = TfidfVectorizer(max_features=100, stop_words="english", min_df=2)
+            tfidf_matrix = tfidf.fit_transform(sample_queries)
+            visualizer = TSNEVisualizer(**params)
+            visualizer.fit(tfidf_matrix, sample_labels)
+            return visualizer
+
+        elif visualizer_name == "UMAPVisualizer":
+            if not UMAP_AVAILABLE:
+                raise ImportError("UMAPVisualizer requires umap-learn: pip install umap-learn")
+            sample_size = min(len(valid_queries), 500)
+            sample_queries = valid_queries[:sample_size]
+            sample_labels = cluster_labels[:sample_size] if cluster_labels is not None else None
+
+            tfidf = TfidfVectorizer(max_features=100, stop_words="english", min_df=2)
+            tfidf_matrix = tfidf.fit_transform(sample_queries)
+            visualizer = UMAPVisualizer(**params)
+            visualizer.fit(tfidf_matrix, sample_labels)
+            return visualizer
+
+        elif visualizer_name == "DispersionPlot":
+            # Tokenize documents and find target words (as per notebook)
+            # Limit to 500 docs for performance
+            from collections import Counter
+            tokenized_docs = [q.lower().split() for q in valid_queries[:500]]
+
+            # Build a set of all unique words that actually appear in tokenized docs
+            all_words_in_corpus = set()
+            for doc in tokenized_docs:
+                all_words_in_corpus.update(doc)
+
+            # Get word frequencies from tokenized docs
+            all_tokens = [word for doc in tokenized_docs for word in doc]
+            token_freq = Counter(all_tokens)
+
+            # Get top frequent words that:
+            # 1. Have length > 2
+            # 2. Appear at least 3 times
+            # 3. VERIFIED to exist in the corpus (important for DispersionPlot)
+            target_words = []
+            for word, count in token_freq.most_common(50):
+                if len(word) > 2 and count >= 3 and word in all_words_in_corpus:
+                    target_words.append(word)
+                    if len(target_words) >= 10:
+                        break
+
+            print(f"DispersionPlot: {len(tokenized_docs)} docs, {len(all_tokens)} tokens, {len(all_words_in_corpus)} unique words")
+            print(f"DispersionPlot: target_words={target_words}")
+
+            if len(target_words) < 3:
+                raise ValueError(f"Insufficient vocabulary for DispersionPlot. Found {len(target_words)} verified words, need at least 3.")
+
+            try:
+                visualizer = DispersionPlot(target_words, **params)
+                print(f"DispersionPlot: visualizer created, fitting with {len(tokenized_docs)} docs...")
+                visualizer.fit(tokenized_docs)
+                print(f"DispersionPlot: fit complete!")
+                return visualizer
+            except Exception as e:
+                print(f"DispersionPlot error: {type(e).__name__}: {e}")
+                raise
+
+        elif visualizer_name == "WordCorrelationPlot":
+            # Find most common words for correlation
+            word_freq = {}
+            for q in valid_queries:
+                for word in q.lower().split():
+                    if len(word) > 2:
+                        word_freq[word] = word_freq.get(word, 0) + 1
+            target_words = sorted(word_freq.keys(), key=lambda x: word_freq[x], reverse=True)[:10]
+            if len(target_words) < 3:
+                raise ValueError("Insufficient vocabulary for WordCorrelationPlot")
+            visualizer = WordCorrelationPlot(words=target_words, **params)
+            visualizer.fit(valid_queries)
+            return visualizer
+
+        elif visualizer_name == "PosTagVisualizer":
+            if not POS_AVAILABLE:
+                raise ImportError("PosTagVisualizer requires NLTK: pip install nltk")
+            # Use raw text - parser='nltk' handles tokenization and tagging
+            # Limit to 300 queries for speed (as per notebook)
+            visualizer = PosTagVisualizer(**params)
+            visualizer.fit(valid_queries[:300])
+            return visualizer
+
     return None
 
 

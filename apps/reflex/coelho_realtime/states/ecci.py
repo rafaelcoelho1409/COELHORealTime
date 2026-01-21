@@ -39,6 +39,59 @@ class ECCIState(SharedState):
     _ecci_int_fields = {"session_event_sequence", "quantity", "time_on_page_seconds"}
 
     # ==========================================================================
+    # YELLOWBRICK STATE VARIABLES (Batch ML)
+    # ==========================================================================
+    yellowbrick_metric_type: str = "Clustering"
+    yellowbrick_metric_name: str = "Select visualization..."
+    yellowbrick_image_base64: str = ""
+    yellowbrick_loading: bool = False
+    yellowbrick_error: str = ""
+    _yellowbrick_cancel_requested: bool = False
+    yellowbrick_metrics_options: dict[str, list[str]] = {
+        "Clustering": [
+            "Select visualization...",
+            "KElbowVisualizer",       # Optimal K using elbow method
+            "SilhouetteVisualizer",   # Silhouette scores per cluster
+            "InterclusterDistance",   # Distance between cluster centers
+        ],
+        "Feature Analysis": [
+            "Select visualization...",
+            "Rank1D",
+            "Rank2D",
+            "PCA",
+            "Manifold",
+            "ParallelCoordinates",
+            "RadViz",
+            "JointPlot",
+        ],
+        "Target": [
+            "Select visualization...",
+            "ClassBalance",               # Cluster distribution
+            "FeatureCorrelation",         # Mutual info correlation
+            "FeatureCorrelation_Pearson", # Linear correlation
+            "BalancedBinningReference",   # Target binning reference
+        ],
+        "Model Selection": [
+            "Select visualization...",
+            "FeatureImportances",    # Feature ranking (not applicable to KMeans)
+            "CVScores",              # Cross-validation scores
+            "ValidationCurve",       # Hyperparameter tuning
+            "LearningCurve",         # Training size vs performance
+            "RFECV",                 # Recursive feature elimination
+            "DroppingCurve",         # Feature dropping impact
+        ],
+        "Text Analysis": [
+            "Select visualization...",
+            "FreqDistVisualizer",    # Word frequency distribution
+            "TSNEVisualizer",        # t-SNE text visualization
+            "UMAPVisualizer",        # UMAP text visualization
+            "DispersionPlot",        # Word dispersion across documents
+            "WordCorrelationPlot",   # Word correlation heatmap
+            "PosTagVisualizer",      # Part-of-speech tagging
+        ],
+    }
+
+    # ==========================================================================
     # ECCI COMPUTED VARIABLES
     # ==========================================================================
     @rx.var
@@ -128,6 +181,40 @@ class ECCIState(SharedState):
             "n_clusters": metrics.get("metrics.n_clusters", 0),
             "n_micro_clusters": metrics.get("metrics.n_micro_clusters", 0),
         }
+
+    @rx.var
+    def ecci_batch_metrics(self) -> dict[str, str]:
+        """Get all ECCI batch ML clustering metrics with appropriate formatting.
+
+        Clustering metrics (all formatted as decimals):
+        - silhouette_score: [-1, 1], higher is better
+        - calinski_harabasz_score: [0, ∞), higher is better
+        - davies_bouldin_score: [0, ∞), lower is better
+        - inertia: [0, ∞), lower is better
+        - n_clusters: integer count
+        - preprocessing_time_seconds: time metric
+        """
+        raw_metrics = self.batch_mlflow_metrics.get("E-Commerce Customer Interactions", {})
+        if not isinstance(raw_metrics, dict):
+            return {}
+
+        result = {}
+        for key, value in raw_metrics.items():
+            if key.startswith("metrics."):
+                metric_name = key.replace("metrics.", "")
+                if isinstance(value, (int, float)):
+                    # n_clusters is integer
+                    if metric_name == "n_clusters":
+                        result[metric_name] = f"{int(value)}"
+                    # Time metrics with seconds suffix
+                    elif metric_name == "preprocessing_time_seconds":
+                        result[metric_name] = f"{value:.2f}s"
+                    # All other clustering metrics as decimal
+                    else:
+                        result[metric_name] = f"{value:.4f}"
+                else:
+                    result[metric_name] = str(value) if value is not None else "N/A"
+        return result
 
     @rx.var(cache=True)
     def ecci_dashboard_figures(self) -> dict:
@@ -717,15 +804,18 @@ class ECCIState(SharedState):
 
     @rx.event(background=True)
     async def predict_batch_ecci(self):
-        """Make batch prediction for ECCI using Scikit-Learn model."""
+        """Make batch prediction for ECCI using Scikit-Learn model from selected run."""
         from .shared import SKLEARN_BASE_URL
         project_name = "E-Commerce Customer Interactions"
         current_form = self.form_data.get(project_name, {})
+        # Use selected run_id from SharedState (or None for best)
+        run_id = self.selected_batch_run.get(project_name) or None
         timestamp = f"{current_form.get('timestamp_date', '')}T{current_form.get('timestamp_time', '')}:00.000000+00:00"
 
         payload = {
             "project_name": project_name,
             "model_name": "KMeans",
+            "run_id": run_id,  # Use selected run's model
             "customer_id": current_form.get("customer_id", ""),
             "event_id": current_form.get("event_id", ""),
             "session_id": current_form.get("session_id", ""),
@@ -797,3 +887,114 @@ class ECCIState(SharedState):
                 description=str(e)[:100],
                 duration=4000,
             )
+
+    # ==========================================================================
+    # YELLOWBRICK COMPUTED VARS & EVENT HANDLERS
+    # ==========================================================================
+    @rx.var
+    def yellowbrick_options_for_type(self) -> list[str]:
+        """Get YellowBrick visualization options for current metric type."""
+        return self.yellowbrick_metrics_options.get(self.yellowbrick_metric_type, ["Select visualization..."])
+
+    @rx.var
+    def yellowbrick_categories(self) -> list[str]:
+        """Get all YellowBrick category names."""
+        return list(self.yellowbrick_metrics_options.keys())
+
+    @rx.event
+    def set_yellowbrick_metric_type(self, metric_type: str):
+        """Set YellowBrick metric type and reset metric name."""
+        self.yellowbrick_metric_type = metric_type
+        self.yellowbrick_metric_name = "Select visualization..."
+        self.yellowbrick_image_base64 = ""
+        self.yellowbrick_error = ""
+
+    @rx.event
+    def clear_yellowbrick_visualization(self):
+        """Clear YellowBrick visualization state (called on tab change)."""
+        self.yellowbrick_image_base64 = ""
+        self.yellowbrick_error = ""
+
+    @rx.event
+    def cancel_yellowbrick_loading(self):
+        """Cancel the current YellowBrick visualization loading."""
+        self._yellowbrick_cancel_requested = True
+        self.yellowbrick_loading = False
+        self.yellowbrick_error = ""
+        self.yellowbrick_image_base64 = ""
+        self.yellowbrick_metric_name = "Select visualization..."
+        yield rx.toast.info(
+            "Visualization cancelled",
+            description="Loading has been stopped.",
+            duration=2000
+        )
+
+    @rx.event
+    def set_yellowbrick_metric_name(self, metric_name: str):
+        """Set YellowBrick metric name."""
+        self.yellowbrick_metric_name = metric_name
+        if metric_name and metric_name != "Select visualization...":
+            return ECCIState.fetch_yellowbrick_metric("E-Commerce Customer Interactions")
+
+    @rx.event
+    def set_yellowbrick_visualization(self, category: str, metric_name: str):
+        """Unified handler for all YellowBrick visualization categories.
+
+        Args:
+            category: The YellowBrick category (e.g., "Clustering", "Feature Analysis", etc.)
+            metric_name: The visualization name to display
+        """
+        self._yellowbrick_cancel_requested = False  # Reset cancel flag
+        self.yellowbrick_metric_type = category
+        self.yellowbrick_metric_name = metric_name
+        if metric_name and metric_name != "Select visualization...":
+            return ECCIState.fetch_yellowbrick_metric("E-Commerce Customer Interactions")
+
+    @rx.event(background=True)
+    async def fetch_yellowbrick_metric(self, project_name: str):
+        """Fetch YellowBrick visualization from FastAPI using selected MLflow run."""
+        from .shared import SKLEARN_BASE_URL
+        metric_type = self.yellowbrick_metric_type
+        metric_name = self.yellowbrick_metric_name
+        # Use selected run_id from SharedState (or None for best)
+        run_id = self.selected_batch_run.get(project_name) or None
+
+        if not metric_name or metric_name == "Select visualization...":
+            async with self:
+                self.yellowbrick_image_base64 = ""
+                self.yellowbrick_error = ""
+            return
+
+        async with self:
+            self.yellowbrick_loading = True
+            self.yellowbrick_error = ""
+            self.yellowbrick_image_base64 = ""  # Clear old image while loading new one
+            self._yellowbrick_cancel_requested = False
+
+        try:
+            response = await httpx_client_post(
+                url=f"{SKLEARN_BASE_URL}/yellowbrick_metric",
+                json={
+                    "project_name": project_name,
+                    "metric_type": metric_type,
+                    "metric_name": metric_name,
+                    "run_id": run_id,
+                },
+                timeout=300.0  # 5 minutes for slow visualizations like Manifold
+            )
+            # Check if cancelled before updating state
+            if self._yellowbrick_cancel_requested:
+                return
+            result = response.json()
+            async with self:
+                self.yellowbrick_image_base64 = result.get("image_base64", "")
+                self.yellowbrick_loading = False
+                self.yellowbrick_error = result.get("error", "")
+        except Exception as e:
+            if self._yellowbrick_cancel_requested:
+                return
+            print(f"Error fetching YellowBrick visualization: {e}")
+            async with self:
+                self.yellowbrick_loading = False
+                self.yellowbrick_error = str(e)
+                self.yellowbrick_image_base64 = ""
