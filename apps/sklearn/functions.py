@@ -64,7 +64,7 @@ BEST_METRIC_CRITERIA = {
     # ETA: Use MAE (lower is better) for regression
     "Estimated Time of Arrival": {"metric_name": "mae", "maximize": False},
     # ECCI: Use Silhouette score (higher is better) for clustering
-    "E-Commerce Customer Interactions": {"metric_name": "silhouette", "maximize": True},
+    "E-Commerce Customer Interactions": {"metric_name": "silhouette_score", "maximize": True},
 }
 
 # Delta Lake paths (S3 paths for DuckDB delta_scan)
@@ -157,6 +157,36 @@ ECCI_CATEGORICAL_FEATURES = [
 ]
 ECCI_ALL_FEATURES = ECCI_NUMERICAL_FEATURES + ECCI_CATEGORICAL_FEATURES
 ECCI_CAT_FEATURE_INDICES = list(range(len(ECCI_NUMERICAL_FEATURES), len(ECCI_ALL_FEATURES)))
+
+# Customer-level aggregated features for clustering (from notebook 018)
+# These are computed via DuckDB SQL aggregation at customer level
+ECCI_CUSTOMER_FEATURES = [
+    # Engagement metrics
+    "total_sessions",
+    "total_events",
+    "avg_time_on_page",
+    "total_time_on_site",
+    "avg_events_per_session",
+    # Purchase behavior (RFM-like)
+    "total_purchases",
+    "total_revenue",
+    "avg_order_value",
+    # Behavioral patterns
+    "page_views",
+    "product_views",
+    "add_to_carts",
+    "searches",
+    "unique_products_viewed",
+    "unique_categories_viewed",
+    # Temporal patterns
+    "preferred_hour",
+    "days_active",
+    # Geographic
+    "geo_diversity",
+    # Conversion rates
+    "view_to_cart_rate",
+    "cart_to_purchase_rate",
+]
 
 # =============================================================================
 # Unified Feature Lookup Dictionaries
@@ -850,6 +880,94 @@ def _load_eta_data_duckdb(
     return X, y, metadata
 
 
+def load_ecci_event_data_duckdb(
+    sample_frac: float | None = None,
+    max_rows: int | None = None,
+) -> tuple[pd.DataFrame, list[str]]:
+    """Load E-Commerce Customer Interactions data with event-level approach.
+
+    From notebook 018_sklearn_duckdb_sql_clustering.ipynb (event-level version)
+
+    Uses the same DENSE_RANK encoding pattern as TFD/ETA for consistency.
+    Each row is an individual event (not aggregated by customer).
+
+    Single SQL query does:
+    - DENSE_RANK label encoding for categorical features
+    - Timestamp extraction (year, month, day, hour, minute, second)
+    - JSON extraction (device_info → browser, os)
+    - NULL handling with COALESCE
+    - Sampling (if requested)
+
+    Returns:
+        DataFrame with one row per event, all numeric features
+        List of feature names (ECCI_ALL_FEATURES order)
+    """
+    delta_path = DELTA_PATHS["E-Commerce Customer Interactions"]
+
+    # Build the SQL query - event-level with DENSE_RANK encoding (like TFD/ETA)
+    # Column order MUST match ECCI_ALL_FEATURES for consistency
+    query = f"""
+    SELECT
+        -- Numerical features
+        COALESCE(price, 0) AS price,
+        COALESCE(quantity, 0) AS quantity,
+        COALESCE(session_event_sequence, 0) AS session_event_sequence,
+        COALESCE(time_on_page_seconds, 0) AS time_on_page_seconds,
+
+        -- Categorical features: Label encoded with DENSE_RANK() - 1
+        -- Produces 0-indexed integers compatible with all ML tools
+        DENSE_RANK() OVER (ORDER BY event_type) - 1 AS event_type,
+        DENSE_RANK() OVER (ORDER BY COALESCE(product_category, 'unknown')) - 1 AS product_category,
+        DENSE_RANK() OVER (ORDER BY COALESCE(product_id, 'unknown')) - 1 AS product_id,
+        DENSE_RANK() OVER (ORDER BY COALESCE(referrer_url, 'unknown')) - 1 AS referrer_url,
+        DENSE_RANK() OVER (ORDER BY COALESCE(device_info->>'browser', 'unknown')) - 1 AS browser,
+        DENSE_RANK() OVER (ORDER BY COALESCE(device_info->>'os', 'unknown')) - 1 AS os,
+
+        -- Timestamp components (already integers)
+        CAST(date_part('year', CAST(timestamp AS TIMESTAMP)) AS INTEGER) AS year,
+        CAST(date_part('month', CAST(timestamp AS TIMESTAMP)) AS INTEGER) AS month,
+        CAST(date_part('day', CAST(timestamp AS TIMESTAMP)) AS INTEGER) AS day,
+        CAST(date_part('hour', CAST(timestamp AS TIMESTAMP)) AS INTEGER) AS hour,
+        CAST(date_part('minute', CAST(timestamp AS TIMESTAMP)) AS INTEGER) AS minute,
+        CAST(date_part('second', CAST(timestamp AS TIMESTAMP)) AS INTEGER) AS second
+
+    FROM delta_scan('{delta_path}')
+    """
+
+    # Add sampling clause (DuckDB's efficient sampling at scan time)
+    if sample_frac is not None and 0 < sample_frac < 1:
+        query += f" USING SAMPLE {sample_frac * 100}%"
+
+    # Add limit clause
+    if max_rows is not None:
+        query += f" LIMIT {max_rows}"
+
+    # Execute query
+    try:
+        print(f"Loading ECCI data via DuckDB SQL (event-level, DENSE_RANK encoding)...")
+        if sample_frac:
+            print(f"  Sampling: {sample_frac * 100}%")
+        if max_rows:
+            print(f"  Max rows: {max_rows}")
+        conn = _get_duckdb_connection()
+        df = conn.execute(query).df()
+        print(f"  Loaded {len(df)} events with {len(df.columns)} columns")
+    except Exception as e:
+        print(f"DuckDB query failed, attempting reconnect: {e}")
+        conn = _get_duckdb_connection(force_reconnect=True)
+        df = conn.execute(query).df()
+        print(f"  Loaded {len(df)} events with {len(df.columns)} columns")
+
+    # Feature names match ECCI_ALL_FEATURES order
+    feature_names = ECCI_ALL_FEATURES
+
+    # All columns are now numeric (integers from DENSE_RANK or float64)
+    print(f"  All features numeric: {df.select_dtypes(include=['number']).shape[1]}/{df.shape[1]} columns")
+    print(f"  Features: {len(ECCI_NUMERICAL_FEATURES)} numerical, {len(ECCI_CATEGORICAL_FEATURES)} label-encoded")
+
+    return df, feature_names
+
+
 def process_batch_data_duckdb(
     project_name: str,
     sample_frac: float | None = None,
@@ -994,6 +1112,41 @@ def process_sklearn_sample(x: dict, project_name: str) -> pd.DataFrame:
         df = pd.DataFrame([features])
         # Convert categoricals to category dtype
         for col in ETA_CATEGORICAL_FEATURES:
+            if col in df.columns:
+                df[col] = df[col].astype("category")
+        return df
+    elif project_name == "E-Commerce Customer Interactions":
+        # Extract device_info JSON
+        device_info = x.get("device_info", "{}")
+        if isinstance(device_info, str):
+            device_info = orjson.loads(device_info)
+        # Extract timestamp components
+        timestamp = pd.to_datetime(x.get("timestamp"))
+        # Build feature dict in correct order (matches ECCI_ALL_FEATURES)
+        features = {
+            # Numerical features
+            "price": x.get("price", 0),
+            "quantity": x.get("quantity", 0),
+            "session_event_sequence": x.get("session_event_sequence", 0),
+            "time_on_page_seconds": x.get("time_on_page_seconds", 0),
+            # Categorical features (will be encoded by scaler or use raw values)
+            "event_type": x.get("event_type"),
+            "product_category": x.get("product_category"),
+            "product_id": x.get("product_id"),
+            "referrer_url": x.get("referrer_url"),
+            "browser": device_info.get("browser"),
+            "os": device_info.get("os"),
+            # Timestamp components
+            "year": timestamp.year,
+            "month": timestamp.month,
+            "day": timestamp.day,
+            "hour": timestamp.hour,
+            "minute": timestamp.minute,
+            "second": timestamp.second,
+        }
+        df = pd.DataFrame([features])
+        # Convert categoricals to category dtype
+        for col in ECCI_CATEGORICAL_FEATURES:
             if col in df.columns:
                 df[col] = df[col].astype("category")
         return df

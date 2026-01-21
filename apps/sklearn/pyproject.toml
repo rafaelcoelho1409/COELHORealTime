@@ -11,8 +11,10 @@ dependencies = [
     "prometheus-fastapi-instrumentator",
     "starlette",
     "click",
+    "requests",
     # Data processing
     "pandas",
+    "numpy",
     "pyarrow",
     "duckdb",
     "deltalake",

@@ -26,6 +26,13 @@ dependencies = [
     "xgboost",
     "mlflow",
     "lightgbm",
+    "hdbscan",
+    # umap-learn requires numba/llvmlite - specify versions for Python 3.13 compatibility
+    "umap-learn>=0.5.7",
+    "numba>=0.60.0",
+    "llvmlite>=0.43.0",
+    "ipykernel>=7.1.0",
+    "nltk>=3.9.2",
 ]
 
 [dependency-groups]

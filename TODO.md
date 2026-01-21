@@ -363,6 +363,15 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
   - [x] Notebook 009: Pandas/Sklearn approach
   - [x] Notebook 010: DuckDB SQL approach (better performance)
   - [ ] Compare with River incremental model (side-by-side metrics)
+- [x] **ECCI Batch ML - Event-Level Clustering** (January 2026)
+  - [x] Notebook 018: KMeans clustering with YellowBrick visualizations
+  - [x] Event-level approach (like TFD/ETA) instead of customer-level aggregation
+  - [x] DENSE_RANK SQL encoding for categorical features (no CTE, no GROUP BY)
+  - [x] Features: price, quantity, time_on_page_seconds, session_event_sequence + encoded categoricals
+  - [x] YellowBrick visualizers: KElbowVisualizer, SilhouetteVisualizer, InterclusterDistance
+  - [x] YellowBrick text visualizers: FreqDistVisualizer, TSNEVisualizer, DispersionPlot, WordCorrelationPlot
+  - [x] find_optimal_k() with silhouette optimization (complementary to KElbowVisualizer)
+  - [ ] Training script adaptation (pending notebook testing)
 - [ ] **Optimize DuckDB Delta Lake Reading** (Priority: MEDIUM)
   - Problem: DuckDB reads entire Delta Lake table on every batch training trigger
   - Current behavior: ~60+ seconds loading time for 1M+ rows
@@ -383,12 +392,13 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
     - [ ] Display learning curve trend (improving/plateauing/overfitting)
     - [ ] Add estimated completion percentage based on early stopping patience
   - Affected files: `apps/reflex/coelho_realtime/components/shared.py`, `apps/sklearn/app.py`
-- [ ] YellowBrick visualizations:
+- [x] YellowBrick visualizations:
   - [x] Classification visualizers (ClassificationReport, ConfusionMatrix, ROCAUC, PrecisionRecallCurve)
   - [x] Feature analysis visualizers (ParallelCoordinates, PCA)
   - [x] Target visualizers (ClassBalance, BalancedBinningReference)
   - [x] Model selection visualizers (LearningCurve, CVScores, FeatureImportances)
-  - [ ] Cluster analysis visualizations (for ECCI)
+  - [x] Cluster analysis visualizers (KElbowVisualizer, SilhouetteVisualizer, InterclusterDistance)
+  - [x] Text visualizers (FreqDistVisualizer, TSNEVisualizer, DispersionPlot, WordCorrelationPlot)
 - [ ] PySpark MLlib (optional):
   - [ ] Distributed training on Delta Lake data
   - [ ] Large-scale feature engineering
@@ -1031,6 +1041,26 @@ Services Removed:
   - MLflow URL (direct link to selected run page)
 - **Files modified:** `app.py`, `functions.py` (sklearn), `shared.py`, `tfd.py` (states/components)
 
+### ECCI Batch ML with Event-Level Clustering (January 2026)
+- **Problem:** Customer-level aggregation (CTE with GROUP BY) creates mismatch between form inputs and ML model
+- **Solution:** Event-level clustering like TFD/ETA - each row is an event, not a customer
+- **Implementation:**
+  - DENSE_RANK SQL encoding for categorical features (same pattern as TFD/ETA)
+  - No CTE, no GROUP BY, no customer aggregation
+  - Features: numerical (price, quantity, time_on_page_seconds, session_event_sequence) + encoded categoricals
+  - Form inputs map directly to model features (no transformation layer needed)
+- **YellowBrick visualizers implemented:**
+  - Cluster analysis: KElbowVisualizer, SilhouetteVisualizer, InterclusterDistance
+  - Text analysis: FreqDistVisualizer, TSNEVisualizer, DispersionPlot, WordCorrelationPlot
+- **Optimal K determination:**
+  - `find_optimal_k()`: Max silhouette score method
+  - `KElbowVisualizer`: Elbow method (diminishing returns on inertia)
+  - Both methods kept for visualization/comparison purposes
+- **Files:**
+  - `notebooks/018_sklearn_duckdb_sql_clustering.ipynb` - Complete implementation
+  - `apps/sklearn/e_commerce_customer_interactions_sklearn.py` - Training script (pending adaptation)
+  - `apps/sklearn/functions.py` - Helper functions (pending adaptation)
+
 ---
 
 ## Notes
@@ -1071,4 +1101,4 @@ Services Removed:
 
 ---
 
-*Last updated: 2026-01-19 (MLflow Run Selector for Batch ML completed; Added tasks for River Incremental ML and ETA/ECCI Batch ML run selectors)*
+*Last updated: 2026-01-21 (ECCI Batch ML event-level clustering; YellowBrick text visualizers including WordCorrelationPlot; Training script pending)*
