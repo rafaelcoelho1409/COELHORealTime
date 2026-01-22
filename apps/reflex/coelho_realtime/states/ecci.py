@@ -82,12 +82,12 @@ class ECCIState(SharedState):
         ],
         "Text Analysis": [
             "Select visualization...",
-            "FreqDistVisualizer",    # Word frequency distribution
-            "TSNEVisualizer",        # t-SNE text visualization
-            "UMAPVisualizer",        # UMAP text visualization
-            "DispersionPlot",        # Word dispersion across documents
-            "WordCorrelationPlot",   # Word correlation heatmap
-            "PosTagVisualizer",      # Part-of-speech tagging
+            "FreqDistVisualizer",         # Full dataset
+            "TSNEVisualizer",             # Limited to 2,000 samples
+            "UMAPVisualizer",             # Limited to 2,000 samples
+            "DispersionPlot",             # Full dataset
+            "WordCorrelationPlot",        # Full dataset
+            "PosTagVisualizer",           # Limited to 1,000 samples
         ],
     }
 
@@ -958,6 +958,7 @@ class ECCIState(SharedState):
         metric_name = self.yellowbrick_metric_name
         # Use selected run_id from SharedState (or None for best)
         run_id = self.selected_batch_run.get(project_name) or None
+        print(f"[DEBUG ECCI] fetch_yellowbrick_metric: selected_batch_run={self.selected_batch_run}, run_id={run_id}")
 
         if not metric_name or metric_name == "Select visualization...":
             async with self:

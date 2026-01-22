@@ -1083,8 +1083,9 @@ def load_ecci_event_data_duckdb(
     if not include_search_queries:
         return df, feature_names
 
-    # Load search queries for text analysis (using same connection)
-    search_queries = []
+    # Load ALL search queries for text analysis (NO LIMIT - full dataset)
+    # Using same DuckDB connection that's already connected to Delta Lake
+    search_queries_df = None
     try:
         search_query = f"""
         SELECT DISTINCT search_query
@@ -1092,15 +1093,14 @@ def load_ecci_event_data_duckdb(
         WHERE search_query IS NOT NULL
           AND search_query != ''
           AND LENGTH(search_query) > 2
-        LIMIT 5000
         """
-        search_df = conn.execute(search_query).df()
-        search_queries = search_df['search_query'].astype(str).str.strip().tolist()
-        print(f"  Loaded {len(search_queries)} unique search queries for text analysis")
+        search_queries_df = conn.execute(search_query).df()
+        print(f"  Loaded {len(search_queries_df)} unique search queries for text analysis (full dataset)")
     except Exception as e:
         print(f"  Warning: Could not load search queries: {e}")
+        search_queries_df = pd.DataFrame(columns=['search_query'])
 
-    return df, feature_names, search_queries
+    return df, feature_names, search_queries_df
 
 
 def get_ecci_label_encodings() -> dict[str, dict[str, int]]:
@@ -2026,15 +2026,28 @@ def yellowbrick_target_kwargs(
     """
     task_type = PROJECT_TASK_TYPES.get(project_name, "classification")
     is_regression = task_type == "regression"
+    is_clustering = task_type == "clustering"
 
     kwargs = {}
 
-    # Classification-only: ClassBalance
+    # ClassBalance: Classification and Clustering only (not regression)
     if not is_regression:
-        kwargs["ClassBalance"] = {
-            "labels": labels if labels else ["Non-Fraud", "Fraud"],
-            "colors": ["#2ecc71", "#e74c3c"],
-        }
+        if is_clustering:
+            # Clustering: dynamic labels for clusters
+            # Generate colors for n clusters using a color palette
+            cluster_colors = ["#3498db", "#e74c3c", "#2ecc71", "#f39c12", "#9b59b6",
+                              "#1abc9c", "#e67e22", "#34495e", "#7f8c8d", "#16a085"]
+            n_clusters = len(labels) if labels else 3
+            kwargs["ClassBalance"] = {
+                "labels": labels if labels else [f"Cluster {i}" for i in range(n_clusters)],
+                "colors": cluster_colors[:n_clusters],
+            }
+        else:
+            # Classification: binary fraud detection labels (TFD)
+            kwargs["ClassBalance"] = {
+                "labels": labels if labels else ["Non-Fraud", "Fraud"],
+                "colors": ["#2ecc71", "#e74c3c"],
+            }
 
     # FeatureCorrelation with Mutual Information (method depends on task type)
     kwargs["FeatureCorrelation"] = {
@@ -2122,9 +2135,18 @@ def yellowbrick_model_selection_kwargs(
     """
     task_type = PROJECT_TASK_TYPES.get(project_name, "classification")
     is_regression = task_type == "regression"
+    is_clustering = task_type == "clustering"
 
     # Scoring metric based on task type
-    scoring = "r2" if is_regression else "f1"
+    # - Regression: r2 (coefficient of determination)
+    # - Clustering: accuracy (predicting cluster membership with RandomForest)
+    # - Classification: f1 (harmonic mean of precision and recall)
+    if is_regression:
+        scoring = "r2"
+    elif is_clustering:
+        scoring = "accuracy"
+    else:
+        scoring = "f1"
 
     kwargs = {
         "FeatureImportances": {
@@ -2240,11 +2262,14 @@ def yellowbrick_model_selection_visualizers(
                     random_state=42,
                     n_jobs=-1
                 )
-                # Adjust params for RandomForest (no 'iterations' param)
-                cv_params = {k: v for k, v in params.items() if k != "param_name" or k != "param_range"}
+                # Adjust params for RandomForest (no 'iterations' param like CatBoost)
+                cv_params = {k: v for k, v in params.items() if k not in ("param_name", "param_range")}
+                # Override scoring to 'accuracy' for clustering
+                cv_params["scoring"] = "accuracy"
                 if visualizer_name == "ValidationCurve":
-                    cv_params["param_name"] = "n_estimators"
-                    cv_params["param_range"] = np.array([20, 50, 100, 150])
+                    # Use max_depth for RandomForest (tests tree complexity)
+                    cv_params["param_name"] = "max_depth"
+                    cv_params["param_range"] = np.array([2, 4, 6, 8, 10])
                 visualizer = vis_class(rf_cv, **cv_params)
                 visualizer.fit(X_full, y_full)
             return visualizer
@@ -2503,9 +2528,12 @@ def yellowbrick_text_analysis_visualizers(
     if len(valid_queries) < 10:
         raise ValueError(f"Insufficient search queries ({len(valid_queries)}). Need at least 10 for visualization.")
 
+    # Log dataset size
+    print(f"Text analysis: {len(valid_queries)} valid queries available")
+
     for visualizer_name, params in yb_kwargs.items():
         if visualizer_name == "FreqDistVisualizer":
-            # Vectorize text for frequency distribution
+            # Vectorize text for frequency distribution - FULL dataset (fast)
             vectorizer = CountVectorizer(
                 max_features=params.get("n", 50),
                 stop_words="english",
@@ -2518,8 +2546,8 @@ def yellowbrick_text_analysis_visualizers(
             return visualizer
 
         elif visualizer_name == "TSNEVisualizer":
-            # TF-IDF for t-SNE (limit samples for speed)
-            sample_size = min(len(valid_queries), 500)
+            # TF-IDF for t-SNE - limited to 2000 samples (slow algorithm)
+            sample_size = min(len(valid_queries), 2000)
             sample_queries = valid_queries[:sample_size]
             sample_labels = cluster_labels[:sample_size] if cluster_labels is not None else None
 
@@ -2532,7 +2560,8 @@ def yellowbrick_text_analysis_visualizers(
         elif visualizer_name == "UMAPVisualizer":
             if not UMAP_AVAILABLE:
                 raise ImportError("UMAPVisualizer requires umap-learn: pip install umap-learn")
-            sample_size = min(len(valid_queries), 500)
+            # TF-IDF for UMAP - limited to 2000 samples (slow algorithm)
+            sample_size = min(len(valid_queries), 2000)
             sample_queries = valid_queries[:sample_size]
             sample_labels = cluster_labels[:sample_size] if cluster_labels is not None else None
 
@@ -2543,10 +2572,9 @@ def yellowbrick_text_analysis_visualizers(
             return visualizer
 
         elif visualizer_name == "DispersionPlot":
-            # Tokenize documents and find target words (as per notebook)
-            # Limit to 500 docs for performance
+            # Tokenize documents and find target words - FULL dataset (fast)
             from collections import Counter
-            tokenized_docs = [q.lower().split() for q in valid_queries[:500]]
+            tokenized_docs = [q.lower().split() for q in valid_queries]
 
             # Build a set of all unique words that actually appear in tokenized docs
             all_words_in_corpus = set()
@@ -2568,24 +2596,15 @@ def yellowbrick_text_analysis_visualizers(
                     if len(target_words) >= 10:
                         break
 
-            print(f"DispersionPlot: {len(tokenized_docs)} docs, {len(all_tokens)} tokens, {len(all_words_in_corpus)} unique words")
-            print(f"DispersionPlot: target_words={target_words}")
-
             if len(target_words) < 3:
                 raise ValueError(f"Insufficient vocabulary for DispersionPlot. Found {len(target_words)} verified words, need at least 3.")
 
-            try:
-                visualizer = DispersionPlot(target_words, **params)
-                print(f"DispersionPlot: visualizer created, fitting with {len(tokenized_docs)} docs...")
-                visualizer.fit(tokenized_docs)
-                print(f"DispersionPlot: fit complete!")
-                return visualizer
-            except Exception as e:
-                print(f"DispersionPlot error: {type(e).__name__}: {e}")
-                raise
+            visualizer = DispersionPlot(target_words, **params)
+            visualizer.fit(tokenized_docs)
+            return visualizer
 
         elif visualizer_name == "WordCorrelationPlot":
-            # Find most common words for correlation
+            # Find most common words for correlation - FULL dataset (fast)
             word_freq = {}
             for q in valid_queries:
                 for word in q.lower().split():
@@ -2601,10 +2620,10 @@ def yellowbrick_text_analysis_visualizers(
         elif visualizer_name == "PosTagVisualizer":
             if not POS_AVAILABLE:
                 raise ImportError("PosTagVisualizer requires NLTK: pip install nltk")
-            # Use raw text - parser='nltk' handles tokenization and tagging
-            # Limit to 300 queries for speed (as per notebook)
+            # Use raw text - limited to 1000 samples (slow NLTK processing)
+            sample_size = min(len(valid_queries), 1000)
             visualizer = PosTagVisualizer(**params)
-            visualizer.fit(valid_queries[:300])
+            visualizer.fit(valid_queries[:sample_size])
             return visualizer
 
     return None

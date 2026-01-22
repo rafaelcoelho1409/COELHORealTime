@@ -937,8 +937,12 @@ def _save_artifact(run_id: str, artifact_path: str, data: bytes) -> bool:
 def _load_search_queries_from_mlflow(run_id: str, project_name: str) -> list[str]:
     """Load search queries from MLflow artifacts for text analysis.
 
-    First tries to load from MLflow artifact 'training_data/search_queries.txt'.
-    If not available, loads directly from Delta Lake.
+    Tries to load in order:
+    1. Parquet format (new, full dataset): 'training_data/search_queries.parquet'
+    2. Text format (legacy, limited): 'training_data/search_queries.txt'
+    3. Fallback: Direct Delta Lake query (may fail in Kubernetes)
+
+    Uses DuckDB to query parquet for efficient filtering.
 
     Args:
         run_id: MLflow run ID
@@ -950,7 +954,29 @@ def _load_search_queries_from_mlflow(run_id: str, project_name: str) -> list[str
     import duckdb
     from functions import DELTA_PATHS
 
-    # First try to load from MLflow artifact (if training script saved it)
+    # 1. Try to load from parquet (new format - full dataset)
+    try:
+        search_queries_path = mlflow.artifacts.download_artifacts(
+            run_id=run_id,
+            artifact_path="training_data/search_queries.parquet",
+        )
+        # Use DuckDB to query parquet efficiently
+        conn = duckdb.connect()
+        df = conn.execute(f"""
+            SELECT search_query
+            FROM read_parquet('{search_queries_path}')
+            WHERE search_query IS NOT NULL
+              AND LENGTH(TRIM(search_query)) > 2
+        """).df()
+        conn.close()
+
+        search_queries = df['search_query'].astype(str).str.strip().tolist()
+        print(f"Loaded {len(search_queries)} search queries from MLflow parquet (full dataset)")
+        return search_queries
+    except Exception as e:
+        print(f"Parquet search queries not found: {e}")
+
+    # 2. Fallback: Try legacy txt format (backward compatibility)
     try:
         search_queries_path = mlflow.artifacts.download_artifacts(
             run_id=run_id,
@@ -958,13 +984,13 @@ def _load_search_queries_from_mlflow(run_id: str, project_name: str) -> list[str
         )
         with open(search_queries_path, 'r') as f:
             search_queries = [line.strip() for line in f if line.strip()]
-        print(f"Loaded {len(search_queries)} search queries from MLflow artifact")
+        print(f"Loaded {len(search_queries)} search queries from MLflow txt (legacy format)")
         return search_queries
     except Exception as e:
-        print(f"Search queries not found in MLflow artifacts: {e}")
+        print(f"Text search queries not found in MLflow artifacts: {e}")
 
-    # Fallback: Load directly from Delta Lake
-    print("Loading search queries from Delta Lake...")
+    # 3. Last resort: Load directly from Delta Lake (may fail in Kubernetes)
+    print("Loading search queries from Delta Lake (fallback)...")
     try:
         delta_path = DELTA_PATHS.get(project_name)
         if not delta_path:
@@ -978,14 +1004,13 @@ def _load_search_queries_from_mlflow(run_id: str, project_name: str) -> list[str
         WHERE search_query IS NOT NULL
           AND search_query != ''
           AND LENGTH(search_query) > 2
-        LIMIT 5000
         """
         df = conn.execute(query).df()
         conn.close()
 
         search_queries = df['search_query'].astype(str).tolist()
         search_queries = [q.strip() for q in search_queries if q.strip()]
-        print(f"Loaded {len(search_queries)} search queries from Delta Lake")
+        print(f"Loaded {len(search_queries)} search queries from Delta Lake (full dataset)")
         return search_queries
     except Exception as e:
         raise ValueError(f"Failed to load search queries: {e}")
@@ -1041,10 +1066,14 @@ def _sync_generate_yellowbrick_plot(
     # Combined data for visualizers that need full dataset
     X = pd.concat([X_train, X_test], ignore_index=True)
     y = pd.concat([y_train, y_test], ignore_index=True)
-    # Classes only for classification (None for regression)
+    # Classes for classification/clustering (None for regression)
     classes = None
     if task_type == "classification":
         classes = sorted(list(set(y_train.unique().tolist() + y_test.unique().tolist())))
+    elif task_type == "clustering":
+        # For clustering, generate labels for each unique cluster
+        unique_clusters = sorted(list(set(y_train.unique().tolist() + y_test.unique().tolist())))
+        classes = [f"Cluster {c}" for c in unique_clusters]
     fig_buf = io.BytesIO()
     yb_vis = None
     try:
@@ -1153,6 +1182,7 @@ async def yellowbrick_metric(payload: dict):
     metric_type = payload.get("metric_type")
     metric_name = payload.get("metric_name")
     run_id = payload.get("run_id")  # Optional: specific run, or None for best
+    print(f"[DEBUG] yellowbrick_metric called: project={project_name}, type={metric_type}, name={metric_name}, run_id={run_id}")
     if not all([project_name, metric_type, metric_name]):
         raise HTTPException(
             status_code=400,

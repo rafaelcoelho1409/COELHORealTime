@@ -341,6 +341,21 @@ def _text_analysis_tab() -> rx.Component:
             align_items="center"
         ),
         _yellowbrick_content("Text Analysis", "Select a text analysis visualization to explore search query patterns."),
+        rx.callout(
+            rx.vstack(
+                rx.text("**Data Sampling:** Some visualizations use sampled data for performance:", size="2"),
+                rx.text("• FreqDistVisualizer, DispersionPlot, WordCorrelationPlot: Full dataset", size="1", color="gray"),
+                rx.text("• TSNEVisualizer, UMAPVisualizer: 2,000 samples (slow)", size="1", color="gray"),
+                rx.text("• PosTagVisualizer: 1,000 samples (slow)", size="1", color="gray"),
+                spacing="1",
+                align_items="start"
+            ),
+            icon="info",
+            color="blue",
+            variant="soft",
+            size="1",
+            width="100%"
+        ),
         spacing="4",
         width="100%",
     )

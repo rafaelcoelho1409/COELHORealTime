@@ -367,15 +367,14 @@ def main(sample_frac: float | None, max_rows: int | None, n_clusters: int | None
                 mlflow.log_artifact(os.path.join(tmpdir, "cluster_centers.parquet"), artifact_path="training_data")
                 print(f"  Saved: cluster_centers={centers_df.shape}")
                 # Save search queries for YellowBrick text analysis
-                # Uses pre-loaded search_queries from initial data load (same DuckDB connection)
+                # Uses pre-loaded search_queries DataFrame from initial data load (full dataset, no limits)
                 print("Saving search queries for text analysis...")
-                if search_queries:
-                    search_queries_path = os.path.join(tmpdir, "search_queries.txt")
-                    with open(search_queries_path, 'w') as f:
-                        for q in search_queries:
-                            f.write(q + '\n')
+                if search_queries is not None and len(search_queries) > 0:
+                    # Save as parquet for efficient storage and DuckDB querying
+                    search_queries_path = os.path.join(tmpdir, "search_queries.parquet")
+                    search_queries.to_parquet(search_queries_path, compression="snappy", index=False)
                     mlflow.log_artifact(search_queries_path, artifact_path="training_data")
-                    print(f"  Saved: search_queries={len(search_queries)} unique queries")
+                    print(f"  Saved: search_queries={len(search_queries)} unique queries (full dataset, parquet)")
                 else:
                     print("  Warning: No search queries available for text analysis")
             # Log model using MLflow's sklearn flavor
