@@ -15,13 +15,13 @@ from .shared import metric_info_dialog, yellowbrick_info_dialog, ml_training_swi
 # =============================================================================
 # ETA Card Helper Functions
 # =============================================================================
-def metric_card(label: str, value_var, metric_key: str = None, project_key: str = "eta") -> rx.Component:
+def metric_card(label: str, value_var, metric_key: str = None, project_key: str = "eta", ml_type: str = "batch") -> rx.Component:
     """Create a compact styled metric card with optional info button."""
     return rx.card(
         rx.vstack(
             rx.hstack(
                 rx.text(label, size="1", weight="medium", color="gray"),
-                metric_info_dialog(metric_key, project_key) if metric_key else rx.fragment(),
+                metric_info_dialog(metric_key, project_key, ml_type) if metric_key else rx.fragment(),
                 spacing="1",
                 align="center",
                 justify="center"
@@ -102,12 +102,12 @@ def mlflow_run_info_badge(project_name: str) -> rx.Component:
 
 
 def kpi_card_with_info(plotly_key: str, metric_key: str) -> rx.Component:
-    """Create a KPI card with Plotly chart and info button."""
+    """Create a KPI card with Plotly chart and info button (Incremental ML)."""
     return rx.card(
         rx.vstack(
             rx.hstack(
                 rx.spacer(),
-                metric_info_dialog(metric_key, "eta"),
+                metric_info_dialog(metric_key, "eta", "incremental"),
                 width="100%",
                 justify="end"
             ),
@@ -120,12 +120,12 @@ def kpi_card_with_info(plotly_key: str, metric_key: str) -> rx.Component:
 
 
 def gauge_card_with_info(plotly_key: str, metric_key: str) -> rx.Component:
-    """Create a gauge card with Plotly chart and info button."""
+    """Create a gauge card with Plotly chart and info button (Incremental ML)."""
     return rx.card(
         rx.vstack(
             rx.hstack(
                 rx.spacer(),
-                metric_info_dialog(metric_key, "eta"),
+                metric_info_dialog(metric_key, "eta", "incremental"),
                 width="100%",
                 justify="end"
             ),
@@ -158,7 +158,13 @@ def eta_map() -> rx.Component:
 def estimated_time_of_arrival_metrics() -> rx.Component:
     """Display MLflow regression metrics for ETA with Plotly dashboard layout."""
     return rx.vstack(
-        mlflow_run_info_badge("Estimated Time of Arrival"),
+        # Run info badge with spacing from tab
+        rx.box(
+            mlflow_run_info_badge("Estimated Time of Arrival"),
+            margin_top="1em",
+            margin_bottom="0.5em",
+            width="100%"
+        ),
         # ROW 1: KPI Indicators
         rx.grid(
             kpi_card_with_info("kpi_mae", "mae"),
@@ -171,10 +177,10 @@ def estimated_time_of_arrival_metrics() -> rx.Component:
         ),
         # ROW 2: Additional metrics
         rx.grid(
-            metric_card("MSE", ETAState.eta_metrics["mse"], "mse"),
-            metric_card("RMSLE", ETAState.eta_metrics["rmsle"], "rmsle"),
-            metric_card("SMAPE", ETAState.eta_metrics["smape"], "smape"),
-            metric_card("Time Rolling MAE", ETAState.eta_metrics["time_rolling_mae"], "time_rolling_mae"),
+            metric_card("MSE", ETAState.eta_metrics["mse"], "mse", "eta", "incremental"),
+            metric_card("RMSLE", ETAState.eta_metrics["rmsle"], "rmsle", "eta", "incremental"),
+            metric_card("SMAPE", ETAState.eta_metrics["smape"], "smape", "eta", "incremental"),
+            metric_card("Time Rolling MAE", ETAState.eta_metrics["time_rolling_mae"], "time_rolling_mae", "eta", "incremental"),
             columns="4",
             spacing="2",
             width="100%"
@@ -221,7 +227,7 @@ def eta_batch_kpi_card(plotly_key: str) -> rx.Component:
         rx.vstack(
             rx.hstack(
                 rx.spacer(),
-                metric_info_dialog(metric_key, "eta") if metric_key else rx.fragment(),
+                metric_info_dialog(metric_key, "eta", "batch") if metric_key else rx.fragment(),
                 width="100%",
                 justify="end"
             ),
@@ -240,7 +246,7 @@ def eta_batch_gauge_card(plotly_key: str) -> rx.Component:
         rx.vstack(
             rx.hstack(
                 rx.spacer(),
-                metric_info_dialog(metric_key, "eta") if metric_key else rx.fragment(),
+                metric_info_dialog(metric_key, "eta", "batch") if metric_key else rx.fragment(),
                 width="100%",
                 justify="end"
             ),
@@ -259,7 +265,7 @@ def eta_batch_bullet_card(plotly_key: str) -> rx.Component:
         rx.vstack(
             rx.hstack(
                 rx.spacer(),
-                metric_info_dialog(metric_key, "eta") if metric_key else rx.fragment(),
+                metric_info_dialog(metric_key, "eta", "batch") if metric_key else rx.fragment(),
                 width="100%",
                 justify="end"
             ),
@@ -699,12 +705,15 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
             rx.tabs.list(
                 rx.tabs.trigger(
                     rx.hstack(rx.icon("target", size=14), rx.text("Prediction"), spacing="2", align_items="center"),
-                    value="prediction"
+                    value="prediction",
+                    flex="1"
                 ),
                 rx.tabs.trigger(
                     rx.hstack(rx.icon("chart-bar", size=14), rx.text("Metrics"), spacing="2", align_items="center"),
-                    value="metrics"
+                    value="metrics",
+                    flex="1"
                 ),
+                width="100%"
             ),
             # Tab 1: Prediction
             rx.tabs.content(
@@ -750,38 +759,13 @@ def estimated_time_of_arrival_form(model_key: str = None, project_name: str = No
                                     align_items="center"
                                 ),
                                 mlflow_run_info_badge("Estimated Time of Arrival"),
-                                rx.cond(
-                                    ETAState.eta_prediction_show,
-                                    rx.box(
-                                        rx.plotly(data=ETAState.eta_prediction_figure, width="100%"),
-                                        width="100%",
-                                        flex="1",
-                                        display="flex",
-                                        align_items="center",
-                                        justify_content="center"
-                                    ),
-                                    rx.box(
-                                        rx.cond(
-                                            ETAState.incremental_model_available["Estimated Time of Arrival"],
-                                            rx.callout(
-                                                "Click **Predict** to get the estimated time of arrival.",
-                                                icon="info",
-                                                color="blue",
-                                                width="100%"
-                                            ),
-                                            rx.callout(
-                                                "No trained model available. Toggle **Real-time ML Training** to train first.",
-                                                icon="triangle-alert",
-                                                color="orange",
-                                                width="100%"
-                                            )
-                                        ),
-                                        width="100%",
-                                        flex="1",
-                                        display="flex",
-                                        align_items="center",
-                                        justify_content="center"
-                                    )
+                                rx.box(
+                                    rx.plotly(data=ETAState.eta_prediction_figure, width="100%"),
+                                    width="100%",
+                                    flex="1",
+                                    display="flex",
+                                    align_items="center",
+                                    justify_content="center"
                                 ),
                                 spacing="2",
                                 width="100%",
@@ -1152,12 +1136,15 @@ def estimated_time_of_arrival_batch_form(model_key: str = None, project_name: st
             rx.tabs.list(
                 rx.tabs.trigger(
                     rx.hstack(rx.icon("target", size=14), rx.text("Prediction"), spacing="2", align_items="center"),
-                    value="prediction"
+                    value="prediction",
+                    flex="1"
                 ),
                 rx.tabs.trigger(
                     rx.hstack(rx.icon("chart-bar", size=14), rx.text("Metrics"), spacing="2", align_items="center"),
-                    value="metrics"
+                    value="metrics",
+                    flex="1"
                 ),
+                width="100%"
             ),
             # Tab 1: Prediction
             rx.tabs.content(

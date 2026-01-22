@@ -9,7 +9,7 @@ from ...states import ECCIState
 
 
 PROJECT_NAME = "E-Commerce Customer Interactions"
-MODEL_KEY = "e_commerce_customer_interactions_river.py"
+MODEL_KEY = "ml_training/river/ecci.py"
 BASE_ROUTE = "/ecci"
 
 

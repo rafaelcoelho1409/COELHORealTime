@@ -12,7 +12,7 @@ import reflex as rx
 import datetime as dt
 import plotly.graph_objects as go
 import folium
-from .shared import SharedState, RIVER_BASE_URL, safe_float_str
+from .shared import SharedState, INCREMENTAL_API, BATCH_API, safe_float_str
 from ..utils import httpx_client_post, httpx_client_get
 
 
@@ -595,22 +595,29 @@ class ECCIState(SharedState):
         try:
             print(f"Making ECCI prediction with payload: {payload}")
             response = await httpx_client_post(
-                url=f"{RIVER_BASE_URL}/predict",
+                url=f"{INCREMENTAL_API}/predict",
                 json=payload,
                 timeout=30.0
             )
             result = response.json()
             print(f"ECCI Prediction result: {result}")
             cluster = result.get("cluster", 0)
+            model_source = result.get("model_source", "mlflow")
             async with self:
                 self.prediction_results = {
                     **self.prediction_results,
                     project_name: {
                         "cluster": cluster,
-                        "model_source": result.get("model_source", "mlflow"),
+                        "model_source": model_source,
                         "show": True
                     }
                 }
+            # Show toast with cluster prediction
+            yield rx.toast.success(
+                f"Cluster: {cluster}",
+                description=f"Customer assigned to cluster {cluster} (Source: {model_source.upper()})",
+                duration=5000
+            )
             await self._fetch_mlflow_metrics_internal(project_name)
         except Exception as e:
             print(f"Error making ECCI prediction: {e}")
@@ -622,6 +629,11 @@ class ECCIState(SharedState):
                         "show": False
                     }
                 }
+            yield rx.toast.error(
+                "Prediction failed",
+                description=str(e)[:100],
+                duration=5000
+            )
 
     @rx.event
     def randomize_ecci_form(self):
@@ -705,7 +717,7 @@ class ECCIState(SharedState):
         """Fetch cluster counts from FastAPI."""
         try:
             response = await httpx_client_get(
-                url=f"{RIVER_BASE_URL}/cluster_counts",
+                url=f"{INCREMENTAL_API}/cluster-counts",
                 timeout=30.0
             )
             cluster_counts = response.json()
@@ -725,7 +737,7 @@ class ECCIState(SharedState):
         column_name = "device_info" if feature in device_info_features else feature
         try:
             response = await httpx_client_post(
-                url=f"{RIVER_BASE_URL}/cluster_feature_counts",
+                url=f"{INCREMENTAL_API}/cluster-feature-counts",
                 json={"column_name": column_name},
                 timeout=30.0
             )
@@ -760,6 +772,52 @@ class ECCIState(SharedState):
         """Set the selected feature and trigger data fetch."""
         self.ecci_selected_feature = feature
         return ECCIState.fetch_ecci_cluster_feature_counts(feature)
+
+    @rx.event(background=True)
+    async def fetch_ecci_batch_cluster_feature_counts(self, feature: str = None):
+        """Fetch feature counts per cluster from sklearn service (batch ML).
+
+        Used for the Cluster Behavior box in ECCI Batch ML Prediction page.
+        Fetches data from MLflow training artifacts via /cluster_feature_counts endpoint.
+        """
+        from .shared import BATCH_API
+
+        if feature is None:
+            feature = self.ecci_selected_feature
+
+        # Get selected run_id for batch ML
+        run_id = self.selected_batch_run.get("E-Commerce Customer Interactions") or None
+
+        try:
+            response = await httpx_client_post(
+                url=f"{BATCH_API}/cluster-feature-counts",
+                json={
+                    "project_name": "E-Commerce Customer Interactions",
+                    "feature_name": feature,
+                    "run_id": run_id,
+                },
+                timeout=30.0
+            )
+            data = response.json()
+            feature_counts = data.get("feature_counts", {})
+
+            # Convert cluster_id keys to strings for consistency with UI
+            processed_data = {str(k): v for k, v in feature_counts.items()}
+
+            async with self:
+                self.ecci_cluster_feature_counts = processed_data
+                print(f"[DEBUG] Fetched batch cluster feature counts for {feature}: {len(processed_data)} clusters")
+
+        except Exception as e:
+            print(f"Error fetching ECCI batch cluster feature counts: {e}")
+            async with self:
+                self.ecci_cluster_feature_counts = {}
+
+    @rx.event
+    def set_ecci_batch_selected_feature(self, feature: str):
+        """Set the selected feature and trigger batch data fetch."""
+        self.ecci_selected_feature = feature
+        return ECCIState.fetch_ecci_batch_cluster_feature_counts(feature)
 
     # ==========================================================================
     # BATCH ML PREDICTION (Scikit-Learn)
@@ -805,7 +863,7 @@ class ECCIState(SharedState):
     @rx.event(background=True)
     async def predict_batch_ecci(self):
         """Make batch prediction for ECCI using Scikit-Learn model from selected run."""
-        from .shared import SKLEARN_BASE_URL
+        from .shared import BATCH_API
         project_name = "E-Commerce Customer Interactions"
         current_form = self.form_data.get(project_name, {})
         # Use selected run_id from SharedState (or None for best)
@@ -849,7 +907,7 @@ class ECCIState(SharedState):
         try:
             print(f"Making batch ECCI prediction with payload: {payload}")
             response = await httpx_client_post(
-                url=f"{SKLEARN_BASE_URL}/predict",
+                url=f"{BATCH_API}/predict",
                 json=payload,
                 timeout=30.0
             )
@@ -953,7 +1011,7 @@ class ECCIState(SharedState):
     @rx.event(background=True)
     async def fetch_yellowbrick_metric(self, project_name: str):
         """Fetch YellowBrick visualization from FastAPI using selected MLflow run."""
-        from .shared import SKLEARN_BASE_URL
+        from .shared import BATCH_API
         metric_type = self.yellowbrick_metric_type
         metric_name = self.yellowbrick_metric_name
         # Use selected run_id from SharedState (or None for best)
@@ -974,7 +1032,7 @@ class ECCIState(SharedState):
 
         try:
             response = await httpx_client_post(
-                url=f"{SKLEARN_BASE_URL}/yellowbrick_metric",
+                url=f"{BATCH_API}/yellowbrick-metric",
                 json={
                     "project_name": project_name,
                     "metric_type": metric_type,

@@ -17,7 +17,7 @@ from .shared import metric_info_dialog, yellowbrick_info_dialog, ml_training_swi
 # =============================================================================
 # TFD Card Helper Functions
 # =============================================================================
-def metric_card(label: str, value_var, metric_key: str = None, project_key: str = "tfd") -> rx.Component:
+def metric_card(label: str, value_var, metric_key: str = None, project_key: str = "tfd", ml_type: str = "batch") -> rx.Component:
     """Create a compact styled metric card with optional info button."""
     return rx.card(
         rx.vstack(
@@ -28,7 +28,7 @@ def metric_card(label: str, value_var, metric_key: str = None, project_key: str 
                     weight="medium",
                     color="gray"
                 ),
-                metric_info_dialog(metric_key, project_key) if metric_key else rx.fragment(),
+                metric_info_dialog(metric_key, project_key, ml_type) if metric_key else rx.fragment(),
                 spacing="1",
                 align="center",
                 justify="center"
@@ -122,12 +122,12 @@ def mlflow_run_info_badge(project_name: str) -> rx.Component:
 
 
 def kpi_card_with_info(plotly_key: str, metric_key: str) -> rx.Component:
-    """Create a KPI card with Plotly chart and info button."""
+    """Create a KPI card with Plotly chart and info button (Incremental ML)."""
     return rx.card(
         rx.vstack(
             rx.hstack(
                 rx.spacer(),
-                metric_info_dialog(metric_key, "tfd"),
+                metric_info_dialog(metric_key, "tfd", "incremental"),
                 width="100%",
                 justify="end"
             ),
@@ -140,12 +140,12 @@ def kpi_card_with_info(plotly_key: str, metric_key: str) -> rx.Component:
 
 
 def gauge_card_with_info(plotly_key: str, metric_key: str) -> rx.Component:
-    """Create a gauge card with Plotly chart and info button."""
+    """Create a gauge card with Plotly chart and info button (Incremental ML)."""
     return rx.card(
         rx.vstack(
             rx.hstack(
                 rx.spacer(),
-                metric_info_dialog(metric_key, "tfd"),
+                metric_info_dialog(metric_key, "tfd", "incremental"),
                 width="100%",
                 justify="end"
             ),
@@ -159,12 +159,12 @@ def gauge_card_with_info(plotly_key: str, metric_key: str) -> rx.Component:
 
 
 def heatmap_card_with_info(plotly_key: str, metric_key: str) -> rx.Component:
-    """Create a heatmap card with Plotly chart and info button."""
+    """Create a heatmap card with Plotly chart and info button (Incremental ML)."""
     return rx.card(
         rx.vstack(
             rx.hstack(
                 rx.spacer(),
-                metric_info_dialog(metric_key, "tfd"),
+                metric_info_dialog(metric_key, "tfd", "incremental"),
                 width="100%",
                 justify="end"
             ),
@@ -212,7 +212,7 @@ def batch_kpi_card(plotly_key: str) -> rx.Component:
         rx.vstack(
             rx.hstack(
                 rx.spacer(),
-                metric_info_dialog(metric_key, "tfd") if metric_key else rx.fragment(),
+                metric_info_dialog(metric_key, "tfd", "batch") if metric_key else rx.fragment(),
                 width="100%",
                 justify="end"
             ),
@@ -231,7 +231,7 @@ def batch_gauge_card(plotly_key: str) -> rx.Component:
         rx.vstack(
             rx.hstack(
                 rx.spacer(),
-                metric_info_dialog(metric_key, "tfd") if metric_key else rx.fragment(),
+                metric_info_dialog(metric_key, "tfd", "batch") if metric_key else rx.fragment(),
                 width="100%",
                 justify="end"
             ),
@@ -250,7 +250,7 @@ def batch_bullet_card(plotly_key: str) -> rx.Component:
         rx.vstack(
             rx.hstack(
                 rx.spacer(),
-                metric_info_dialog(metric_key, "tfd") if metric_key else rx.fragment(),
+                metric_info_dialog(metric_key, "tfd", "batch") if metric_key else rx.fragment(),
                 width="100%",
                 justify="end"
             ),
@@ -301,8 +301,13 @@ def yellowbrick_dynamic_info_button() -> rx.Component:
 def transaction_fraud_detection_metrics() -> rx.Component:
     """Display MLflow classification metrics for TFD with Plotly dashboard layout."""
     return rx.vstack(
-        # Run info badge
-        mlflow_run_info_badge("Transaction Fraud Detection"),
+        # Run info badge with spacing from tab
+        rx.box(
+            mlflow_run_info_badge("Transaction Fraud Detection"),
+            margin_top="1em",
+            margin_bottom="0.5em",
+            width="100%"
+        ),
         # ROW 1: KPI Indicators (primary metrics with delta from baseline)
         rx.grid(
             kpi_card_with_info("kpi_fbeta", "fbeta"),
@@ -316,12 +321,12 @@ def transaction_fraud_detection_metrics() -> rx.Component:
         ),
         # ROW 2: Additional metrics (text cards with info buttons)
         rx.grid(
-            metric_card("F1", TFDState.tfd_metrics["f1"], "f1"),
-            metric_card("Accuracy", TFDState.tfd_metrics["accuracy"], "accuracy"),
-            metric_card("Geo Mean", TFDState.tfd_metrics["geometric_mean"], "geometric_mean"),
-            metric_card("Cohen k", TFDState.tfd_metrics["cohen_kappa"], "cohen_kappa"),
-            metric_card("Jaccard", TFDState.tfd_metrics["jaccard"], "jaccard"),
-            metric_card("LogLoss", TFDState.tfd_metrics["logloss"], "logloss"),
+            metric_card("F1", TFDState.tfd_metrics["f1"], "f1", "tfd", "incremental"),
+            metric_card("Accuracy", TFDState.tfd_metrics["accuracy"], "accuracy", "tfd", "incremental"),
+            metric_card("Geo Mean", TFDState.tfd_metrics["geometric_mean"], "geometric_mean", "tfd", "incremental"),
+            metric_card("Cohen k", TFDState.tfd_metrics["cohen_kappa"], "cohen_kappa", "tfd", "incremental"),
+            metric_card("Jaccard", TFDState.tfd_metrics["jaccard"], "jaccard", "tfd", "incremental"),
+            metric_card("LogLoss", TFDState.tfd_metrics["logloss"], "logloss", "tfd", "incremental"),
             columns="6",
             spacing="2",
             width="100%"
@@ -767,7 +772,8 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                         spacing="2",
                         align_items="center"
                     ),
-                    value="prediction"
+                    value="prediction",
+                    flex="1"
                 ),
                 rx.tabs.trigger(
                     rx.hstack(
@@ -776,8 +782,10 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                         spacing="2",
                         align_items="center"
                     ),
-                    value="metrics"
+                    value="metrics",
+                    flex="1"
                 ),
+                width="100%"
             ),
             # Tab 1: Prediction
             rx.tabs.content(
@@ -790,28 +798,10 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                         align_items="center",
                         width="100%"
                     ),
-                    # Model info row
-                    rx.hstack(
-                        rx.badge(
-                            rx.hstack(
-                                rx.icon("brain", size=12),
-                                rx.text("RandomUnderSampler + ARFClassifier", size="1"),
-                                spacing="1",
-                                align_items="center"
-                            ),
-                            color_scheme="blue",
-                            variant="soft",
-                            size="1"
-                        ),
-                        rx.badge("Imbalanced Learning", color_scheme="purple", variant="soft", size="1"),
-                        spacing="2"
-                    ),
                     # MLflow run info (LIVE/FINISHED status)
                     mlflow_run_info_badge("Transaction Fraud Detection"),
-                    rx.cond(
-                        TFDState.tfd_prediction_show,
-                        # Show prediction results when available
-                        rx.card(
+                    # Always show prediction results card (zeroed on page start)
+                    rx.card(
                             rx.vstack(
                                 # Plotly Gauge Chart
                                 rx.plotly(data=TFDState.tfd_fraud_gauge, width="100%"),
@@ -895,23 +885,6 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                             variant="classic",
                             width="100%"
                         ),
-                        # Show info or warning message when no prediction yet
-                        rx.cond(
-                            TFDState.incremental_model_available["Transaction Fraud Detection"],
-                            rx.callout(
-                                "Fill in the transaction details and click **Predict** to get the fraud probability.",
-                                icon="info",
-                                color="blue",
-                                width="100%"
-                            ),
-                            rx.callout(
-                                "No trained model available. Toggle **Real-time ML Training** to train first.",
-                                icon="triangle-alert",
-                                color="orange",
-                                width="100%"
-                            )
-                        )
-                    ),
                     spacing="4",
                     width="100%",
                     padding_top="1em"
@@ -950,22 +923,6 @@ def transaction_fraud_detection_form(model_key: str = None, project_name: str = 
                         # Subtab 1: Overview (default sklearn metrics)
                         rx.tabs.content(
                             rx.vstack(
-                                # Model info row
-                                rx.hstack(
-                                    rx.badge(
-                                        rx.hstack(
-                                            rx.icon("brain", size=12),
-                                            rx.text("RandomUnderSampler + ARFClassifier", size="1"),
-                                            spacing="1",
-                                            align_items="center"
-                                        ),
-                                        color_scheme="blue",
-                                        variant="soft",
-                                        size="1"
-                                    ),
-                                    rx.badge("Imbalanced Learning", color_scheme="purple", variant="soft", size="1"),
-                                    spacing="2"
-                                ),
                                 transaction_fraud_detection_metrics(),
                                 spacing="4",
                                 width="100%",
@@ -1306,7 +1263,8 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
                         spacing="2",
                         align_items="center"
                     ),
-                    value="prediction"
+                    value="prediction",
+                    flex="1"
                 ),
                 rx.tabs.trigger(
                     rx.hstack(
@@ -1315,8 +1273,10 @@ def transaction_fraud_detection_batch_form(model_key: str = None, project_name: 
                         spacing="2",
                         align_items="center"
                     ),
-                    value="metrics"
+                    value="metrics",
+                    flex="1"
                 ),
+                width="100%"
             ),
             # Tab 1: Prediction
             rx.tabs.content(

@@ -18,9 +18,11 @@ from .shared import (
     YELLOWBRICK_INFO,
     DROPDOWN_OPTIONS,
 
-    # API base URLs
-    RIVER_BASE_URL,
-    SKLEARN_BASE_URL,
+    # API base URLs (unified FastAPI service)
+    FASTAPI_BASE_URL,
+    INCREMENTAL_API,
+    BATCH_API,
+    SQL_API,
 
     # Helper functions
     safe_str,
@@ -52,8 +54,10 @@ __all__ = [
     "METRIC_INFO",
     "YELLOWBRICK_INFO",
     "DROPDOWN_OPTIONS",
-    "RIVER_BASE_URL",
-    "SKLEARN_BASE_URL",
+    "FASTAPI_BASE_URL",
+    "INCREMENTAL_API",
+    "BATCH_API",
+    "SQL_API",
 
     # Helper functions
     "safe_str",

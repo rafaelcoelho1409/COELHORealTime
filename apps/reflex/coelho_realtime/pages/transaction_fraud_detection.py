@@ -10,7 +10,7 @@ from ..states import TFDState, SharedState
 
 
 PROJECT_NAME = "Transaction Fraud Detection"
-MODEL_KEY = "transaction_fraud_detection_river.py"
+MODEL_KEY = "ml_training/river/tfd.py"
 
 
 def index() -> rx.Component:

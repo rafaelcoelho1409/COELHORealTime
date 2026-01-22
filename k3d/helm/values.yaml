@@ -213,10 +213,87 @@ reflex:
       failureThreshold: 6
 
 
-# River ML Training Service
-# Handles incremental ML model training using River library
-river:
-  image: coelho-realtime-river:latest
+# =============================================================================
+# DISABLED: River and Sklearn services
+# Migrating to unified FastAPI service (apps/fastapi/) on port 8001
+# Code remains in apps/river/ and apps/sklearn/ as reference
+# =============================================================================
+# river:
+#   image: coelho-realtime-river:latest
+#   imagePullPolicy: IfNotPresent
+#   replicas: 1
+#   resources:
+#     requests:
+#       memory: "2Gi"
+#       cpu: "1000m"
+#     limits:
+#       memory: "4Gi"
+#       cpu: "2000m"
+#   portsSettings:
+#     ports:
+#       - name: http
+#         port: 8002
+#         targetPort: 8002
+#         nodePort: 30006
+#         protocol: TCP
+#     type: LoadBalancer
+#   livenessProbeSettings:
+#     livenessProbe:
+#       httpGet:
+#         path: /health
+#         port: 8002
+#       initialDelaySeconds: 180
+#       periodSeconds: 30
+#       failureThreshold: 5
+#   readinessProbeSettings:
+#     readinessProbe:
+#       httpGet:
+#         path: /health
+#         port: 8002
+#       initialDelaySeconds: 120
+#       periodSeconds: 10
+#       failureThreshold: 3
+#
+# sklearn:
+#   image: coelho-realtime-sklearn:latest
+#   imagePullPolicy: IfNotPresent
+#   replicas: 1
+#   resources:
+#     requests:
+#       memory: "4Gi"
+#       cpu: "1000m"
+#     limits:
+#       memory: "8Gi"
+#       cpu: "2000m"
+#   portsSettings:
+#     ports:
+#       - name: http
+#         port: 8003
+#         targetPort: 8003
+#         nodePort: 30007
+#         protocol: TCP
+#     type: LoadBalancer
+#   livenessProbeSettings:
+#     livenessProbe:
+#       httpGet:
+#         path: /health
+#         port: 8003
+#       initialDelaySeconds: 120
+#       periodSeconds: 30
+#       failureThreshold: 5
+#   readinessProbeSettings:
+#     readinessProbe:
+#       httpGet:
+#         path: /health
+#         port: 8003
+#       initialDelaySeconds: 60
+#       periodSeconds: 10
+#       failureThreshold: 3
+# =============================================================================
+
+
+fastapi:
+  image: coelho-realtime-fastapi:latest
   imagePullPolicy: IfNotPresent
   replicas: 1
   resources:
@@ -229,8 +306,8 @@ river:
   portsSettings:
     ports:
       - name: http
-        port: 8002
-        targetPort: 8002
+        port: 8001
+        targetPort: 8001
         nodePort: 30006
         protocol: TCP
     type: LoadBalancer
@@ -238,7 +315,7 @@ river:
     livenessProbe:
       httpGet:
         path: /health
-        port: 8002
+        port: 8001
       initialDelaySeconds: 180
       periodSeconds: 30
       failureThreshold: 5
@@ -246,47 +323,8 @@ river:
     readinessProbe:
       httpGet:
         path: /health
-        port: 8002
+        port: 8001
       initialDelaySeconds: 120
-      periodSeconds: 10
-      failureThreshold: 3
-
-
-sklearn:
-  image: coelho-realtime-sklearn:latest
-  imagePullPolicy: IfNotPresent
-  replicas: 1
-  # Higher resources for CatBoost batch training + YellowBrick visualizations
-  # CatBoost is memory-intensive even with memory optimization params
-  resources:
-    requests:
-      memory: "4Gi"
-      cpu: "1000m"
-    limits:
-      memory: "8Gi"
-      cpu: "2000m"
-  portsSettings:
-    ports:
-      - name: http
-        port: 8003
-        targetPort: 8003
-        nodePort: 30007
-        protocol: TCP
-    type: LoadBalancer
-  livenessProbeSettings:
-    livenessProbe:
-      httpGet:
-        path: /health
-        port: 8003
-      initialDelaySeconds: 120
-      periodSeconds: 30
-      failureThreshold: 5
-  readinessProbeSettings:
-    readinessProbe:
-      httpGet:
-        path: /health
-        port: 8003
-      initialDelaySeconds: 60
       periodSeconds: 10
       failureThreshold: 3
 

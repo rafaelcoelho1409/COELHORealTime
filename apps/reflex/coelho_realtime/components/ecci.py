@@ -17,14 +17,14 @@ from .shared import metric_info_dialog, yellowbrick_info_dialog, ml_training_swi
 # =============================================================================
 # ECCI Card Helper Functions
 # =============================================================================
-def ecci_metric_card(label: str, value_var, metric_key: str) -> rx.Component:
+def ecci_metric_card(label: str, value_var, metric_key: str, ml_type: str = "incremental") -> rx.Component:
     """Create a metric card with info button for ECCI."""
     return rx.card(
         rx.vstack(
             rx.hstack(
                 rx.text(label, size="2", weight="bold", color="gray"),
                 rx.spacer(),
-                metric_info_dialog(metric_key, "ecci"),
+                metric_info_dialog(metric_key, "ecci", ml_type),
                 width="100%",
                 align="center"
             ),
@@ -38,12 +38,12 @@ def ecci_metric_card(label: str, value_var, metric_key: str) -> rx.Component:
 
 
 def ecci_kpi_card_with_info(plotly_key: str, metric_key: str) -> rx.Component:
-    """Create a KPI card with Plotly chart and info button for ECCI."""
+    """Create a KPI card with Plotly chart and info button for ECCI (Incremental ML)."""
     return rx.card(
         rx.vstack(
             rx.hstack(
                 rx.spacer(),
-                metric_info_dialog(metric_key, "ecci"),
+                metric_info_dialog(metric_key, "ecci", "incremental"),
                 width="100%",
                 justify="end"
             ),
@@ -56,12 +56,12 @@ def ecci_kpi_card_with_info(plotly_key: str, metric_key: str) -> rx.Component:
 
 
 def ecci_gauge_card_with_info(plotly_key: str, metric_key: str) -> rx.Component:
-    """Create a gauge card with Plotly chart and info button for ECCI."""
+    """Create a gauge card with Plotly chart and info button for ECCI (Incremental ML)."""
     return rx.card(
         rx.vstack(
             rx.hstack(
                 rx.spacer(),
-                metric_info_dialog(metric_key, "ecci"),
+                metric_info_dialog(metric_key, "ecci", "incremental"),
                 width="100%",
                 justify="end"
             ),
@@ -204,8 +204,13 @@ def ecci_map() -> rx.Component:
 def e_commerce_customer_interactions_metrics() -> rx.Component:
     """Display MLflow clustering metrics for ECCI with Plotly dashboard layout."""
     return rx.vstack(
-        # Run info badge
-        mlflow_run_info_badge("E-Commerce Customer Interactions"),
+        # Run info badge with spacing from tab
+        rx.box(
+            mlflow_run_info_badge("E-Commerce Customer Interactions"),
+            margin_top="1em",
+            margin_bottom="0.5em",
+            width="100%"
+        ),
         # ROW 1: KPI Indicators (primary metrics with delta from baseline)
         rx.grid(
             ecci_kpi_card_with_info("kpi_silhouette", "silhouette"),
@@ -232,7 +237,7 @@ def e_commerce_customer_interactions_metrics() -> rx.Component:
                 rx.vstack(
                     rx.hstack(
                         rx.text("Cluster Statistics", size="2", weight="bold", color="gray"),
-                        metric_info_dialog("n_clusters", "ecci"),
+                        metric_info_dialog("n_clusters", "ecci", "incremental"),
                         width="100%",
                         justify="end"
                     ),
@@ -587,7 +592,8 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
                         spacing="2",
                         align_items="center"
                     ),
-                    value="prediction"
+                    value="prediction",
+                    flex="1"
                 ),
                 rx.tabs.trigger(
                     rx.hstack(
@@ -596,7 +602,8 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
                         spacing="2",
                         align_items="center"
                     ),
-                    value="metrics"
+                    value="metrics",
+                    flex="1"
                 ),
                 rx.tabs.trigger(
                     rx.hstack(
@@ -605,8 +612,10 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
                         spacing="2",
                         align_items="center"
                     ),
-                    value="analytics"
+                    value="analytics",
+                    flex="1"
                 ),
+                width="100%"
             ),
             # Tab 1: Cluster Prediction
             rx.tabs.content(
@@ -638,38 +647,13 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
                                     spacing="2",
                                     align_items="center"
                                 ),
-                                rx.cond(
-                                    ECCIState.ecci_prediction_show,
-                                    rx.box(
-                                        rx.plotly(data=ECCIState.ecci_prediction_figure, width="100%"),
-                                        width="100%",
-                                        flex="1",
-                                        display="flex",
-                                        align_items="center",
-                                        justify_content="center"
-                                    ),
-                                    rx.box(
-                                        rx.cond(
-                                            ECCIState.incremental_model_available["E-Commerce Customer Interactions"],
-                                            rx.callout(
-                                                "Click **Predict** to identify the customer segment.",
-                                                icon="info",
-                                                color="blue",
-                                                width="100%"
-                                            ),
-                                            rx.callout(
-                                                "No trained model available. Toggle **Real-time ML Training** to train first.",
-                                                icon="triangle-alert",
-                                                color="orange",
-                                                width="100%"
-                                            )
-                                        ),
-                                        width="100%",
-                                        flex="1",
-                                        display="flex",
-                                        align_items="center",
-                                        justify_content="center"
-                                    )
+                                rx.box(
+                                    rx.plotly(data=ECCIState.ecci_prediction_figure, width="100%"),
+                                    width="100%",
+                                    flex="1",
+                                    display="flex",
+                                    align_items="center",
+                                    justify_content="center"
                                 ),
                                 spacing="2",
                                 width="100%",
@@ -803,8 +787,13 @@ def e_commerce_customer_interactions_form(model_key: str = None, project_name: s
             # Tab 3: Cluster Analytics
             rx.tabs.content(
                 rx.vstack(
-                    # Run info badge
-                    mlflow_run_info_badge("E-Commerce Customer Interactions"),
+                    # Run info badge with spacing from tab
+                    rx.box(
+                        mlflow_run_info_badge("E-Commerce Customer Interactions"),
+                        margin_top="1em",
+                        margin_bottom="0.5em",
+                        width="100%"
+                    ),
                     # Samples per cluster chart
                     rx.card(
                         rx.vstack(
@@ -1230,7 +1219,8 @@ def e_commerce_customer_interactions_batch_form(model_key: str = None, project_n
                         spacing="2",
                         align_items="center"
                     ),
-                    value="prediction"
+                    value="prediction",
+                    flex="1"
                 ),
                 rx.tabs.trigger(
                     rx.hstack(
@@ -1239,8 +1229,10 @@ def e_commerce_customer_interactions_batch_form(model_key: str = None, project_n
                         spacing="2",
                         align_items="center"
                     ),
-                    value="metrics"
+                    value="metrics",
+                    flex="1"
                 ),
+                width="100%"
             ),
             # Tab 1: Cluster Prediction
             rx.tabs.content(

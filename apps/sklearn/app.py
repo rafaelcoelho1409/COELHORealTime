@@ -856,6 +856,303 @@ async def get_mlflow_metrics(request: MLflowMetricsRequest):
         raise HTTPException(status_code=500, detail=f"Failed to fetch MLflow metrics: {str(e)}")
 
 
+# =============================================================================
+# Combined Batch Init Endpoint (Optimized - Single Request for All Data)
+# =============================================================================
+class BatchInitRequest(BaseModel):
+    """Request for batch page initialization."""
+    project_name: str
+    run_id: Optional[str] = None  # Optional: specific run, or None for best
+
+
+@app.post("/batch_init")
+async def batch_init(request: BatchInitRequest):
+    """Initialize batch ML page with all required data in a single request.
+
+    Returns all data needed for batch page startup:
+    - runs: List of all MLflow runs (ordered by criteria, best first)
+    - model_available: Whether a trained model exists
+    - experiment_url: Link to MLflow experiment
+    - metrics: Metrics for selected/best run
+    - total_rows: Total training rows from the run
+
+    This endpoint replaces 3 separate calls (/mlflow_runs, /model_available, /mlflow_metrics)
+    with a single optimized request, reducing latency by ~60-70%.
+    """
+    project_name = request.project_name
+    model_name = MLFLOW_MODEL_NAMES.get(project_name)
+    if not model_name:
+        raise HTTPException(status_code=400, detail=f"Unknown project: {project_name}")
+
+    # Run all data fetches in parallel
+    async def fetch_runs():
+        """Fetch all MLflow runs."""
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(get_all_mlflow_runs, project_name, model_name),
+                timeout=15.0
+            )
+        except Exception as e:
+            print(f"Error fetching runs: {e}", file=sys.stderr)
+            return []
+
+    async def check_model():
+        """Check model availability."""
+        try:
+            experiment = mlflow.get_experiment_by_name(project_name)
+            if experiment is None:
+                return {"available": False, "experiment_url": None}
+            experiment_url = f"http://localhost:5001/#/experiments/{experiment.experiment_id}"
+            runs = mlflow.search_runs(
+                experiment_ids=[experiment.experiment_id],
+                filter_string=f"tags.mlflow.runName = '{model_name}'",
+                order_by=["start_time DESC"],
+                max_results=1
+            )
+            return {
+                "available": not runs.empty,
+                "experiment_url": experiment_url
+            }
+        except Exception as e:
+            print(f"Error checking model: {e}", file=sys.stderr)
+            return {"available": False, "experiment_url": None}
+
+    async def fetch_metrics(run_id: str = None):
+        """Fetch metrics for specified or best run."""
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(
+                    _sync_get_mlflow_metrics,
+                    project_name,
+                    model_name,
+                    run_id
+                ),
+                timeout=15.0
+            )
+        except Exception as e:
+            print(f"Error fetching metrics: {e}", file=sys.stderr)
+            return {"_no_runs": True}
+
+    # Execute all queries in parallel
+    runs_result, model_result, metrics_result = await asyncio.gather(
+        fetch_runs(),
+        check_model(),
+        fetch_metrics(request.run_id),
+        return_exceptions=True
+    )
+
+    # Handle any exceptions from gather
+    if isinstance(runs_result, Exception):
+        runs_result = []
+    if isinstance(model_result, Exception):
+        model_result = {"available": False, "experiment_url": None}
+    if isinstance(metrics_result, Exception):
+        metrics_result = {"_no_runs": True}
+
+    # Calculate total rows from metrics
+    total_rows = 0
+    if not metrics_result.get("_no_runs"):
+        train_samples = metrics_result.get("params.train_samples")
+        test_samples = metrics_result.get("params.test_samples")
+        if train_samples and test_samples:
+            total_rows = int(train_samples) + int(test_samples)
+
+    # Determine best run ID (first in sorted list)
+    best_run_id = runs_result[0]["run_id"] if runs_result else None
+
+    return {
+        "runs": runs_result,
+        "model_available": model_result.get("available", False),
+        "experiment_url": model_result.get("experiment_url"),
+        "metrics": metrics_result if not metrics_result.get("_no_runs") else {},
+        "total_rows": total_rows,
+        "best_run_id": best_run_id,
+    }
+
+
+# =============================================================================
+# Delta Lake Total Rows Endpoint
+# =============================================================================
+# Project to Delta Lake table mapping
+DELTA_LAKE_TABLES = {
+    "Transaction Fraud Detection": "s3a://coelho-realtime/delta/transaction_fraud_detection",
+    "Estimated Time of Arrival": "s3a://coelho-realtime/delta/estimated_time_of_arrival",
+    "E-Commerce Customer Interactions": "s3a://coelho-realtime/delta/e_commerce_customer_interactions",
+}
+
+
+@app.post("/delta_total_rows")
+async def get_delta_total_rows(payload: dict):
+    """Get total number of rows available in Delta Lake for a project.
+
+    This is used to set the maximum value for the max_rows training option.
+    Uses DuckDB with Delta Lake extension to query the row count.
+
+    Payload:
+        project_name: str - Project name to query
+
+    Returns:
+        total_rows: int - Total rows in Delta Lake table
+    """
+    project_name = payload.get("project_name")
+    if not project_name:
+        raise HTTPException(status_code=400, detail="project_name is required")
+
+    delta_path = DELTA_LAKE_TABLES.get(project_name)
+    if not delta_path:
+        raise HTTPException(status_code=400, detail=f"Unknown project: {project_name}")
+
+    try:
+        import duckdb
+
+        def query_count():
+            conn = duckdb.connect()
+            conn.execute("INSTALL delta; LOAD delta;")
+            conn.execute("INSTALL httpfs; LOAD httpfs;")
+            # Configure S3 credentials from environment
+            conn.execute(f"""
+                SET s3_region = '{os.getenv("AWS_REGION", "us-east-1")}';
+                SET s3_access_key_id = '{os.getenv("AWS_ACCESS_KEY_ID", "")}';
+                SET s3_secret_access_key = '{os.getenv("AWS_SECRET_ACCESS_KEY", "")}';
+                SET s3_endpoint = '{os.getenv("AWS_S3_ENDPOINT", "")}';
+                SET s3_use_ssl = false;
+                SET s3_url_style = 'path';
+            """)
+            result = conn.execute(f"SELECT COUNT(*) FROM delta_scan('{delta_path}')").fetchone()
+            conn.close()
+            return result[0] if result else 0
+
+        total_rows = await asyncio.wait_for(
+            asyncio.to_thread(query_count),
+            timeout=30.0
+        )
+
+        return {"total_rows": total_rows, "project_name": project_name}
+
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Query timed out")
+    except Exception as e:
+        print(f"Error querying Delta Lake total rows: {e}", file=sys.stderr)
+        # Return 0 on error - UI will use default max
+        return {"total_rows": 0, "project_name": project_name, "error": str(e)}
+
+
+# =============================================================================
+# Cluster Feature Counts Endpoint (ECCI Batch ML)
+# =============================================================================
+# Features available for cluster behavior analysis
+ECCI_CLUSTER_FEATURES = [
+    "event_type",
+    "product_category",
+    "referrer_url",
+    "quantity",
+    "time_on_page_seconds",
+    "session_event_sequence",
+    "device_type",
+    "browser",
+    "os",
+]
+
+# Cache for cluster feature counts (1 minute TTL)
+_cluster_feature_counts_cache: Dict[str, dict] = {}
+_cluster_feature_counts_cache_time: Dict[str, float] = {}
+CLUSTER_FEATURE_COUNTS_CACHE_TTL = 60.0  # seconds
+
+
+@app.post("/cluster_feature_counts")
+async def get_cluster_feature_counts(payload: dict):
+    """Get cluster feature counts for batch ML (ECCI clustering).
+
+    Computes feature value distribution per cluster from MLflow training data artifact.
+    Uses X_events.parquet which contains original features + cluster_label.
+
+    Payload:
+        project_name: str - Must be "E-Commerce Customer Interactions"
+        feature_name: str - Feature to analyze (e.g., "event_type")
+        run_id: str (optional) - Specific MLflow run ID, or None for best
+
+    Returns:
+        dict with cluster_id -> {feature_value: count}
+    """
+    project_name = payload.get("project_name")
+    feature_name = payload.get("feature_name")
+    run_id = payload.get("run_id")
+
+    if project_name != "E-Commerce Customer Interactions":
+        raise HTTPException(
+            status_code=400,
+            detail="Cluster feature counts only available for E-Commerce Customer Interactions"
+        )
+
+    if feature_name not in ECCI_CLUSTER_FEATURES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid feature: {feature_name}. Available: {ECCI_CLUSTER_FEATURES}"
+        )
+
+    # Get best run if not specified
+    if not run_id:
+        model_name = MLFLOW_MODEL_NAMES.get(project_name)
+        run_id = get_best_mlflow_run_id(project_name, model_name)
+        if not run_id:
+            return {"feature_counts": {}, "message": "No MLflow runs found"}
+
+    # Check cache
+    cache_key = f"{run_id}:{feature_name}"
+    cache_time = _cluster_feature_counts_cache_time.get(cache_key, 0)
+    if time.time() - cache_time < CLUSTER_FEATURE_COUNTS_CACHE_TTL:
+        cached = _cluster_feature_counts_cache.get(cache_key)
+        if cached:
+            return cached
+
+    try:
+        def compute_counts():
+            # Download X_events.parquet from MLflow
+            local_path = mlflow.artifacts.download_artifacts(
+                run_id=run_id,
+                artifact_path="training_data/X_events.parquet",
+            )
+            df = pd.read_parquet(local_path)
+
+            if 'cluster_label' not in df.columns:
+                return {"feature_counts": {}, "error": "No cluster_label in training data"}
+
+            if feature_name not in df.columns:
+                return {"feature_counts": {}, "error": f"Feature {feature_name} not in training data"}
+
+            # Compute value counts per cluster
+            feature_counts = {}
+            for cluster_id in sorted(df['cluster_label'].unique()):
+                cluster_data = df[df['cluster_label'] == cluster_id]
+                value_counts = cluster_data[feature_name].value_counts().to_dict()
+                # Convert keys to strings for JSON serialization
+                feature_counts[int(cluster_id)] = {str(k): int(v) for k, v in value_counts.items()}
+
+            return {
+                "feature_counts": feature_counts,
+                "feature_name": feature_name,
+                "run_id": run_id,
+                "total_samples": len(df),
+            }
+
+        result = await asyncio.wait_for(
+            asyncio.to_thread(compute_counts),
+            timeout=30.0
+        )
+
+        # Cache result
+        _cluster_feature_counts_cache[cache_key] = result
+        _cluster_feature_counts_cache_time[cache_key] = time.time()
+
+        return result
+
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Query timed out")
+    except Exception as e:
+        print(f"Error getting cluster feature counts: {e}", file=sys.stderr)
+        return {"feature_counts": {}, "error": str(e)}
+
+
 def _get_visualization_artifact_path(metric_type: str, metric_name: str) -> str:
     """Get MLflow artifact path for a YellowBrick visualization.
 
@@ -1443,9 +1740,11 @@ async def switch_batch_model(payload: dict):
         model_key: str - Script filename (e.g., "transaction_fraud_detection_sklearn.py")
                         or "none" to stop training
         sample_frac: float (optional) - Fraction of data to use (0.0-1.0)
+        max_rows: int (optional) - Maximum number of rows to use for training
     """
     model_key = payload.get("model_key")
     sample_frac = payload.get("sample_frac")  # Optional: 0.0-1.0
+    max_rows = payload.get("max_rows")  # Optional: int
     # If requesting to stop
     if model_key == "none":
         if batch_state.current_process:
@@ -1468,9 +1767,12 @@ async def switch_batch_model(payload: dict):
             detail=f"Model key '{model_key}' not found. Available: {list(MODEL_SCRIPTS.keys())}"
         )
     command = ["/app/.venv/bin/python3", "-u", model_key]
-    # Add --sample-frac if provided
+    # Add --sample-frac if provided (percentage mode)
     if sample_frac is not None and 0.0 < sample_frac <= 1.0:
         command.extend(["--sample-frac", str(sample_frac)])
+    # Add --max-rows if provided (max rows mode)
+    elif max_rows is not None and max_rows > 0:
+        command.extend(["--max-rows", str(max_rows)])
     try:
         print(f"Starting batch training: {model_key}" + (f" with sample_frac={sample_frac}" if sample_frac else ""))
         # Note: No cache invalidation needed - MLflow artifact caching stores

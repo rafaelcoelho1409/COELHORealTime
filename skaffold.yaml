@@ -5,7 +5,6 @@ metadata:
 
 build:
   artifacts:
-    # NOTE: FastAPI service (port 8001) has been terminated and merged into river/sklearn services
     # Kafka Producers (Python data generators)
     - image: coelho-realtime-kafka-producers
       context: ./apps/kafka-producers
@@ -27,25 +26,36 @@ build:
             dest: /app
           - src: "**/*.json"
             dest: /app
-    # River ML Training service
-    - image: coelho-realtime-river
-      context: ./apps/river
+    # FastAPI
+    - image: coelho-realtime-fastapi
+      context: ./apps/fastapi
       docker:
-        dockerfile: Dockerfile.river
+        dockerfile: Dockerfile.fastapi
       sync:
         manual:
           - src: "**/*.py"
             dest: /app
-    # Sklearn Batch ML service
-    - image: coelho-realtime-sklearn
-      context: ./apps/sklearn
-      docker:
-        dockerfile: Dockerfile.sklearn
-      sync:
-        manual:
-          - src: "**/*.py"
-            dest: /app
-    # NOTE: Streamlit has been removed - fully replaced by Reflex
+    # ==========================================================================
+    # DISABLED: River and Sklearn services - migrating to unified FastAPI
+    # Code remains in apps/river/ and apps/sklearn/ as reference
+    # ==========================================================================
+    # - image: coelho-realtime-river
+    #   context: ./apps/river
+    #   docker:
+    #     dockerfile: Dockerfile.river
+    #   sync:
+    #     manual:
+    #       - src: "**/*.py"
+    #         dest: /app
+    # - image: coelho-realtime-sklearn
+    #   context: ./apps/sklearn
+    #   docker:
+    #     dockerfile: Dockerfile.sklearn
+    #   sync:
+    #     manual:
+    #       - src: "**/*.py"
+    #         dest: /app
+    # ==========================================================================
   local:
     push: true  # Push to localhost:5000, K3d registry mirrors handle the rest
     useBuildkit: true
@@ -62,11 +72,12 @@ manifests:
         skipBuildDependencies: true  # Dependencies committed to repo - see docs/helm_dependencies.md
         setValueTemplates:
           # Skaffold will automatically replace these with built image tags
-          # NOTE: fastapi and streamlit services removed - replaced by river/sklearn/reflex
           kafka-producers.image: "{{.IMAGE_NAME_coelho_realtime_kafka_producers}}:{{.IMAGE_TAG_coelho_realtime_kafka_producers}}"
           reflex.image: "{{.IMAGE_NAME_coelho_realtime_reflex}}:{{.IMAGE_TAG_coelho_realtime_reflex}}"
-          river.image: "{{.IMAGE_NAME_coelho_realtime_river}}:{{.IMAGE_TAG_coelho_realtime_river}}"
-          sklearn.image: "{{.IMAGE_NAME_coelho_realtime_sklearn}}:{{.IMAGE_TAG_coelho_realtime_sklearn}}"
+          fastapi.image: "{{.IMAGE_NAME_coelho_realtime_fastapi}}:{{.IMAGE_TAG_coelho_realtime_fastapi}}"
+          # DISABLED: river/sklearn migrating to unified FastAPI
+          # river.image: "{{.IMAGE_NAME_coelho_realtime_river}}:{{.IMAGE_TAG_coelho_realtime_river}}"
+          # sklearn.image: "{{.IMAGE_NAME_coelho_realtime_sklearn}}:{{.IMAGE_TAG_coelho_realtime_sklearn}}"
 
 deploy:
   helm: {}
@@ -115,20 +126,26 @@ portForward:
     port: 9092
     localPort: 9092
     address: 0.0.0.0
-  # River ML Training
+  # FastAPI
   - resourceType: service
-    resourceName: coelho-realtime-river
+    resourceName: coelho-realtime-fastapi
     namespace: coelho-realtime
-    port: 8002
-    localPort: 8002
+    port: 8001
+    localPort: 8001
     address: 0.0.0.0
-  # Sklearn Batch ML
-  - resourceType: service
-    resourceName: coelho-realtime-sklearn
-    namespace: coelho-realtime
-    port: 8003
-    localPort: 8003
-    address: 0.0.0.0
+  # DISABLED: River and Sklearn - migrating to unified FastAPI on port 8001
+  # - resourceType: service
+  #   resourceName: coelho-realtime-river
+  #   namespace: coelho-realtime
+  #   port: 8002
+  #   localPort: 8002
+  #   address: 0.0.0.0
+  # - resourceType: service
+  #   resourceName: coelho-realtime-sklearn
+  #   namespace: coelho-realtime
+  #   port: 8003
+  #   localPort: 8003
+  #   address: 0.0.0.0
   # Prometheus (service name truncated by Helm)
   - resourceType: service
     resourceName: coelho-realtime-kube-prome-prometheus
@@ -196,25 +213,35 @@ profiles:
                 dest: /app
               - src: "**/*.json"
                 dest: /app
-        # River ML Training - Manual sync for hot-reload
-        - image: coelho-realtime-river
-          context: ./apps/river
+        # FastAPI
+        - image: coelho-realtime-fastapi
+          context: ./apps/fastapi
           docker:
-            dockerfile: Dockerfile.river
+            dockerfile: Dockerfile.fastapi
           sync:
             manual:
               - src: "**/*.py"
                 dest: /app
-        # Sklearn Batch ML - Manual sync for hot-reload
-        - image: coelho-realtime-sklearn
-          context: ./apps/sklearn
-          docker:
-            dockerfile: Dockerfile.sklearn
-          sync:
-            manual:
-              - src: "**/*.py"
-                dest: /app
-        # NOTE: Streamlit has been removed - fully replaced by Reflex
+        # ==========================================================================
+        # DISABLED: River and Sklearn - migrating to unified FastAPI
+        # ==========================================================================
+        # - image: coelho-realtime-river
+        #   context: ./apps/river
+        #   docker:
+        #     dockerfile: Dockerfile.river
+        #   sync:
+        #     manual:
+        #       - src: "**/*.py"
+        #         dest: /app
+        # - image: coelho-realtime-sklearn
+        #   context: ./apps/sklearn
+        #   docker:
+        #     dockerfile: Dockerfile.sklearn
+        #   sync:
+        #     manual:
+        #       - src: "**/*.py"
+        #         dest: /app
+        # ==========================================================================
     # Profile-specific manifests override (if needed)
     manifests:
       helm:
@@ -225,11 +252,12 @@ profiles:
             createNamespace: true
             skipBuildDependencies: true  # Dependencies committed to repo - see docs/helm_dependencies.md
             setValueTemplates:
-              # NOTE: fastapi and streamlit removed - replaced by river/sklearn/reflex
               kafka-producers.image: "{{.IMAGE_NAME_coelho_realtime_kafka_producers}}:{{.IMAGE_TAG_coelho_realtime_kafka_producers}}"
               reflex.image: "{{.IMAGE_NAME_coelho_realtime_reflex}}:{{.IMAGE_TAG_coelho_realtime_reflex}}"
-              river.image: "{{.IMAGE_NAME_coelho_realtime_river}}:{{.IMAGE_TAG_coelho_realtime_river}}"
-              sklearn.image: "{{.IMAGE_NAME_coelho_realtime_sklearn}}:{{.IMAGE_TAG_coelho_realtime_sklearn}}"
+              fastapi.image: "{{.IMAGE_NAME_coelho_realtime_fastapi}}:{{.IMAGE_TAG_coelho_realtime_fastapi}}"
+              # DISABLED: river/sklearn migrating to unified FastAPI
+              # river.image: "{{.IMAGE_NAME_coelho_realtime_river}}:{{.IMAGE_TAG_coelho_realtime_river}}"
+              # sklearn.image: "{{.IMAGE_NAME_coelho_realtime_sklearn}}:{{.IMAGE_TAG_coelho_realtime_sklearn}}"
     deploy:
       helm: {}
 
@@ -237,4 +265,4 @@ profiles:
 # Install it via your package manager (e.g., `sudo pacman -S docker-buildx` on Arch Linux).
 
 # DON'T USE MULTI-STAGE DOCKER BUILD - Skaffold won't work fine, will always rebuild images every code change
-# sh mirror_localhost_tailscale.sh 5001 3000 8000 9000 9001 8002 8003 9090 3001 9094 9092 4040
+# sh mirror_localhost_tailscale.sh 7443 5001 3000 8000 9000 9001 8001 9090 3001 9094 9092 4040

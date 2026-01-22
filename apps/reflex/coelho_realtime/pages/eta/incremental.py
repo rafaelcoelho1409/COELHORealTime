@@ -9,7 +9,7 @@ from ...states import ETAState
 
 
 PROJECT_NAME = "Estimated Time of Arrival"
-MODEL_KEY = "estimated_time_of_arrival_river.py"
+MODEL_KEY = "ml_training/river/eta.py"
 BASE_ROUTE = "/eta"
 
 

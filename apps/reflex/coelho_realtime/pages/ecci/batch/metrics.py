@@ -20,13 +20,13 @@ BATCH_ROUTE = "/ecci/batch"
 # METRICS DISPLAY COMPONENTS
 # =============================================================================
 def _metric_card(title: str, value_key: str, description: str, color: str = "purple") -> rx.Component:
-    """Build a metric card with title, value, description, and info button."""
+    """Build a metric card with title, value, description, and info button (Batch ML)."""
     return rx.card(
         rx.vstack(
             rx.hstack(
                 rx.text(title, size="2", weight="bold"),
                 rx.spacer(),
-                metric_info_dialog(value_key, "ecci"),
+                metric_info_dialog(value_key, "ecci", "batch"),
                 width="100%",
                 align="center"
             ),
@@ -46,13 +46,13 @@ def _metric_card(title: str, value_key: str, description: str, color: str = "pur
 
 
 def _kpi_indicator(title: str, value_key: str, color: str = "purple") -> rx.Component:
-    """Build a KPI indicator showing a single metric with info button."""
+    """Build a KPI indicator showing a single metric with info button (Batch ML)."""
     return rx.card(
         rx.vstack(
             rx.hstack(
                 rx.text(title, size="1", color="gray"),
                 rx.spacer(),
-                metric_info_dialog(value_key, "ecci"),
+                metric_info_dialog(value_key, "ecci", "batch"),
                 width="100%",
                 align="center"
             ),

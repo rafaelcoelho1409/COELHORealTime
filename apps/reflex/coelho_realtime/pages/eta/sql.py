@@ -1,4 +1,4 @@
-"""ETA Delta Lake SQL page - DuckDB/Polars SQL query interface."""
+"""ETA Delta Lake SQL page - DuckDB SQL query interface."""
 import reflex as rx
 from ...components import (
     coelho_realtime_navbar,

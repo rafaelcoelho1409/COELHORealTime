@@ -15,7 +15,8 @@ import plotly.graph_objects as go
 import folium
 from .shared import (
     SharedState,
-    RIVER_BASE_URL,
+    INCREMENTAL_API,
+    BATCH_API,
     safe_float_str,
 )
 from ..utils import httpx_client_post
@@ -524,22 +525,30 @@ class ETAState(SharedState):
         try:
             print(f"Making ETA prediction with payload: {payload}")
             response = await httpx_client_post(
-                url=f"{RIVER_BASE_URL}/predict",
+                url=f"{INCREMENTAL_API}/predict",
                 json=payload,
                 timeout=30.0
             )
             result = response.json()
             print(f"ETA Prediction result: {result}")
             eta_seconds = result.get("Estimated Time of Arrival", 0.0)
+            model_source = result.get("model_source", "mlflow")
             async with self:
                 self.prediction_results = {
                     **self.prediction_results,
                     project_name: {
                         "eta_seconds": eta_seconds,
-                        "model_source": result.get("model_source", "mlflow"),
+                        "model_source": model_source,
                         "show": True
                     }
                 }
+            # Format ETA for toast
+            eta_minutes = eta_seconds / 60
+            yield rx.toast.success(
+                f"ETA: {eta_minutes:.1f} minutes",
+                description=f"Estimated travel time: {eta_seconds:.0f} seconds (Source: {model_source.upper()})",
+                duration=5000
+            )
             await self._fetch_mlflow_metrics_internal(project_name)
         except Exception as e:
             print(f"Error making ETA prediction: {e}")
@@ -552,6 +561,11 @@ class ETAState(SharedState):
                         "show": False
                     }
                 }
+            yield rx.toast.error(
+                "Prediction failed",
+                description=str(e)[:100],
+                duration=5000
+            )
 
     @rx.event
     def randomize_eta_form(self):
@@ -700,7 +714,7 @@ class ETAState(SharedState):
     @rx.event(background=True)
     async def predict_batch_eta(self):
         """Make batch prediction for ETA using Scikit-Learn model."""
-        from .shared import SKLEARN_BASE_URL
+        from .shared import BATCH_API
         project_name = "Estimated Time of Arrival"
         current_form = self.form_data.get(project_name, {})
         timestamp = f"{current_form.get('timestamp_date', '')}T{current_form.get('timestamp_time', '')}:00.000000+00:00"
@@ -744,7 +758,7 @@ class ETAState(SharedState):
         try:
             print(f"Making batch ETA prediction with payload: {payload}")
             response = await httpx_client_post(
-                url=f"{SKLEARN_BASE_URL}/predict",
+                url=f"{BATCH_API}/predict",
                 json=payload,
                 timeout=30.0
             )
@@ -1079,9 +1093,9 @@ class ETAState(SharedState):
             self._yellowbrick_cancel_requested = False
 
         try:
-            from .shared import SKLEARN_BASE_URL
+            from .shared import BATCH_API
             response = await httpx_client_post(
-                url=f"{SKLEARN_BASE_URL}/yellowbrick_metric",
+                url=f"{BATCH_API}/yellowbrick-metric",
                 json={
                     "project_name": project_name,
                     "metric_type": metric_type,

@@ -1,0 +1,51 @@
+[project]
+name = "coelho-realtime-fastapi"
+version = "1.0.0"
+description = "Unified ML Service - Incremental (River) and Batch (Scikit-Learn) ML"
+requires-python = ">=3.13"
+dependencies = [
+    # HTTP API
+    "fastapi",
+    "uvicorn",
+    "prometheus-fastapi-instrumentator",
+    "pydantic",
+    "starlette",
+    "click",
+    "requests",
+    "orjson",
+    # ML Training - Incremental (River)
+    "river",
+    "kafka-python",
+    # ML Training - Batch (Scikit-Learn/CatBoost)
+    "scikit-learn",
+    "catboost",
+    "imbalanced-learn",
+    # Core ML/Data
+    "pandas",
+    "numpy",
+    "mlflow",
+    "boto3",
+    "pyarrow",
+    "deltalake",
+    # Redis (live model caching for real-time predictions)
+    "redis",
+    # DuckDB (SQL queries on Delta Lake)
+    "duckdb",
+    # Visualization
+    "matplotlib",
+    "yellowbrick",
+    "setuptools",  # Provides distutils compatibility for yellowbrick on Python 3.13
+    # UMAP visualization (requires numba/llvmlite - specify versions for Python 3.13)
+    "umap-learn>=0.5.7",
+    "numba>=0.60.0",
+    "llvmlite>=0.43.0",
+    # Text analysis (NLTK for PosTagVisualizer)
+    "nltk>=3.9.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = []

@@ -28,7 +28,11 @@ build:
     - echo "Testing connectivity to Docker Registry..."
     - wget -q --spider http://${REGISTRY}/v2/ && echo "✓ Registry is accessible" || echo "⚠ Registry check completed"
   script:
-    # NOTE: FastAPI service has been terminated and merged into River/Sklearn services
+    # Build and push FastAPI
+    - echo "Building FastAPI image..."
+    - docker build -t ${REGISTRY}/coelho-realtime-fastapi:${CI_COMMIT_SHA} -t ${REGISTRY}/coelho-realtime-fastapi:latest ./apps/fastapi -f ./apps/fastapi/Dockerfile.fastapi
+    - docker push ${REGISTRY}/coelho-realtime-fastapi:${CI_COMMIT_SHA}
+    - docker push ${REGISTRY}/coelho-realtime-fastapi:latest
     # Build and push River
     - echo "Building River image..."
     - docker build -t ${REGISTRY}/coelho-realtime-river:${CI_COMMIT_SHA} -t ${REGISTRY}/coelho-realtime-river:latest ./apps/river -f ./apps/river/Dockerfile.river

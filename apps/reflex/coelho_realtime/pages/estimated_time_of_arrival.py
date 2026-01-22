@@ -10,7 +10,7 @@ from ..states import ETAState, SharedState
 
 
 PROJECT_NAME = "Estimated Time of Arrival"
-MODEL_KEY = "estimated_time_of_arrival_river.py"
+MODEL_KEY = "ml_training/river/eta.py"
 
 
 def index() -> rx.Component:

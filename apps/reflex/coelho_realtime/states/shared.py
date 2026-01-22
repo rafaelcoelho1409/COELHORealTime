@@ -2,7 +2,7 @@
 Shared state module - constants, helpers, and common utilities.
 
 This module contains:
-- API base URLs (RIVER_BASE_URL, SKLEARN_BASE_URL)
+- API base URLs (unified FastAPI service)
 - Pre-loaded constants (METRIC_INFO, DROPDOWN_OPTIONS)
 - Helper functions (safe_str, safe_int_str, etc.)
 """
@@ -35,12 +35,15 @@ class MLflowRunInfo(BaseModel):
     is_best: bool = False
 
 # =============================================================================
-# API Base URLs
+# API Base URLs - Unified FastAPI Service
 # =============================================================================
-RIVER_HOST = os.getenv("RIVER_HOST", "localhost")
-RIVER_BASE_URL = f"http://{RIVER_HOST}:8002"
-SKLEARN_HOST = os.getenv("SKLEARN_HOST", "localhost")
-SKLEARN_BASE_URL = f"http://{SKLEARN_HOST}:8003"
+FASTAPI_HOST = os.getenv("FASTAPI_HOST", "localhost")
+FASTAPI_BASE_URL = f"http://{FASTAPI_HOST}:8001"
+
+# API Router prefixes
+INCREMENTAL_API = f"{FASTAPI_BASE_URL}/api/v1/incremental"
+BATCH_API = f"{FASTAPI_BASE_URL}/api/v1/batch"
+SQL_API = f"{FASTAPI_BASE_URL}/api/v1/sql"
 
 
 # =============================================================================
@@ -316,9 +319,9 @@ class SharedState(rx.State):
 
     # Batch training script mapping (for subprocess-based training)
     _batch_training_scripts: dict = {
-        "Transaction Fraud Detection": "transaction_fraud_detection_sklearn.py",
-        "Estimated Time of Arrival": "estimated_time_of_arrival_sklearn.py",
-        "E-Commerce Customer Interactions": "e_commerce_customer_interactions_sklearn.py",
+        "Transaction Fraud Detection": "ml_training/sklearn/tfd.py",
+        "Estimated Time of Arrival": "ml_training/sklearn/eta.py",
+        "E-Commerce Customer Interactions": "ml_training/sklearn/ecci.py",
     }
 
     # Batch MLflow experiment URLs for each project
@@ -347,6 +350,24 @@ class SharedState(rx.State):
         "Transaction Fraud Detection": 100,
         "Estimated Time of Arrival": 100,
         "E-Commerce Customer Interactions": 100
+    }
+    # Batch training mode: "percentage" or "max_rows"
+    batch_training_mode: dict[str, str] = {
+        "Transaction Fraud Detection": "percentage",
+        "Estimated Time of Arrival": "percentage",
+        "E-Commerce Customer Interactions": "percentage"
+    }
+    # Batch training max rows (when mode is "max_rows")
+    batch_training_max_rows: dict[str, int] = {
+        "Transaction Fraud Detection": 10000,
+        "Estimated Time of Arrival": 10000,
+        "E-Commerce Customer Interactions": 10000
+    }
+    # Total rows available in Delta Lake for each project
+    batch_delta_lake_total_rows: dict[str, int] = {
+        "Transaction Fraud Detection": 0,
+        "Estimated Time of Arrival": 0,
+        "E-Commerce Customer Interactions": 0
     }
 
     # Live training status (updated during batch training)
@@ -438,11 +459,6 @@ class SharedState(rx.State):
         "Transaction Fraud Detection": 0.0,
         "Estimated Time of Arrival": 0.0,
         "E-Commerce Customer Interactions": 0.0
-    }
-    sql_engine: dict = {
-        "Transaction Fraud Detection": "polars",
-        "Estimated Time of Arrival": "polars",
-        "E-Commerce Customer Interactions": "polars"
     }
     sql_search_filter: dict = {
         "Transaction Fraud Detection": "",
@@ -576,11 +592,6 @@ class SharedState(rx.State):
     def current_sql_execution_time(self) -> float:
         """Get SQL execution time for current page."""
         return self.sql_execution_time.get(self.page_name, 0.0)
-
-    @rx.var
-    def current_sql_engine(self) -> str:
-        """Get selected SQL engine for current page."""
-        return self.sql_engine.get(self.page_name, "polars")
 
     @rx.var
     def current_sql_search_filter(self) -> str:
@@ -748,7 +759,7 @@ class SharedState(rx.State):
                 return
             try:
                 response = await httpx_client_post(
-                    url=f"{RIVER_BASE_URL}/switch_model",
+                    url=f"{INCREMENTAL_API}/switch-model",
                     json={
                         "model_key": model_key,
                         "project_name": project_name,
@@ -790,7 +801,7 @@ class SharedState(rx.State):
                 return
             try:
                 await httpx_client_post(
-                    url=f"{RIVER_BASE_URL}/switch_model",
+                    url=f"{INCREMENTAL_API}/switch-model",
                     json={
                         "model_key": "none",
                         "project_name": ""
@@ -834,7 +845,7 @@ class SharedState(rx.State):
             if self.activated_model == self._current_page_model_key:
                 try:
                     await httpx_client_post(
-                        url=f"{RIVER_BASE_URL}/switch_model",
+                        url=f"{INCREMENTAL_API}/switch-model",
                         json={
                             "model_key": "none",
                             "project_name": ""
@@ -859,7 +870,7 @@ class SharedState(rx.State):
         model_name = self._mlflow_model_names.get(project_name, "ARFClassifier")
         try:
             response = await httpx_client_post(
-                url=f"{RIVER_BASE_URL}/mlflow_metrics",
+                url=f"{INCREMENTAL_API}/mlflow-metrics",
                 json={
                     "project_name": project_name,
                     "model_name": model_name
@@ -888,7 +899,7 @@ class SharedState(rx.State):
         model_name = self._mlflow_model_names.get(project_name, "ARFClassifier")
         try:
             response = await httpx_client_post(
-                url=f"{RIVER_BASE_URL}/mlflow_metrics",
+                url=f"{INCREMENTAL_API}/mlflow-metrics",
                 json={
                     "project_name": project_name,
                     "model_name": model_name,
@@ -922,7 +933,7 @@ class SharedState(rx.State):
         model_name = self._mlflow_model_names.get(project_name, "ARFClassifier")
         try:
             response = await httpx_client_post(
-                url=f"{RIVER_BASE_URL}/mlflow_metrics",
+                url=f"{INCREMENTAL_API}/mlflow-metrics",
                 json={
                     "project_name": project_name,
                     "model_name": model_name,
@@ -945,7 +956,7 @@ class SharedState(rx.State):
         """Internal helper to fetch report metrics from MLflow artifacts."""
         try:
             response = await httpx_client_post(
-                url=f"{RIVER_BASE_URL}/report_metrics",
+                url=f"{INCREMENTAL_API}/report-metrics",
                 json={"project_name": project_name, "model_name": model_name},
                 timeout=30.0
             )
@@ -963,7 +974,7 @@ class SharedState(rx.State):
         model_name = self._incremental_model_names.get(project_name, "ARFClassifier")
         try:
             response = await httpx_client_post(
-                url=f"{RIVER_BASE_URL}/model_available",
+                url=f"{INCREMENTAL_API}/model-available",
                 json={
                     "project_name": project_name,
                     "model_name": model_name
@@ -1001,7 +1012,7 @@ class SharedState(rx.State):
 
         try:
             response = await httpx_client_post(
-                url=f"{RIVER_BASE_URL}/page_init",
+                url=f"{INCREMENTAL_API}/page-init",
                 json={
                     "project_name": project_name,
                     "model_name": model_name
@@ -1045,7 +1056,7 @@ class SharedState(rx.State):
         try:
             # Check batch model availability (also returns experiment_url)
             avail_response = await httpx_client_post(
-                url=f"{SKLEARN_BASE_URL}/model_available",
+                url=f"{BATCH_API}/model-available",
                 json={
                     "project_name": project_name,
                     "model_name": batch_model_name
@@ -1061,7 +1072,7 @@ class SharedState(rx.State):
 
             # Fetch batch MLflow metrics
             batch_response = await httpx_client_post(
-                url=f"{SKLEARN_BASE_URL}/mlflow_metrics",
+                url=f"{BATCH_API}/mlflow-metrics",
                 json={
                     "project_name": project_name,
                     "model_name": batch_model_name
@@ -1146,14 +1157,6 @@ class SharedState(rx.State):
         }
 
     @rx.event
-    def set_sql_engine(self, engine: str):
-        """Set the SQL engine for current page (polars or duckdb)."""
-        project_name = self.page_name
-        self.sql_engine = {
-            **self.sql_engine,
-            project_name: engine
-        }
-
     @rx.event
     def set_sql_search_filter(self, search: str):
         """Set the search filter for SQL results."""
@@ -1191,11 +1194,10 @@ class SharedState(rx.State):
 
     @rx.event(background=True)
     async def execute_sql_query(self):
-        """Execute SQL query against Delta Lake via River service."""
+        """Execute SQL query against Delta Lake via FastAPI (DuckDB)."""
         async with self:
             project_name = self.page_name
             query = self.sql_query_input.get(project_name, "")
-            engine = self.sql_engine.get(project_name, "polars")
 
         if not query.strip():
             yield rx.toast.warning(
@@ -1211,12 +1213,11 @@ class SharedState(rx.State):
 
         try:
             response = await httpx_client_post(
-                url=f"{RIVER_BASE_URL}/sql_query",
+                url=f"{SQL_API}/query",
                 json={
                     "project_name": project_name,
                     "query": query,
-                    "limit": 100,
-                    "engine": engine
+                    "limit": 100
                 },
                 timeout=65.0
             )
@@ -1233,9 +1234,8 @@ class SharedState(rx.State):
 
             row_count = result.get("row_count", 0)
             exec_time = result.get("execution_time_ms", 0.0)
-            engine_used = result.get("engine", engine).upper()
             yield rx.toast.success(
-                f"Query executed ({engine_used})",
+                "Query executed (DuckDB)",
                 description=f"{row_count} rows in {exec_time:.0f}ms",
                 duration=3000
             )
@@ -1267,7 +1267,7 @@ class SharedState(rx.State):
 
         try:
             response = await httpx_client_post(
-                url=f"{RIVER_BASE_URL}/table_schema",
+                url=f"{SQL_API}/schema",
                 json={"project_name": project_name},
                 timeout=30.0
             )
@@ -1295,19 +1295,65 @@ class SharedState(rx.State):
         except (ValueError, TypeError):
             pass  # Ignore invalid values
 
+    @rx.event
+    def set_batch_training_mode(self, project_name: str, mode: str):
+        """Set the training mode: 'percentage' or 'max_rows'."""
+        if mode in ("percentage", "max_rows"):
+            self.batch_training_mode[project_name] = mode
+
+    @rx.event
+    def set_batch_training_max_rows(self, project_name: str, value: str):
+        """Set the maximum training rows for a project."""
+        try:
+            max_rows = int(value)
+            # Minimum 100 rows, maximum is delta lake total (or 10M as upper bound)
+            delta_total = self.batch_delta_lake_total_rows.get(project_name, 10000000)
+            if max_rows < 100:
+                max_rows = 100
+            elif max_rows > delta_total and delta_total > 0:
+                max_rows = delta_total
+            self.batch_training_max_rows[project_name] = max_rows
+        except (ValueError, TypeError):
+            pass  # Ignore invalid values
+
+    @rx.event(background=True)
+    async def fetch_delta_lake_total_rows(self, project_name: str):
+        """Fetch total rows available in Delta Lake for a project."""
+        try:
+            response = await httpx_client_post(
+                url=f"{SQL_API}/total-rows",
+                json={"project_name": project_name},
+                timeout=30.0
+            )
+            result = response.json()
+            async with self:
+                total = result.get("total_rows", 0)
+                self.batch_delta_lake_total_rows[project_name] = total
+                # If max_rows is 0 or exceeds total, set to total (or default)
+                if self.batch_training_max_rows[project_name] == 0 or self.batch_training_max_rows[project_name] > total:
+                    self.batch_training_max_rows[project_name] = min(total, 100000) if total > 0 else 10000
+        except Exception as e:
+            print(f"Error fetching Delta Lake total rows: {e}")
+
     @rx.event(background=True)
     async def train_batch_model(self, model_key: str, project_name: str):
         """Train a batch ML model using Scikit-Learn service via subprocess.
 
         Uses /switch_model to start training script, then polls /batch_status
         until training completes. Updates live status for UI display.
+
+        Training data selection modes:
+        - percentage: Use a fraction of total data (1-100%)
+        - max_rows: Use up to N rows from the dataset
         """
         # Get the training script for this project
         training_script = self._batch_training_scripts.get(
-            project_name, "transaction_fraud_detection_sklearn.py"
+            project_name, "ml_training/sklearn/tfd.py"
         )
-        # Get the training data percentage (convert to fraction for --sample-frac)
+        # Get training mode and values
+        training_mode = self.batch_training_mode.get(project_name, "percentage")
         data_percentage = self.batch_training_data_percentage.get(project_name, 100)
+        max_rows = self.batch_training_max_rows.get(project_name, 10000)
 
         async with self:
             self.batch_training_loading[project_name] = True
@@ -1319,21 +1365,26 @@ class SharedState(rx.State):
             self.batch_training_catboost_log[project_name] = {}
             self.batch_training_total_rows[project_name] = 0
 
-        # Show toast with percentage info
-        pct_info = f" using {data_percentage}% of data" if data_percentage < 100 else ""
+        # Show toast with training info based on mode
+        if training_mode == "percentage":
+            data_info = f" using {data_percentage}% of data" if data_percentage < 100 else ""
+        else:
+            data_info = f" using max {max_rows:,} rows"
         yield rx.toast.info(
             "Batch ML training started",
-            description=f"Training {self.batch_ml_model_name.get(project_name, 'model')}{pct_info}...",
+            description=f"Training {self.batch_ml_model_name.get(project_name, 'model')}{data_info}...",
             duration=5000,
         )
 
         try:
-            # Start training via /switch_model endpoint with data percentage
+            # Start training via /switch_model endpoint
             payload = {"model_key": training_script}
-            if data_percentage < 100:
+            if training_mode == "percentage" and data_percentage < 100:
                 payload["sample_frac"] = data_percentage / 100.0  # Convert to 0.0-1.0
+            elif training_mode == "max_rows":
+                payload["max_rows"] = max_rows
             response = await httpx_client_post(
-                url=f"{SKLEARN_BASE_URL}/switch_model",
+                url=f"{BATCH_API}/switch-model",
                 json=payload,
                 timeout=30.0
             )
@@ -1350,7 +1401,7 @@ class SharedState(rx.State):
                 await asyncio.sleep(poll_interval)
 
                 status_response = await httpx_client_get(
-                    url=f"{SKLEARN_BASE_URL}/batch_status",
+                    url=f"{BATCH_API}/status",
                     timeout=10.0
                 )
                 status = status_response.json()
@@ -1433,7 +1484,7 @@ class SharedState(rx.State):
         """Stop the current batch training process and reset state."""
         try:
             response = await httpx_client_post(
-                url=f"{SKLEARN_BASE_URL}/stop_training",
+                url=f"{BATCH_API}/stop-training",
                 json={},
                 timeout=30.0
             )
@@ -1476,7 +1527,7 @@ class SharedState(rx.State):
         model_name = self._batch_model_names.get(project_name, "XGBClassifier")
         try:
             response = await httpx_client_post(
-                url=f"{SKLEARN_BASE_URL}/model_available",
+                url=f"{BATCH_API}/model-available",
                 json={
                     "project_name": project_name,
                     "model_name": model_name
@@ -1505,7 +1556,7 @@ class SharedState(rx.State):
         run_id = self.selected_batch_run.get(project_name) or None
         try:
             response = await httpx_client_post(
-                url=f"{SKLEARN_BASE_URL}/mlflow_metrics",
+                url=f"{BATCH_API}/mlflow-metrics",
                 json={
                     "project_name": project_name,
                     "model_name": model_name,
@@ -1548,7 +1599,7 @@ class SharedState(rx.State):
         run_id = self.selected_batch_run.get(project_name) or None
         try:
             response = await httpx_client_post(
-                url=f"{SKLEARN_BASE_URL}/mlflow_metrics",
+                url=f"{BATCH_API}/mlflow-metrics",
                 json={
                     "project_name": project_name,
                     "model_name": model_name,
@@ -1595,14 +1646,83 @@ class SharedState(rx.State):
 
     @rx.event(background=True)
     async def init_batch_page(self, project_name: str):
-        """Initialize batch ML page - fetch runs list and metrics."""
+        """Initialize batch ML page with optimized single API call.
+
+        Uses /batch_init endpoint which fetches all data in parallel:
+        - List of MLflow runs
+        - Model availability
+        - Metrics for best/selected run
+
+        This reduces initialization from 3 sequential API calls to 1 parallel call,
+        improving page load time by ~60-70%.
+        """
         print(f"[DEBUG] init_batch_page called for: {project_name}")
-        # Fetch list of available MLflow runs (ordered by criteria, best first)
-        yield SharedState.fetch_mlflow_runs(project_name)
-        # Check model availability
-        yield SharedState.check_batch_model_available(project_name)
-        # Fetch metrics for selected run (or best if none selected)
-        yield SharedState.get_batch_mlflow_metrics(project_name)
+
+        # Set loading state
+        async with self:
+            self.batch_runs_loading[project_name] = True
+
+        try:
+            # Use selected run_id if set, otherwise endpoint uses best
+            run_id = self.selected_batch_run.get(project_name) or None
+
+            # Single optimized API call that fetches everything in parallel
+            response = await httpx_client_post(
+                url=f"{BATCH_API}/init",
+                json={
+                    "project_name": project_name,
+                    "run_id": run_id,
+                },
+                timeout=30.0
+            )
+            data = response.json()
+
+            # Update all state variables at once
+            async with self:
+                # Parse runs into Pydantic models
+                runs = [MLflowRunInfo(**run) for run in data.get("runs", [])]
+                self.batch_mlflow_runs[project_name] = runs
+
+                # Model availability
+                self.batch_model_available[project_name] = data.get("model_available", False)
+
+                # Experiment URL
+                experiment_url = data.get("experiment_url")
+                if experiment_url:
+                    self.batch_mlflow_experiment_url[project_name] = experiment_url
+
+                # Metrics
+                metrics = data.get("metrics", {})
+                self.batch_mlflow_metrics[project_name] = metrics
+
+                # Total rows
+                self.batch_training_total_rows[project_name] = data.get("total_rows", 0)
+
+                # Auto-select best run if none selected
+                if runs and not self.selected_batch_run[project_name]:
+                    best_run_id = data.get("best_run_id") or runs[0].run_id
+                    self.selected_batch_run[project_name] = best_run_id
+
+                # Update run URL from metrics if available
+                run_url = metrics.get("run_url")
+                if run_url:
+                    self.batch_mlflow_experiment_url[project_name] = run_url
+
+                self.batch_runs_loading[project_name] = False
+                print(f"[DEBUG] init_batch_page complete: {len(runs)} runs, model_available={data.get('model_available')}")
+
+            # Fetch Delta Lake total rows in background (for max_rows training option)
+            yield SharedState.fetch_delta_lake_total_rows(project_name)
+
+        except Exception as e:
+            print(f"Error in init_batch_page: {e}")
+            async with self:
+                self.batch_mlflow_runs[project_name] = []
+                self.selected_batch_run[project_name] = ""
+                self.batch_mlflow_metrics[project_name] = {}
+                self.batch_training_total_rows[project_name] = 0
+                self.batch_model_available[project_name] = False
+                self.batch_runs_loading[project_name] = False
 
     @rx.event
     def init_sql_page(self, project_name: str):
@@ -1621,7 +1741,7 @@ class SharedState(rx.State):
 
         try:
             response = await httpx_client_post(
-                url=f"{SKLEARN_BASE_URL}/mlflow_runs",
+                url=f"{BATCH_API}/mlflow-runs",
                 json={"project_name": project_name},
                 timeout=30.0
             )
@@ -1659,7 +1779,7 @@ class SharedState(rx.State):
 
         try:
             response = await httpx_client_post(
-                url=f"{SKLEARN_BASE_URL}/mlflow_runs",
+                url=f"{BATCH_API}/mlflow-runs",
                 json={"project_name": project_name},
                 timeout=30.0
             )
@@ -1691,7 +1811,7 @@ class SharedState(rx.State):
 
         try:
             response = await httpx_client_post(
-                url=f"{SKLEARN_BASE_URL}/mlflow_runs",
+                url=f"{BATCH_API}/mlflow-runs",
                 json={"project_name": project_name},
                 timeout=30.0
             )

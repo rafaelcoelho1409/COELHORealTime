@@ -1,3 +1,4 @@
+{{- if .Values.river }}
 apiVersion: v1
 {{- include "coelho-realtime.ConfigMapSettings" (dict "appName" "river" "root" .) | nindent 0}}
 data:
@@ -10,3 +11,4 @@ data:
   AWS_DEFAULT_REGION: "us-east-1"
   # Redis for live model caching (real-time predictions during training)
   REDIS_URL: "redis://{{ .Release.Name }}-redis-master:6379"
+{{- end }}

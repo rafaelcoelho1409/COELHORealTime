@@ -12,8 +12,8 @@ import datetime as dt
 import plotly.graph_objects as go
 from .shared import (
     SharedState,
-    RIVER_BASE_URL,
-    SKLEARN_BASE_URL,
+    INCREMENTAL_API,
+    BATCH_API,
     safe_str,
     safe_int_str,
     safe_float_str,
@@ -104,7 +104,7 @@ class TFDState(SharedState):
         "Transaction Fraud Detection": False,
     }
     batch_ml_model_key: dict = {
-        "Transaction Fraud Detection": "transaction_fraud_detection_sklearn.py",
+        "Transaction Fraud Detection": "ml_training/sklearn/tfd.py",
     }
 
     # ==========================================================================
@@ -856,23 +856,33 @@ class TFDState(SharedState):
         try:
             print(f"Making prediction with payload: {payload}")
             response = await httpx_client_post(
-                url=f"{RIVER_BASE_URL}/predict",
+                url=f"{INCREMENTAL_API}/predict",
                 json=payload,
                 timeout=30.0
             )
             result = response.json()
             print(f"Prediction result: {result}")
+            fraud_prob = result.get("fraud_probability", 0.0)
+            prediction = result.get("prediction", 0)
+            model_source = result.get("model_source", "mlflow")
             # Create new dict to trigger reactivity
             async with self:
                 self.prediction_results = {
                     **self.prediction_results,
                     project_name: {
-                        "prediction": result.get("prediction"),
-                        "fraud_probability": result.get("fraud_probability"),
-                        "model_source": result.get("model_source", "mlflow"),
+                        "prediction": prediction,
+                        "fraud_probability": fraud_prob,
+                        "model_source": model_source,
                         "show": True
                     }
                 }
+            # Show toast with prediction result
+            prediction_text = "Fraud" if prediction == 1 else "Not Fraud"
+            yield rx.toast.success(
+                f"Prediction: {prediction_text}",
+                description=f"Fraud probability: {fraud_prob * 100:.2f}% (Source: {model_source.upper()})",
+                duration=5000
+            )
             # Refresh MLflow metrics after prediction (to show real-time updates during training)
             await self._fetch_mlflow_metrics_internal(project_name)
         except Exception as e:
@@ -887,6 +897,11 @@ class TFDState(SharedState):
                         "show": False
                     }
                 }
+            yield rx.toast.error(
+                "Prediction failed",
+                description=str(e)[:100],
+                duration=5000
+            )
 
     @rx.event
     def randomize_tfd_form(self):
@@ -1036,7 +1051,7 @@ class TFDState(SharedState):
 
         try:
             response = await httpx_client_post(
-                url=f"{SKLEARN_BASE_URL}/yellowbrick_metric",
+                url=f"{BATCH_API}/yellowbrick-metric",
                 json={
                     "project_name": project_name,
                     "metric_type": metric_type,
@@ -1081,7 +1096,7 @@ class TFDState(SharedState):
         """Check if a batch (Scikit-Learn) model is available for prediction."""
         try:
             response = await httpx_client_post(
-                url=f"{SKLEARN_BASE_URL}/model_available",
+                url=f"{BATCH_API}/model-available",
                 json={
                     "project_name": project_name,
                     "model_name": "CatBoostClassifier"
@@ -1145,7 +1160,7 @@ class TFDState(SharedState):
         try:
             print(f"Making batch prediction with payload: {payload}")
             response = await httpx_client_post(
-                url=f"{SKLEARN_BASE_URL}/predict",
+                url=f"{BATCH_API}/predict",
                 json=payload,
                 timeout=30.0
             )

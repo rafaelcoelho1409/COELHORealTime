@@ -287,7 +287,7 @@ def _prediction_result() -> rx.Component:
                             rx.select(
                                 ECCIState.ecci_feature_options,
                                 value=ECCIState.ecci_selected_feature,
-                                on_change=ECCIState.set_ecci_selected_feature,
+                                on_change=ECCIState.set_ecci_batch_selected_feature,
                                 width="100%"
                             ),
                             rx.plotly(data=ECCIState.ecci_selected_cluster_feature_figure, width="100%"),
@@ -377,6 +377,7 @@ def index() -> rx.Component:
         on_mount=[
             ECCIState.init_ecci_form_if_empty,
             SharedState.init_batch_page(PROJECT_NAME),
+            ECCIState.fetch_ecci_batch_cluster_feature_counts,
         ],
         on_unmount=ECCIState.cleanup_on_page_leave(PROJECT_NAME),
         spacing="0",

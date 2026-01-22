@@ -1,3 +1,4 @@
+{{- if .Values.sklearn }}
 apiVersion: v1
 {{- include "coelho-realtime.ConfigMapSettings" (dict "appName" "sklearn" "root" .) | nindent 0}}
 data:
@@ -11,3 +12,4 @@ data:
   # Redis for YellowBrick visualization caching (REDIS_HOST already in commonEnvVars)
   REDIS_DB: "1"
   YELLOWBRICK_CACHE_TTL: "3600"
+{{- end }}

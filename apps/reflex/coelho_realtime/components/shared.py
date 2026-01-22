@@ -20,13 +20,29 @@ CONTEXT_TITLES = {
 }
 
 
-def metric_info_dialog(metric_key: str, project_key: str = "tfd") -> rx.Component:
-    """Create an info dialog button showing metric formula and explanation."""
+def metric_info_dialog(metric_key: str, project_key: str = "tfd", ml_type: str = "batch") -> rx.Component:
+    """Create an info dialog button showing metric formula and explanation.
+
+    Args:
+        metric_key: The key for the metric in the METRIC_INFO dictionary
+        project_key: The project key ("tfd", "eta", "ecci")
+        ml_type: The ML type ("incremental" for River, "batch" for Sklearn)
+    """
     info = METRIC_INFO.get(project_key, {}).get("metrics", {}).get(metric_key, {})
     if not info:
         return rx.fragment()
 
     context_title = CONTEXT_TITLES.get(project_key, "Context")
+
+    # Handle nested docs_url structure
+    docs_url_data = info.get("docs_url", "")
+    if isinstance(docs_url_data, dict):
+        # Get the URL for the specified ml_type only (no fallback)
+        # If incremental ML doesn't have a River link, show no link
+        docs_url = docs_url_data.get(ml_type, "")
+    else:
+        # Legacy string format
+        docs_url = docs_url_data
 
     return rx.dialog.root(
         rx.dialog.trigger(
@@ -111,6 +127,24 @@ def metric_info_dialog(metric_key: str, project_key: str = "tfd") -> rx.Componen
                     rx.badge(f"Range: {info.get('range', 'N/A')}", color_scheme="blue", variant="soft"),
                     rx.badge(info.get("optimal", ""), color_scheme="green", variant="soft"),
                     spacing="2"
+                ),
+                # Documentation link
+                rx.cond(
+                    docs_url != "",
+                    rx.hstack(
+                        rx.icon("external-link", size=14, color="gray"),
+                        rx.link(
+                            "Official Documentation",
+                            href=docs_url,
+                            is_external=True,
+                            size="2",
+                            color="accent",
+                            underline="always",
+                        ),
+                        spacing="1",
+                        align="center"
+                    ),
+                    rx.fragment()
                 ),
                 spacing="3",
                 width="100%",
@@ -255,6 +289,24 @@ def yellowbrick_info_dialog(visualizer_key: str, project_key: str = "tfd") -> rx
                         rx.code(info.get("parameters", ""), size="1"),
                         spacing="2",
                         wrap="wrap"
+                    ),
+                    rx.fragment()
+                ),
+                # Documentation link
+                rx.cond(
+                    info.get("docs_url", "") != "",
+                    rx.hstack(
+                        rx.icon("external-link", size=14, color="gray"),
+                        rx.link(
+                            "Official Documentation",
+                            href=info.get("docs_url", ""),
+                            is_external=True,
+                            size="2",
+                            color="accent",
+                            underline="always",
+                        ),
+                        spacing="1",
+                        align="center"
                     ),
                     rx.fragment()
                 ),
@@ -659,32 +711,78 @@ def batch_ml_run_and_training_box(model_key: str, project_name: str) -> rx.Compo
                 ),
                 rx.fragment()
             ),
-            # Training data percentage input (hidden during training)
+            # Training data options (hidden during training)
             rx.cond(
                 SharedState.batch_training_loading[project_name],
                 rx.fragment(),
-                rx.hstack(
-                    rx.icon("database", size=14, color="gray"),
-                    rx.text("Data %", size="1", color="gray"),
-                    rx.input(
-                        value=SharedState.batch_training_data_percentage[project_name],
-                        on_change=lambda v: SharedState.set_batch_training_percentage(project_name, v),
-                        type="number",
-                        min=1,
-                        max=100,
-                        size="1",
-                        width="60px",
-                    ),
-                    rx.text(
-                        rx.cond(
-                            SharedState.batch_training_data_percentage[project_name] < 100,
-                            "faster",
-                            "full"
+                rx.vstack(
+                    # Mode selector (Percentage vs Max Rows)
+                    rx.hstack(
+                        rx.icon("database", size=14, color="gray"),
+                        rx.text("Data", size="1", color="gray"),
+                        rx.segmented_control.root(
+                            rx.segmented_control.item("Percentage", value="percentage"),
+                            rx.segmented_control.item("Max Rows", value="max_rows"),
+                            value=SharedState.batch_training_mode[project_name],
+                            on_change=lambda v: SharedState.set_batch_training_mode(project_name, v),
+                            size="1",
                         ),
-                        size="1",
-                        color="gray"
+                        align_items="center",
+                        spacing="2",
+                        width="100%"
                     ),
-                    align_items="center",
+                    # Percentage input (shown when mode is "percentage")
+                    rx.cond(
+                        SharedState.batch_training_mode[project_name] == "percentage",
+                        rx.hstack(
+                            rx.input(
+                                value=SharedState.batch_training_data_percentage[project_name],
+                                on_change=lambda v: SharedState.set_batch_training_percentage(project_name, v),
+                                type="number",
+                                min=1,
+                                max=100,
+                                size="1",
+                                width="70px",
+                            ),
+                            rx.text("%", size="1", color="gray"),
+                            rx.text(
+                                rx.cond(
+                                    SharedState.batch_training_data_percentage[project_name] < 100,
+                                    "faster",
+                                    "full"
+                                ),
+                                size="1",
+                                color="gray"
+                            ),
+                            align_items="center",
+                            spacing="2",
+                            padding_left="1.5em"
+                        ),
+                        # Max rows input (shown when mode is "max_rows")
+                        rx.hstack(
+                            rx.input(
+                                value=SharedState.batch_training_max_rows[project_name],
+                                on_change=lambda v: SharedState.set_batch_training_max_rows(project_name, v),
+                                type="number",
+                                min=100,
+                                size="1",
+                                width="100px",
+                            ),
+                            rx.text("rows", size="1", color="gray"),
+                            rx.cond(
+                                SharedState.batch_delta_lake_total_rows[project_name] > 0,
+                                rx.text(
+                                    f"/ " + SharedState.batch_delta_lake_total_rows[project_name].to(str),
+                                    size="1",
+                                    color="gray"
+                                ),
+                                rx.fragment()
+                            ),
+                            align_items="center",
+                            spacing="2",
+                            padding_left="1.5em"
+                        ),
+                    ),
                     spacing="2",
                     width="100%"
                 ),
@@ -997,32 +1095,78 @@ def batch_ml_training_box(model_key: str, project_name: str) -> rx.Component:
                 ),
                 rx.fragment()
             ),
-            # Training data percentage input (hidden during training)
+            # Training data options (hidden during training)
             rx.cond(
                 SharedState.batch_training_loading[project_name],
                 rx.fragment(),
-                rx.hstack(
-                    rx.icon("database", size=14, color="gray"),
-                    rx.text("Data %", size="1", color="gray"),
-                    rx.input(
-                        value=SharedState.batch_training_data_percentage[project_name],
-                        on_change=lambda v: SharedState.set_batch_training_percentage(project_name, v),
-                        type="number",
-                        min=1,
-                        max=100,
-                        size="1",
-                        width="60px",
-                    ),
-                    rx.text(
-                        rx.cond(
-                            SharedState.batch_training_data_percentage[project_name] < 100,
-                            "faster",
-                            "full"
+                rx.vstack(
+                    # Mode selector (Percentage vs Max Rows)
+                    rx.hstack(
+                        rx.icon("database", size=14, color="gray"),
+                        rx.text("Data", size="1", color="gray"),
+                        rx.segmented_control.root(
+                            rx.segmented_control.item("Percentage", value="percentage"),
+                            rx.segmented_control.item("Max Rows", value="max_rows"),
+                            value=SharedState.batch_training_mode[project_name],
+                            on_change=lambda v: SharedState.set_batch_training_mode(project_name, v),
+                            size="1",
                         ),
-                        size="1",
-                        color="gray"
+                        align_items="center",
+                        spacing="2",
+                        width="100%"
                     ),
-                    align_items="center",
+                    # Percentage input (shown when mode is "percentage")
+                    rx.cond(
+                        SharedState.batch_training_mode[project_name] == "percentage",
+                        rx.hstack(
+                            rx.input(
+                                value=SharedState.batch_training_data_percentage[project_name],
+                                on_change=lambda v: SharedState.set_batch_training_percentage(project_name, v),
+                                type="number",
+                                min=1,
+                                max=100,
+                                size="1",
+                                width="70px",
+                            ),
+                            rx.text("%", size="1", color="gray"),
+                            rx.text(
+                                rx.cond(
+                                    SharedState.batch_training_data_percentage[project_name] < 100,
+                                    "faster",
+                                    "full"
+                                ),
+                                size="1",
+                                color="gray"
+                            ),
+                            align_items="center",
+                            spacing="2",
+                            padding_left="1.5em"
+                        ),
+                        # Max rows input (shown when mode is "max_rows")
+                        rx.hstack(
+                            rx.input(
+                                value=SharedState.batch_training_max_rows[project_name],
+                                on_change=lambda v: SharedState.set_batch_training_max_rows(project_name, v),
+                                type="number",
+                                min=100,
+                                size="1",
+                                width="100px",
+                            ),
+                            rx.text("rows", size="1", color="gray"),
+                            rx.cond(
+                                SharedState.batch_delta_lake_total_rows[project_name] > 0,
+                                rx.text(
+                                    f"/ " + SharedState.batch_delta_lake_total_rows[project_name].to(str),
+                                    size="1",
+                                    color="gray"
+                                ),
+                                rx.fragment()
+                            ),
+                            align_items="center",
+                            spacing="2",
+                            padding_left="1.5em"
+                        ),
+                    ),
                     spacing="2",
                     width="100%"
                 ),
@@ -1269,8 +1413,8 @@ def coelho_realtime_navbar() -> rx.Component:
                             )
                         ),
                         rx.menu.content(
-                            rx.menu.sub(
-                                rx.menu.sub_trigger(
+                            rx.menu.item(
+                                rx.link(
                                     rx.hstack(
                                         rx.image(
                                             src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/fastapi/fastapi-original.svg",
@@ -1280,41 +1424,9 @@ def coelho_realtime_navbar() -> rx.Component:
                                         rx.text("FastAPI", size="3", weight="medium"),
                                         spacing="2",
                                         align_items="center"
-                                    )
-                                ),
-                                rx.menu.sub_content(
-                                    rx.menu.item(
-                                        rx.link(
-                                            rx.hstack(
-                                                rx.image(
-                                                    src="https://riverml.xyz/latest/img/icon.png",
-                                                    width="16px",
-                                                    height="16px"
-                                                ),
-                                                rx.text("River (Incremental ML)", size="3", weight="medium"),
-                                                spacing="2",
-                                                align_items="center"
-                                            ),
-                                            href="http://localhost:8002/docs",
-                                            is_external=True
-                                        )
                                     ),
-                                    rx.menu.item(
-                                        rx.link(
-                                            rx.hstack(
-                                                rx.image(
-                                                    src="https://scikit-learn.org/stable/_static/scikit-learn-logo-without-subtitle.svg",
-                                                    width="16px",
-                                                    height="16px"
-                                                ),
-                                                rx.text("Scikit-Learn (Batch ML)", size="3", weight="medium"),
-                                                spacing="2",
-                                                align_items="center"
-                                            ),
-                                            href="http://localhost:8003/docs",
-                                            is_external=True
-                                        )
-                                    )
+                                    href="http://localhost:8001/docs",
+                                    is_external=True
                                 )
                             ),
                             rx.menu.item(
@@ -1589,7 +1701,7 @@ def batch_sub_nav(base_route: str, active: str) -> rx.Component:
 def delta_lake_sql_tab() -> rx.Component:
     """
     Delta Lake SQL query interface.
-    Allows users to execute SQL queries against Delta Lake tables via DuckDB/Polars.
+    Allows users to execute SQL queries against Delta Lake tables via DuckDB.
     """
     return rx.hstack(
         # Left column - Query editor and controls (35%)
@@ -1601,13 +1713,17 @@ def delta_lake_sql_tab() -> rx.Component:
                         rx.icon("terminal", size=16, color=rx.color("accent", 10)),
                         rx.heading("SQL Editor", size="3", weight="bold"),
                         rx.spacer(),
-                        # Engine selector - compact
-                        rx.select(
-                            ["polars", "duckdb"],
-                            value=SharedState.current_sql_engine,
-                            on_change=SharedState.set_sql_engine,
-                            size="1",
+                        # DuckDB badge
+                        rx.badge(
+                            rx.hstack(
+                                rx.icon("database", size=12),
+                                rx.text("DuckDB", size="1"),
+                                spacing="1",
+                                align_items="center"
+                            ),
+                            color_scheme="orange",
                             variant="soft",
+                            size="1"
                         ),
                         spacing="2",
                         align="center",
