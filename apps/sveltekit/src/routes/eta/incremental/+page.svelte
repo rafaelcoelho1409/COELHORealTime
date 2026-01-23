@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { beforeNavigate } from '$app/navigation';
+	import { browser } from '$app/environment';
 	import {
 		Card,
 		CardContent,
@@ -14,6 +15,7 @@
 		TabsTrigger,
 		TabsContent
 	} from '$components/shared';
+	import Plotly from 'svelte-plotly.js';
 	import {
 		formData,
 		predictionResults,
@@ -98,9 +100,51 @@
 		};
 	}
 
-	// Derived values for display
-	let estimatedDistanceKm = $state<number>(0);
-	let initialEstimatedTravelTime = $state<number>(0);
+	// Helper function to calculate distance (Haversine formula)
+	function calcDistanceKm(oLat: number, oLon: number, dLat: number, dLon: number): number {
+		const R = 6371; // Earth's radius in km
+		const dLatRad = ((dLat - oLat) * Math.PI) / 180;
+		const dLonRad = ((dLon - oLon) * Math.PI) / 180;
+		const a =
+			Math.sin(dLatRad / 2) * Math.sin(dLatRad / 2) +
+			Math.cos((oLat * Math.PI) / 180) *
+				Math.cos((dLat * Math.PI) / 180) *
+				Math.sin(dLonRad / 2) *
+				Math.sin(dLonRad / 2);
+		const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+		return R * c;
+	}
+
+	// Derived values for display - auto-calculate from form data
+	const estimatedDistanceKm = $derived.by(() => {
+		const form = $formData[PROJECT];
+		// First try to get from form data
+		if (form?.estimated_distance_km) {
+			return Number(form.estimated_distance_km);
+		}
+		// Otherwise calculate from coordinates
+		const oLat = Number(form?.origin_lat) || 0;
+		const oLon = Number(form?.origin_lon) || 0;
+		const dLat = Number(form?.destination_lat) || 0;
+		const dLon = Number(form?.destination_lon) || 0;
+		if (oLat && oLon && dLat && dLon) {
+			return Number(calcDistanceKm(oLat, oLon, dLat, dLon).toFixed(2));
+		}
+		return 0;
+	});
+
+	const initialEstimatedTravelTime = $derived.by(() => {
+		const form = $formData[PROJECT];
+		// First try to get from form data
+		if (form?.initial_estimated_travel_time_seconds) {
+			return Number(form.initial_estimated_travel_time_seconds);
+		}
+		// Otherwise calculate from distance (assume 40 km/h average speed)
+		if (estimatedDistanceKm > 0) {
+			return Math.round((estimatedDistanceKm / 40) * 3600);
+		}
+		return 0;
+	});
 
 	onMount(async () => {
 		try {
@@ -223,43 +267,20 @@
 		}
 	}
 
-	function calculateDistanceKm(
-		originLat: number,
-		originLon: number,
-		destLat: number,
-		destLon: number
-	): number {
-		const R = 6371; // Earth's radius in km
-		const dLat = ((destLat - originLat) * Math.PI) / 180;
-		const dLon = ((destLon - originLon) * Math.PI) / 180;
-		const a =
-			Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-			Math.cos((originLat * Math.PI) / 180) *
-				Math.cos((destLat * Math.PI) / 180) *
-				Math.sin(dLon / 2) *
-				Math.sin(dLon / 2);
-		const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-		return R * c;
-	}
-
 	function updateEstimates() {
 		const form = $formData[PROJECT];
 		if (form.origin_lat && form.origin_lon && form.destination_lat && form.destination_lon) {
-			const dist = calculateDistanceKm(
+			const dist = calcDistanceKm(
 				Number(form.origin_lat),
 				Number(form.origin_lon),
 				Number(form.destination_lat),
 				Number(form.destination_lon)
 			);
-			estimatedDistanceKm = Number(dist.toFixed(2));
+			const distKm = Number(dist.toFixed(2));
 			// Assume average speed of 40 km/h for initial estimate
-			initialEstimatedTravelTime = Math.round((dist / 40) * 3600);
-			updateFormField(PROJECT, 'estimated_distance_km', estimatedDistanceKm);
-			updateFormField(
-				PROJECT,
-				'initial_estimated_travel_time_seconds',
-				initialEstimatedTravelTime
-			);
+			const travelTime = Math.round((dist / 40) * 3600);
+			updateFormField(PROJECT, 'estimated_distance_km', distKm);
+			updateFormField(PROJECT, 'initial_estimated_travel_time_seconds', travelTime);
 		}
 	}
 
@@ -269,11 +290,7 @@
 			const randomData = randomizeETAForm(dropdownOptions);
 			updateProjectStore(formData, PROJECT, randomData);
 			updateProjectStore(predictionResults, PROJECT, {});
-			estimatedDistanceKm = Number(randomData.estimated_distance_km ?? 0);
-			initialEstimatedTravelTime = Number(
-				randomData.initial_estimated_travel_time_seconds ?? 0
-			);
-			updateEstimates();
+			// Distance and travel time are now derived automatically from form data
 			toast.success('Form randomized');
 		} finally {
 			sampleLoading = false;
@@ -343,9 +360,202 @@
 	const currentMlflowUrl = $derived($mlflowExperimentUrl[PROJECT]);
 
 	// Derived values for prediction display
-	const etaMinutes = $derived(
-		currentPrediction?.['Estimated Time of Arrival'] || currentPrediction?.eta_minutes || 0
+	// API returns ETA in SECONDS, so we need to divide by 60 to get minutes
+	const etaSeconds = $derived(
+		currentPrediction?.['Estimated Time of Arrival'] || currentPrediction?.eta_seconds || 0
 	);
+	const etaMinutes = $derived(etaSeconds > 0 ? etaSeconds / 60 : 0);
+
+	// Plotly prediction chart data (matching Reflex exactly)
+	const etaPredictionData = $derived.by(() => {
+		return [
+			{
+				type: 'indicator',
+				mode: 'number',
+				value: etaSeconds,
+				title: { text: '<b>Seconds</b>', font: { size: 18 } },
+				number: { font: { size: 48, color: '#3b82f6' } },
+				domain: { row: 0, column: 0 }
+			},
+			{
+				type: 'indicator',
+				mode: 'number',
+				value: etaMinutes,
+				title: { text: '<b>Minutes</b>', font: { size: 18 } },
+				number: { font: { size: 48, color: '#22c55e' }, valueformat: '.1f' },
+				domain: { row: 1, column: 0 }
+			}
+		];
+	});
+
+	const etaPredictionLayout = {
+		grid: { rows: 2, columns: 1, pattern: 'independent' },
+		height: 250,
+		margin: { l: 20, r: 20, t: 40, b: 20 },
+		paper_bgcolor: 'transparent',
+		plot_bgcolor: 'transparent'
+	};
+
+	const plotlyConfig = { displayModeBar: false, responsive: true };
+
+	// Map variables
+	let mapContainer: HTMLDivElement | null = null;
+	let leafletMap: any = null;
+	let originMarker: any = null;
+	let destMarker: any = null;
+	let routeLine: any = null;
+	let L: any = null;
+
+	// Derived coordinates
+	const originLat = $derived(Number(currentForm?.origin_lat) || 29.8);
+	const originLon = $derived(Number(currentForm?.origin_lon) || -95.4);
+	const destLat = $derived(Number(currentForm?.destination_lat) || 29.8);
+	const destLon = $derived(Number(currentForm?.destination_lon) || -95.4);
+
+	// Initialize Leaflet map
+	async function initMap() {
+		if (!browser || !mapContainer) return;
+
+		// Add Leaflet CSS if not already loaded
+		if (!document.getElementById('leaflet-css')) {
+			const link = document.createElement('link');
+			link.id = 'leaflet-css';
+			link.rel = 'stylesheet';
+			link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+			document.head.appendChild(link);
+		}
+
+		// Load Leaflet JS from CDN if not already loaded
+		if (!(window as any).L) {
+			await new Promise<void>((resolve, reject) => {
+				const script = document.createElement('script');
+				script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+				script.onload = () => resolve();
+				script.onerror = reject;
+				document.head.appendChild(script);
+			});
+		}
+
+		// Wait for CSS to load
+		await new Promise((r) => setTimeout(r, 100));
+
+		L = (window as any).L;
+		if (!L) return;
+
+		const centerLat = (originLat + destLat) / 2;
+		const centerLon = (originLon + destLon) / 2;
+
+		leafletMap = L.map(mapContainer).setView([centerLat, centerLon], 10);
+
+		L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+			attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+		}).addTo(leafletMap);
+
+		// Add markers and line
+		updateMapMarkers();
+	}
+
+	function updateMapMarkers() {
+		if (!L || !leafletMap) return;
+
+		// Remove existing markers and line
+		if (originMarker) leafletMap.removeLayer(originMarker);
+		if (destMarker) leafletMap.removeLayer(destMarker);
+		if (routeLine) leafletMap.removeLayer(routeLine);
+
+		// Create custom icons
+		const blueIcon = L.divIcon({
+			className: 'custom-marker',
+			html: '<div style="background-color: #3b82f6; width: 24px; height: 24px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>',
+			iconSize: [24, 24],
+			iconAnchor: [12, 12]
+		});
+
+		const redIcon = L.divIcon({
+			className: 'custom-marker',
+			html: '<div style="background-color: #ef4444; width: 24px; height: 24px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>',
+			iconSize: [24, 24],
+			iconAnchor: [12, 12]
+		});
+
+		// Add markers
+		originMarker = L.marker([originLat, originLon], { icon: blueIcon })
+			.addTo(leafletMap)
+			.bindPopup('Origin');
+
+		destMarker = L.marker([destLat, destLon], { icon: redIcon })
+			.addTo(leafletMap)
+			.bindPopup('Destination');
+
+		// Add bold route line
+		routeLine = L.polyline(
+			[
+				[originLat, originLon],
+				[destLat, destLon]
+			],
+			{
+				color: '#333333',
+				weight: 4,
+				opacity: 0.8
+			}
+		).addTo(leafletMap);
+
+		// Fit bounds to show both markers
+		const bounds = L.latLngBounds([
+			[originLat, originLon],
+			[destLat, destLon]
+		]);
+		leafletMap.fitBounds(bounds, { padding: [30, 30] });
+	}
+
+	// Watch for coordinate changes - explicitly reference coordinates to create reactive dependency
+	$effect(() => {
+		// Reference all coordinates to track changes
+		const _oLat = originLat;
+		const _oLon = originLon;
+		const _dLat = destLat;
+		const _dLon = destLon;
+
+		if (leafletMap && L) {
+			updateMapMarkers();
+		}
+	});
+
+	// Initialize or reinitialize map when tab switches to prediction
+	$effect(() => {
+		// Track activeTab to trigger when switching tabs
+		const currentTab = activeTab;
+
+		if (browser && currentTab === 'prediction') {
+			// Small delay to ensure DOM is ready after tab switch
+			setTimeout(() => {
+				if (mapContainer) {
+					// Clean up old map instance if it exists
+					if (leafletMap) {
+						try {
+							leafletMap.remove();
+						} catch (e) {
+							// Ignore errors when removing invalid map
+						}
+						leafletMap = null;
+					}
+					initMap();
+				}
+			}, 50);
+		}
+	});
+
+	// Cleanup map on component destroy
+	onDestroy(() => {
+		if (leafletMap) {
+			try {
+				leafletMap.remove();
+			} catch (e) {
+				// Ignore errors
+			}
+			leafletMap = null;
+		}
+	});
 </script>
 
 <div class="flex gap-6">
@@ -390,7 +600,7 @@
 					<div class="space-y-1">
 						<p class="text-xs text-muted-foreground">Driver ID</p>
 						<Select
-							value={(currentForm.driver_id as string) ?? ''}
+							value={(currentForm.driver_id as string) || ''}
 							options={dropdownOptions.driver_id?.slice(0, 50) || ['driver_1000']}
 							class="h-8 text-sm"
 							onchange={(e) => updateFormField(PROJECT, 'driver_id', e.currentTarget.value)}
@@ -400,7 +610,7 @@
 					<div class="space-y-1">
 						<p class="text-xs text-muted-foreground">Vehicle ID</p>
 						<Select
-							value={(currentForm.vehicle_id as string) ?? ''}
+							value={(currentForm.vehicle_id as string) || ''}
 							options={dropdownOptions.vehicle_id?.slice(0, 50) || ['vehicle_1000']}
 							class="h-8 text-sm"
 							onchange={(e) => updateFormField(PROJECT, 'vehicle_id', e.currentTarget.value)}
@@ -410,7 +620,7 @@
 					<div class="space-y-1">
 						<p class="text-xs text-muted-foreground">Weather</p>
 						<Select
-							value={(currentForm.weather as string) ?? 'Clear'}
+							value={(currentForm.weather as string) || 'Clear'}
 							options={dropdownOptions.weather || ['Clear']}
 							class="h-8 text-sm"
 							onchange={(e) => updateFormField(PROJECT, 'weather', e.currentTarget.value)}
@@ -440,7 +650,7 @@
 					<div class="space-y-1">
 						<p class="text-xs text-muted-foreground">Vehicle Type</p>
 						<Select
-							value={(currentForm.vehicle_type as string) ?? 'Sedan'}
+							value={(currentForm.vehicle_type as string) || 'Sedan'}
 							options={dropdownOptions.vehicle_type || ['Sedan']}
 							class="h-8 text-sm"
 							onchange={(e) => updateFormField(PROJECT, 'vehicle_type', e.currentTarget.value)}
@@ -663,22 +873,10 @@
 										<span class="text-sm font-bold">Origin and Destination</span>
 									</div>
 									<div
-										class="flex-1 rounded-md bg-gradient-to-br from-blue-100 to-blue-50 p-4 dark:from-blue-900/20 dark:to-blue-800/10"
-									>
-										<div class="flex h-full items-center justify-center">
-											<div class="space-y-2 text-center text-sm text-muted-foreground">
-												<MapPin class="mx-auto h-8 w-8" />
-												<p>Map visualization</p>
-												<p class="text-xs">
-													Origin: ({currentForm.origin_lat || '-'}, {currentForm.origin_lon || '-'})
-												</p>
-												<p class="text-xs">
-													Dest: ({currentForm.destination_lat || '-'}, {currentForm.destination_lon ||
-														'-'})
-												</p>
-											</div>
-										</div>
-									</div>
+										bind:this={mapContainer}
+										class="flex-1 rounded-md overflow-hidden"
+										style="min-height: 280px;"
+									></div>
 									<div class="mt-2 space-y-1 text-xs text-muted-foreground">
 										<p>Estimated Distance: {estimatedDistanceKm} km</p>
 										<p>Initial Estimated Travel Time: {initialEstimatedTravelTime} s</p>
@@ -695,57 +893,49 @@
 										<span class="text-sm font-bold">ETA - Prediction</span>
 									</div>
 
-								<div class="mb-4 flex flex-wrap items-center gap-2 rounded-md bg-muted/50 p-2">
-									<span
-										class="inline-flex items-center gap-1 rounded-md bg-purple-500/10 px-2 py-1 text-xs font-medium text-purple-600"
-									>
-										<FlaskConical class="h-3 w-3" />
-										MLflow
-									</span>
-									{#if mlflowRunInfo.is_live}
+									<div class="mb-4 flex flex-wrap items-center gap-2 rounded-md bg-muted/50 p-2">
 										<span
-											class="inline-flex items-center gap-1 rounded-md bg-green-500/10 px-2 py-1 text-xs font-medium text-green-600"
+											class="inline-flex items-center gap-1 rounded-md bg-purple-500/10 px-2 py-1 text-xs font-medium text-purple-600"
 										>
-											<span class="h-2 w-2 animate-pulse rounded-full bg-green-500"></span>
-											LIVE
+											<FlaskConical class="h-3 w-3" />
+											MLflow
 										</span>
-									{:else if mlflowRunInfo.status}
-										<span
-											class="inline-flex items-center gap-1 rounded-md bg-blue-500/10 px-2 py-1 text-xs font-medium text-blue-600"
-										>
-											{mlflowRunInfo.status}
-										</span>
-									{/if}
-									{#if mlflowRunInfo.run_id}
-										<span class="text-xs text-muted-foreground">
-											Run:
-											<code
-												class="rounded bg-muted px-1"
-												title={mlflowRunInfo.run_id_full}
+										{#if mlflowRunInfo.is_live}
+											<span
+												class="inline-flex items-center gap-1 rounded-md bg-green-500/10 px-2 py-1 text-xs font-medium text-green-600"
 											>
-												{mlflowRunInfo.run_id}
-											</code>
-										</span>
-									{/if}
-									{#if mlflowRunInfo.start_time}
-										<span class="text-xs text-muted-foreground">Started: {mlflowRunInfo.start_time}</span>
-									{/if}
-								</div>
+												<span class="h-2 w-2 animate-pulse rounded-full bg-green-500"></span>
+												LIVE
+											</span>
+										{:else if mlflowRunInfo.status}
+											<span
+												class="inline-flex items-center gap-1 rounded-md bg-blue-500/10 px-2 py-1 text-xs font-medium text-blue-600"
+											>
+												{mlflowRunInfo.status}
+											</span>
+										{/if}
+										{#if mlflowRunInfo.run_id}
+											<span class="text-xs text-muted-foreground">
+												Run:
+												<code
+													class="rounded bg-muted px-1"
+													title={mlflowRunInfo.run_id_full}
+												>
+													{mlflowRunInfo.run_id}
+												</code>
+											</span>
+										{/if}
+										{#if mlflowRunInfo.start_time}
+											<span class="text-xs text-muted-foreground">Started: {mlflowRunInfo.start_time}</span>
+										{/if}
+									</div>
 
 									<div class="flex flex-1 items-center justify-center">
-										<div class="text-center">
-											<div
-												class="mx-auto flex h-32 w-32 items-center justify-center rounded-full border-8 border-blue-500 bg-blue-50 dark:bg-blue-900/20"
-											>
-												<div>
-													<span class="text-3xl font-bold text-blue-600">
-														{etaMinutes.toFixed(1)}
-													</span>
-													<p class="text-xs text-muted-foreground">minutes</p>
-												</div>
-											</div>
-											<p class="mt-4 text-sm text-muted-foreground">Estimated Time of Arrival</p>
-										</div>
+										<Plotly
+											data={etaPredictionData}
+											layout={etaPredictionLayout}
+											config={plotlyConfig}
+										/>
 									</div>
 								</div>
 							</CardContent>
@@ -758,7 +948,7 @@
 			<TabsContent value="metrics" class="mt-4 space-y-4">
 				<div class="flex items-center justify-between">
 					<h2 class="text-lg font-bold">Regression Metrics</h2>
-					<Button variant="ghost" size="sm" onclick={fetchMetrics}>
+					<Button variant="ghost" size="sm" onclick={() => fetchMetrics(true)}>
 						<RefreshCw class="h-4 w-4" />
 					</Button>
 				</div>
@@ -784,6 +974,20 @@
 						>
 							{mlflowRunInfo.status}
 						</span>
+					{/if}
+					{#if mlflowRunInfo.run_id}
+						<span class="text-xs text-muted-foreground">
+							Run:
+							<code
+								class="rounded bg-muted px-1"
+								title={mlflowRunInfo.run_id_full}
+							>
+								{mlflowRunInfo.run_id}
+							</code>
+						</span>
+					{/if}
+					{#if mlflowRunInfo.start_time}
+						<span class="text-xs text-muted-foreground">Started: {mlflowRunInfo.start_time}</span>
 					{/if}
 				</div>
 
