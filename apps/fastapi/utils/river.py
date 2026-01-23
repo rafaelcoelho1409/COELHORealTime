@@ -301,11 +301,11 @@ def clear_live_model_from_redis(project_name: str, model_name: str) -> bool:
 # MLflow Experiment Cache (avoids repeated experiment lookups)
 # =============================================================================
 _experiment_cache: Dict[str, tuple[float, Any]] = {}
-_EXPERIMENT_CACHE_TTL = 300  # 5 minutes
+_EXPERIMENT_CACHE_TTL = 30  # 30 seconds
 
 
 def get_cached_experiment(project_name: str) -> Optional[Any]:
-    """Get MLflow experiment with caching (5 minute TTL).
+    """Get MLflow experiment with caching (30 second TTL).
 
     Experiment names/IDs rarely change, so caching avoids repeated API calls.
     Returns the experiment object or None if not found.

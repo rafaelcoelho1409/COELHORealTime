@@ -1,3 +1,4 @@
+{{- if .Values.reflex }}
 {{- $appName := "reflex" -}}
 {{- $appConfig := index $.Values $appName }}
 
@@ -9,3 +10,4 @@ spec:
 {{- include "coelho-realtime.DeploymentResources" (dict "appName" $appName "root" .) | nindent 10}}
 {{- toYaml (index .Values $appName "livenessProbeSettings") | nindent 10}}
 {{- toYaml (index .Values $appName "readinessProbeSettings") | nindent 10}}
+{{- end }}

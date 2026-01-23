@@ -9,7 +9,7 @@ This module contains:
 """
 
 import reflex as rx
-from ..states.shared import SharedState, METRIC_INFO, YELLOWBRICK_INFO
+from ..states.shared import SharedState, ComponentsState, METRIC_INFO, YELLOWBRICK_INFO
 
 
 # Context titles for each project type
@@ -711,80 +711,81 @@ def batch_ml_run_and_training_box(model_key: str, project_name: str) -> rx.Compo
                 ),
                 rx.fragment()
             ),
-            # Training data options (hidden during training)
-            rx.cond(
-                SharedState.batch_training_loading[project_name],
-                rx.fragment(),
-                rx.vstack(
-                    # Mode selector (Percentage vs Max Rows)
-                    rx.hstack(
-                        rx.icon("database", size=14, color="gray"),
-                        rx.text("Data", size="1", color="gray"),
-                        rx.segmented_control.root(
-                            rx.segmented_control.item("Percentage", value="percentage"),
-                            rx.segmented_control.item("Max Rows", value="max_rows"),
-                            value=SharedState.batch_training_mode[project_name],
-                            on_change=lambda v: SharedState.set_batch_training_mode(project_name, v),
-                            size="1",
-                        ),
-                        align_items="center",
-                        spacing="2",
-                        width="100%"
+            # Training data options (hidden during training) - single row layout
+            # Uses ComponentsState (lightweight) + rx.select for fast mode switching
+            rx.hstack(
+                rx.icon("database", size=14, color="gray"),
+                rx.text("Data", size="1", color="gray"),
+                rx.select(
+                    ["Percentage", "Max Rows"],
+                    value=rx.cond(
+                        ComponentsState.batch_training_mode[project_name] == "percentage",
+                        "Percentage",
+                        "Max Rows"
                     ),
-                    # Percentage input (shown when mode is "percentage")
+                    on_change=ComponentsState.set_batch_training_mode(project_name),
+                    size="1",
+                    width="100px",
+                ),
+                # Percentage input: min 1%, max 100% (shown/hidden via CSS)
+                rx.hstack(
+                    rx.input(
+                        value=ComponentsState.batch_training_data_percentage[project_name],
+                        on_change=ComponentsState.set_batch_training_percentage(project_name),
+                        type="number",
+                        min=1,
+                        max=100,
+                        size="1",
+                        width="60px",
+                    ),
+                    rx.text("%", size="1", color="gray"),
+                    align_items="center",
+                    spacing="1",
+                    display=rx.cond(
+                        ComponentsState.batch_training_mode[project_name] == "percentage",
+                        "flex",
+                        "none"
+                    ),
+                ),
+                # Max rows input: min 1000, max delta lake total rows (shown/hidden via CSS)
+                rx.hstack(
+                    rx.input(
+                        value=ComponentsState.batch_training_max_rows[project_name],
+                        on_change=ComponentsState.set_batch_training_max_rows(project_name),
+                        type="number",
+                        min=1000,
+                        max=rx.cond(
+                            ComponentsState.batch_delta_lake_total_rows[project_name] > 0,
+                            ComponentsState.batch_delta_lake_total_rows[project_name],
+                            10000000
+                        ),
+                        size="1",
+                        width="90px",
+                    ),
                     rx.cond(
-                        SharedState.batch_training_mode[project_name] == "percentage",
-                        rx.hstack(
-                            rx.input(
-                                value=SharedState.batch_training_data_percentage[project_name],
-                                on_change=lambda v: SharedState.set_batch_training_percentage(project_name, v),
-                                type="number",
-                                min=1,
-                                max=100,
-                                size="1",
-                                width="70px",
-                            ),
-                            rx.text("%", size="1", color="gray"),
-                            rx.text(
-                                rx.cond(
-                                    SharedState.batch_training_data_percentage[project_name] < 100,
-                                    "faster",
-                                    "full"
-                                ),
-                                size="1",
-                                color="gray"
-                            ),
-                            align_items="center",
-                            spacing="2",
-                            padding_left="1.5em"
+                        ComponentsState.batch_delta_lake_total_rows[project_name] > 0,
+                        rx.text(
+                            "/ " + ComponentsState.batch_delta_lake_total_rows[project_name].to(str),
+                            size="1",
+                            color="gray"
                         ),
-                        # Max rows input (shown when mode is "max_rows")
-                        rx.hstack(
-                            rx.input(
-                                value=SharedState.batch_training_max_rows[project_name],
-                                on_change=lambda v: SharedState.set_batch_training_max_rows(project_name, v),
-                                type="number",
-                                min=100,
-                                size="1",
-                                width="100px",
-                            ),
-                            rx.text("rows", size="1", color="gray"),
-                            rx.cond(
-                                SharedState.batch_delta_lake_total_rows[project_name] > 0,
-                                rx.text(
-                                    f"/ " + SharedState.batch_delta_lake_total_rows[project_name].to(str),
-                                    size="1",
-                                    color="gray"
-                                ),
-                                rx.fragment()
-                            ),
-                            align_items="center",
-                            spacing="2",
-                            padding_left="1.5em"
-                        ),
+                        rx.fragment()
                     ),
-                    spacing="2",
-                    width="100%"
+                    align_items="center",
+                    spacing="1",
+                    display=rx.cond(
+                        ComponentsState.batch_training_mode[project_name] == "max_rows",
+                        "flex",
+                        "none"
+                    ),
+                ),
+                align_items="center",
+                spacing="2",
+                width="100%",
+                display=rx.cond(
+                    SharedState.batch_training_loading[project_name],
+                    "none",
+                    "flex"
                 ),
             ),
             rx.divider(size="4", width="100%"),
@@ -1095,80 +1096,81 @@ def batch_ml_training_box(model_key: str, project_name: str) -> rx.Component:
                 ),
                 rx.fragment()
             ),
-            # Training data options (hidden during training)
-            rx.cond(
-                SharedState.batch_training_loading[project_name],
-                rx.fragment(),
-                rx.vstack(
-                    # Mode selector (Percentage vs Max Rows)
-                    rx.hstack(
-                        rx.icon("database", size=14, color="gray"),
-                        rx.text("Data", size="1", color="gray"),
-                        rx.segmented_control.root(
-                            rx.segmented_control.item("Percentage", value="percentage"),
-                            rx.segmented_control.item("Max Rows", value="max_rows"),
-                            value=SharedState.batch_training_mode[project_name],
-                            on_change=lambda v: SharedState.set_batch_training_mode(project_name, v),
-                            size="1",
-                        ),
-                        align_items="center",
-                        spacing="2",
-                        width="100%"
+            # Training data options (hidden during training) - single row layout
+            # Uses ComponentsState (lightweight) + rx.select for fast mode switching
+            rx.hstack(
+                rx.icon("database", size=14, color="gray"),
+                rx.text("Data", size="1", color="gray"),
+                rx.select(
+                    ["Percentage", "Max Rows"],
+                    value=rx.cond(
+                        ComponentsState.batch_training_mode[project_name] == "percentage",
+                        "Percentage",
+                        "Max Rows"
                     ),
-                    # Percentage input (shown when mode is "percentage")
+                    on_change=ComponentsState.set_batch_training_mode(project_name),
+                    size="1",
+                    width="100px",
+                ),
+                # Percentage input: min 1%, max 100% (shown/hidden via CSS)
+                rx.hstack(
+                    rx.input(
+                        value=ComponentsState.batch_training_data_percentage[project_name],
+                        on_change=ComponentsState.set_batch_training_percentage(project_name),
+                        type="number",
+                        min=1,
+                        max=100,
+                        size="1",
+                        width="60px",
+                    ),
+                    rx.text("%", size="1", color="gray"),
+                    align_items="center",
+                    spacing="1",
+                    display=rx.cond(
+                        ComponentsState.batch_training_mode[project_name] == "percentage",
+                        "flex",
+                        "none"
+                    ),
+                ),
+                # Max rows input: min 1000, max delta lake total rows (shown/hidden via CSS)
+                rx.hstack(
+                    rx.input(
+                        value=ComponentsState.batch_training_max_rows[project_name],
+                        on_change=ComponentsState.set_batch_training_max_rows(project_name),
+                        type="number",
+                        min=1000,
+                        max=rx.cond(
+                            ComponentsState.batch_delta_lake_total_rows[project_name] > 0,
+                            ComponentsState.batch_delta_lake_total_rows[project_name],
+                            10000000
+                        ),
+                        size="1",
+                        width="90px",
+                    ),
                     rx.cond(
-                        SharedState.batch_training_mode[project_name] == "percentage",
-                        rx.hstack(
-                            rx.input(
-                                value=SharedState.batch_training_data_percentage[project_name],
-                                on_change=lambda v: SharedState.set_batch_training_percentage(project_name, v),
-                                type="number",
-                                min=1,
-                                max=100,
-                                size="1",
-                                width="70px",
-                            ),
-                            rx.text("%", size="1", color="gray"),
-                            rx.text(
-                                rx.cond(
-                                    SharedState.batch_training_data_percentage[project_name] < 100,
-                                    "faster",
-                                    "full"
-                                ),
-                                size="1",
-                                color="gray"
-                            ),
-                            align_items="center",
-                            spacing="2",
-                            padding_left="1.5em"
+                        ComponentsState.batch_delta_lake_total_rows[project_name] > 0,
+                        rx.text(
+                            "/ " + ComponentsState.batch_delta_lake_total_rows[project_name].to(str),
+                            size="1",
+                            color="gray"
                         ),
-                        # Max rows input (shown when mode is "max_rows")
-                        rx.hstack(
-                            rx.input(
-                                value=SharedState.batch_training_max_rows[project_name],
-                                on_change=lambda v: SharedState.set_batch_training_max_rows(project_name, v),
-                                type="number",
-                                min=100,
-                                size="1",
-                                width="100px",
-                            ),
-                            rx.text("rows", size="1", color="gray"),
-                            rx.cond(
-                                SharedState.batch_delta_lake_total_rows[project_name] > 0,
-                                rx.text(
-                                    f"/ " + SharedState.batch_delta_lake_total_rows[project_name].to(str),
-                                    size="1",
-                                    color="gray"
-                                ),
-                                rx.fragment()
-                            ),
-                            align_items="center",
-                            spacing="2",
-                            padding_left="1.5em"
-                        ),
+                        rx.fragment()
                     ),
-                    spacing="2",
-                    width="100%"
+                    align_items="center",
+                    spacing="1",
+                    display=rx.cond(
+                        ComponentsState.batch_training_mode[project_name] == "max_rows",
+                        "flex",
+                        "none"
+                    ),
+                ),
+                align_items="center",
+                spacing="2",
+                width="100%",
+                display=rx.cond(
+                    SharedState.batch_training_loading[project_name],
+                    "none",
+                    "flex"
                 ),
             ),
             rx.divider(size="4", width="100%"),

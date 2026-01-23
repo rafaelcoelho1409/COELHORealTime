@@ -1,0 +1,8 @@
+apiVersion: v1
+{{- include "coelho-realtime.ConfigMapSettings" (dict "appName" "sveltekit" "root" .) | nindent 0}}
+data:
+  {{- include "coelho-realtime.commonEnvVars" . | nindent 2 }}
+  # SvelteKit configuration
+  NODE_ENV: "development"
+  # FastAPI URL for API calls (uses Skaffold port-forward)
+  PUBLIC_FASTAPI_URL: "http://localhost:8001"

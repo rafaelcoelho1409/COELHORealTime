@@ -1,0 +1,119 @@
+{
+  "project": "E-Commerce Customer Interactions",
+  "model": "DBSTREAM (Incremental) / KMeans (Batch)",
+  "task": "Clustering",
+  "metrics": {
+    "silhouette": {
+      "name": "Silhouette Coefficient",
+      "formula": "$$s(i) = \\frac{b(i) - a(i)}{\\max\\{a(i), b(i)\\}}$$",
+      "explanation": "Measures how similar a point is to its own cluster (cohesion) compared to other clusters (separation). a(i) is mean intra-cluster distance, b(i) is mean nearest-cluster distance.",
+      "context": "**Primary metric for clustering quality**. Range: [-1, 1]. A value near 1 indicates the point is well-matched to its cluster and poorly-matched to neighboring clusters. Near 0 means the point is on or very close to the decision boundary. Negative values indicate potential misclassification. **Higher is better**.",
+      "range": "-1 to 1",
+      "optimal": "Higher is better (closer to 1)",
+      "docs_url": {
+        "incremental": "https://riverml.xyz/latest/api/metrics/Silhouette/",
+        "batch": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.silhouette_score.html"
+      }
+    },
+    "rolling_silhouette": {
+      "name": "Rolling Silhouette",
+      "formula": "$$\\text{Rolling Silhouette}_t = \\frac{1}{w}\\sum_{i=t-w}^{t}s(i)$$",
+      "explanation": "Silhouette calculated over a sliding window of the most recent samples. Used to detect concept drift in clustering quality.",
+      "context": "With **window_size=1000**, monitors recent clustering quality. A **sudden decrease** indicates **concept drift** - customer behavior patterns may have changed. Essential for **real-time clustering** where customer segments evolve. **Higher and stable is better**.",
+      "range": "-1 to 1",
+      "optimal": "Higher and stable is better",
+      "docs_url": {
+        "incremental": "https://riverml.xyz/latest/api/metrics/Silhouette/"
+      }
+    },
+    "time_rolling_silhouette": {
+      "name": "Time Rolling Silhouette",
+      "formula": "$$\\text{TimeRolling Silhouette}_t = \\frac{1}{|W_t|}\\sum_{i \\in W_t}s(i), \\quad W_t = \\{i : t_i \\in [t - \\Delta t, t]\\}$$",
+      "explanation": "Silhouette over a time-based window (last 5 minutes). Sample count varies based on traffic volume.",
+      "context": "With **period=5 minutes**, shows clustering quality for **recent real-world time**. Unlike sample-based rolling, adapts to varying traffic volumes. Sudden drop means customer patterns changed in the last 5 minutes. **Higher and stable is better**.",
+      "range": "-1 to 1",
+      "optimal": "Higher and stable is better",
+      "docs_url": {
+        "incremental": "https://riverml.xyz/latest/api/metrics/Silhouette/"
+      }
+    },
+    "n_clusters": {
+      "name": "Number of Clusters",
+      "formula": "$$n_{clusters} = |\\{c_1, c_2, ..., c_k\\}|$$",
+      "explanation": "Count of macro clusters formed by the clustering algorithm.",
+      "context": "**Cluster count evolution**. For DBSTREAM: dynamically creates/removes clusters based on data density. For KMeans: fixed at training time. Too few clusters may mean over-generalization, too many may indicate noise or fine-grained segments. **Stable and interpretable count is better**.",
+      "range": "1 to infinity",
+      "optimal": "Stable and interpretable",
+      "docs_url": {
+        "incremental": "https://riverml.xyz/latest/api/cluster/DBSTREAM/",
+        "batch": "https://scikit-learn.org/stable/modules/clustering.html"
+      }
+    },
+    "n_micro_clusters": {
+      "name": "Number of Micro Clusters",
+      "formula": "$$n_{micro} = |\\{mc_1, mc_2, ..., mc_m\\}|$$",
+      "explanation": "Count of micro clusters maintained by DBSTREAM. Micro clusters are the fundamental units before macro cluster formation.",
+      "context": "**Internal cluster representation** (DBSTREAM only). Micro clusters capture local density before being merged into macro clusters. A high ratio of micro to macro clusters indicates well-separated customer segments. **Stable and proportional to data is better**.",
+      "range": "0 to infinity",
+      "optimal": "Stable and proportional",
+      "docs_url": {
+        "incremental": "https://riverml.xyz/latest/api/cluster/DBSTREAM/"
+      }
+    },
+    "silhouette_score": {
+      "name": "Silhouette Score (Batch)",
+      "formula": "$$S = \\frac{1}{n}\\sum_{i=1}^{n}\\frac{b(i) - a(i)}{\\max\\{a(i), b(i)\\}}$$",
+      "explanation": "Mean silhouette coefficient across all samples. Measures overall clustering quality by comparing intra-cluster cohesion to inter-cluster separation.",
+      "context": "**Primary quality metric for KMeans**. Range: [-1, 1]. Values near **1** indicate dense, well-separated clusters. Values near **0** indicate overlapping clusters. Negative values indicate samples assigned to wrong clusters. For customer segmentation, aim for **> 0.3** for acceptable segmentation, **> 0.5** for good segmentation.",
+      "range": "-1 to 1",
+      "optimal": "Higher is better (> 0.3 acceptable)",
+      "docs_url": {
+        "batch": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.silhouette_score.html"
+      }
+    },
+    "calinski_harabasz_score": {
+      "name": "Calinski-Harabasz Index",
+      "formula": "$$CH = \\frac{\\text{tr}(B_k)}{\\text{tr}(W_k)} \\times \\frac{n - k}{k - 1}$$",
+      "explanation": "Ratio of between-cluster dispersion (B_k) to within-cluster dispersion (W_k). Also known as the Variance Ratio Criterion.",
+      "context": "**Higher values indicate better-defined clusters**. Useful for comparing different numbers of clusters (k). No absolute threshold - compare across different k values. Peak indicates optimal cluster count. For customer segmentation, look for the **elbow point** where adding more clusters doesn't significantly improve the score.",
+      "range": "0 to infinity",
+      "optimal": "Higher is better",
+      "docs_url": {
+        "batch": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.calinski_harabasz_score.html"
+      }
+    },
+    "davies_bouldin_score": {
+      "name": "Davies-Bouldin Index",
+      "formula": "$$DB = \\frac{1}{k}\\sum_{i=1}^{k}\\max_{j \\neq i}\\left(\\frac{\\sigma_i + \\sigma_j}{d(c_i, c_j)}\\right)$$",
+      "explanation": "Average similarity between each cluster and its most similar cluster. Lower values indicate clusters that are more separated and less similar to each other.",
+      "context": "**Lower values indicate better separation**. Measures the worst-case similarity between clusters. Values close to **0** indicate well-separated clusters. Unlike Silhouette and Calinski-Harabasz, this metric is **lower is better**. For customer segmentation, aim for **< 1.0** for reasonable separation.",
+      "range": "0 to infinity",
+      "optimal": "Lower is better (< 1.0 good)",
+      "docs_url": {
+        "batch": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.davies_bouldin_score.html"
+      }
+    },
+    "inertia": {
+      "name": "Inertia (WCSS)",
+      "formula": "$$I = \\sum_{i=1}^{n}\\min_{c_j}\\|x_i - c_j\\|^2$$",
+      "explanation": "Within-Cluster Sum of Squares. Sum of squared distances from each point to its assigned cluster centroid. Also known as WCSS.",
+      "context": "**Lower values indicate tighter clusters**. Primary metric used by KMeans during optimization. Decreases as k increases (more clusters = lower inertia). Use the **elbow method**: plot inertia vs k and look for the 'elbow' where the rate of decrease slows. Note: Raw value depends on data scale and sample size.",
+      "range": "0 to infinity",
+      "optimal": "Lower is better (use elbow method)",
+      "docs_url": {
+        "batch": "https://scikit-learn.org/stable/modules/generated/sklearn.cluster.KMeans.html"
+      }
+    },
+    "preprocessing_time_seconds": {
+      "name": "Preprocessing Time",
+      "formula": "$$t_{preprocessing} = t_{end} - t_{start}$$",
+      "explanation": "Time taken to load data from Delta Lake, apply feature engineering, and prepare the data for clustering.",
+      "context": "**Performance metric for batch training pipeline**. Includes: Delta Lake query time, categorical encoding (DENSE_RANK), feature scaling (StandardScaler), and data transformation. Useful for monitoring pipeline efficiency. **Lower is better** for production pipelines.",
+      "range": "0 to infinity",
+      "optimal": "Lower is better",
+      "docs_url": {
+        "batch": "https://scikit-learn.org/stable/modules/preprocessing.html"
+      }
+    }
+  }
+}

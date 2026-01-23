@@ -764,7 +764,7 @@ class ETAState(SharedState):
             )
             result = response.json()
             print(f"Batch ETA Prediction result: {result}")
-            eta_seconds = result.get("Estimated Time of Arrival", 0.0)
+            eta_seconds = result.get("estimated_travel_time_seconds", 0.0)
             eta_minutes = round(eta_seconds / 60, 1)
 
             async with self:

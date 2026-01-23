@@ -100,7 +100,7 @@ mlflow_cache = MLflowMetricsCache(ttl_seconds=5)  # Short TTL for responsive liv
 # Experiment Cache
 # =============================================================================
 _experiment_cache: Dict[str, tuple[float, any]] = {}
-_EXPERIMENT_CACHE_TTL = 300  # 5 minutes
+_EXPERIMENT_CACHE_TTL = 30  # 30 seconds
 
 
 def get_cached_experiment(project_name: str):
@@ -552,7 +552,7 @@ async def get_mlflow_metrics(request: MLflowMetricsRequest):
 # Cluster Artifact Cache
 # =============================================================================
 _cluster_cache: dict = {}
-_CLUSTER_CACHE_TTL = 60  # 1 minute cache
+_CLUSTER_CACHE_TTL = 30  # 30 seconds cache
 
 
 # =============================================================================

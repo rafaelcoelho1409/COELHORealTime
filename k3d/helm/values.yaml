@@ -111,7 +111,7 @@ kafka-producers:
       cpu: "250m"
 
 
-# NOTE: Streamlit has been removed - fully replaced by Reflex
+# NOTE: Streamlit has been removed - replaced by SvelteKit
 
 
 # MLflow subchart configuration (community-charts/mlflow)
@@ -173,42 +173,84 @@ mlflow:
     AWS_DEFAULT_REGION: "us-east-1"
 
 
-reflex:
-  image: coelho-realtime-reflex:latest
+# =============================================================================
+# DISABLED: Reflex frontend service
+# Replaced by SvelteKit frontend (apps/sveltekit/) on port 5173
+# Code remains in apps/reflex/ as reference
+# =============================================================================
+# reflex:
+#   image: coelho-realtime-reflex:latest
+#   imagePullPolicy: IfNotPresent
+#   replicas: 1
+#   resources:
+#     requests:
+#       memory: "2Gi"
+#       cpu: "1000m"
+#     limits:
+#       memory: "4Gi"
+#       cpu: "2000m"
+#   portsSettings:
+#     ports:
+#       - name: frontend
+#         port: 3000
+#         targetPort: 3000
+#         nodePort: 30004
+#         protocol: TCP
+#       - name: backend
+#         port: 8000
+#         targetPort: 8000
+#         nodePort: 30005
+#         protocol: TCP
+#     type: LoadBalancer
+#   livenessProbeSettings:
+#     livenessProbe:
+#       tcpSocket:
+#         port: 3000
+#       initialDelaySeconds: 120
+#       periodSeconds: 20
+#       failureThreshold: 5
+#   readinessProbeSettings:
+#     readinessProbe:
+#       tcpSocket:
+#         port: 3000
+#       initialDelaySeconds: 90
+#       periodSeconds: 10
+#       failureThreshold: 6
+# =============================================================================
+
+
+# SvelteKit frontend (primary frontend)
+sveltekit:
+  image: coelho-realtime-sveltekit:latest
   imagePullPolicy: IfNotPresent
   replicas: 1
   resources:
     requests:
-      memory: "2Gi"
-      cpu: "1000m"
+      memory: "1Gi"
+      cpu: "250m"
     limits:
-      memory: "4Gi"
-      cpu: "2000m"
+      memory: "2Gi"  # Vite needs ~1.5GB to optimize Plotly.js
+      cpu: "500m"
   portsSettings:
     ports:
-      - name: frontend
-        port: 3000
-        targetPort: 3000
-        nodePort: 30004
-        protocol: TCP
-      - name: backend
-        port: 8000
-        targetPort: 8000
-        nodePort: 30005
+      - name: http
+        port: 5173
+        targetPort: 5173
+        nodePort: 30173
         protocol: TCP
     type: LoadBalancer
   livenessProbeSettings:
     livenessProbe:
       tcpSocket:
-        port: 3000
-      initialDelaySeconds: 120
+        port: 5173
+      initialDelaySeconds: 60
       periodSeconds: 20
       failureThreshold: 5
   readinessProbeSettings:
     readinessProbe:
       tcpSocket:
-        port: 3000
-      initialDelaySeconds: 90
+        port: 5173
+      initialDelaySeconds: 30
       periodSeconds: 10
       failureThreshold: 6
 
@@ -298,10 +340,10 @@ fastapi:
   replicas: 1
   resources:
     requests:
-      memory: "2Gi"
+      memory: "4Gi"
       cpu: "1000m"
     limits:
-      memory: "4Gi"
+      memory: "8Gi"
       cpu: "2000m"
   portsSettings:
     ports:
@@ -330,7 +372,7 @@ fastapi:
 
 
 # Redis configuration (Bitnami Redis chart)
-# Used by Reflex for state management in production
+# Available for application state management if needed
 redis:
   enabled: true
   architecture: standalone  # Use 'replication' for high availability
@@ -348,7 +390,7 @@ redis:
       limits:
         memory: "512Mi"
         cpu: "250m"
-  # Redis configuration for Reflex optimization
+  # Redis configuration for application optimization
   commonConfiguration: |-
     # Enable AOF persistence for better durability
     appendonly yes
@@ -488,7 +530,7 @@ postgresql:
 # kube-prometheus-stack configuration (Prometheus + Grafana + Alertmanager)
 # Provides comprehensive monitoring and observability for the cluster
 # Port mappings changed to avoid conflicts:
-#   - Grafana: 3000 → 3001 (Reflex uses 3000)
+#   - Grafana: 3000 → 3001 (port 3000 reserved for potential future use)
 #   - Alertmanager: 9093 → 9094 (Kafka controller uses 9093)
 # Integrations:
 #   - Grafana → PostgreSQL (shared with MLflow)
@@ -550,7 +592,7 @@ kube-prometheus-stack:
     # Admin credentials
     adminUser: admin
     adminPassword: admin123
-    # Service configuration - Port 3001 to avoid conflict with Reflex (3000)
+    # Service configuration - Port 3001 to avoid conflict on port 3000
     service:
       type: NodePort
       port: 3001
@@ -933,14 +975,14 @@ spark:
     tag: "4.0.0"
   # Master configuration
   master:
-    # Resource limits for local k3d
+    # Resource limits for local k3d (reduced to save CPU)
     resources:
       requests:
+        memory: "512Mi"
+        cpu: "100m"
+      limits:
         memory: "1Gi"
         cpu: "500m"
-      limits:
-        memory: "2Gi"
-        cpu: "1000m"
     # Extra environment variables for Spark configuration
     extraEnvVars:
       # Delta Lake and S3 configuration
@@ -993,14 +1035,14 @@ spark:
   worker:
     # Single worker for local development
     replicaCount: 1
-    # Resource limits
+    # Resource limits (reduced to save CPU)
     resources:
       requests:
+        memory: "512Mi"
+        cpu: "100m"
+      limits:
         memory: "2Gi"
         cpu: "1000m"
-      limits:
-        memory: "4Gi"
-        cpu: "2000m"
     # Same init container for workers
     extraEnvVars:
       - name: SPARK_EXTRA_CLASSPATH

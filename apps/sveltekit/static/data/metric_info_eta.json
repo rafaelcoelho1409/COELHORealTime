@@ -1,0 +1,259 @@
+{
+  "project": "Estimated Time of Arrival",
+  "model_incremental": "ARFRegressor (Adaptive Random Forest)",
+  "model_batch": "CatBoostRegressor",
+  "task": "Regression",
+  "metrics": {
+    "mae": {
+      "name": "Mean Absolute Error (MAE)",
+      "formula": "$$\\text{MAE} = \\frac{1}{n}\\sum_{i=1}^{n}|y_i - \\hat{y}_i|$$",
+      "explanation": "Average of absolute differences between predicted and actual travel times. Same units as target (seconds).",
+      "context": "**Primary metric for ETA prediction**. Most interpretable - a MAE of 60 means predictions are off by 60 seconds on average. Not sensitive to outliers.",
+      "range": "0 to infinity",
+      "optimal": "Lower is better",
+      "docs_url": {
+        "incremental": "https://riverml.xyz/latest/api/metrics/MAE/",
+        "batch": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.mean_absolute_error.html"
+      }
+    },
+    "mean_absolute_error": {
+      "name": "Mean Absolute Error (MAE)",
+      "formula": "$$\\text{MAE} = \\frac{1}{n}\\sum_{i=1}^{n}|y_i - \\hat{y}_i|$$",
+      "explanation": "Average of absolute differences between predicted and actual travel times. Same units as target (seconds).",
+      "context": "**Primary metric for ETA prediction**. Most interpretable - a MAE of 60s means predictions are off by 1 minute on average. Robust to outliers unlike RMSE.",
+      "range": "0 to infinity (seconds)",
+      "optimal": "Lower is better",
+      "docs_url": {
+        "incremental": "https://riverml.xyz/latest/api/metrics/MAE/",
+        "batch": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.mean_absolute_error.html"
+      }
+    },
+    "rmse": {
+      "name": "Root Mean Squared Error (RMSE)",
+      "formula": "$$\\text{RMSE} = \\sqrt{\\frac{1}{n}\\sum_{i=1}^{n}(y_i - \\hat{y}_i)^2}$$",
+      "explanation": "Square root of the average squared differences. Penalizes large errors more heavily than MAE.",
+      "context": "**Penalizes late arrivals more than early arrivals** if they're large errors. Useful when big delays are especially problematic (e.g., time-sensitive deliveries). RMSE > MAE indicates presence of outliers.",
+      "range": "0 to infinity",
+      "optimal": "Lower is better",
+      "docs_url": {
+        "incremental": "https://riverml.xyz/latest/api/metrics/RMSE/",
+        "batch": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.root_mean_squared_error.html"
+      }
+    },
+    "root_mean_squared_error": {
+      "name": "Root Mean Squared Error (RMSE)",
+      "formula": "$$\\text{RMSE} = \\sqrt{\\frac{1}{n}\\sum_{i=1}^{n}(y_i - \\hat{y}_i)^2}$$",
+      "explanation": "Square root of the average squared differences. Same units as target (seconds). Penalizes large errors more than MAE.",
+      "context": "If RMSE >> MAE, the model has **high-variance errors** (some trips are way off). For ETA, RMSE helps identify if the model struggles with certain trip types (long hauls, rush hour).",
+      "range": "0 to infinity (seconds)",
+      "optimal": "Lower is better",
+      "docs_url": {
+        "incremental": "https://riverml.xyz/latest/api/metrics/RMSE/",
+        "batch": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.root_mean_squared_error.html"
+      }
+    },
+    "mse": {
+      "name": "Mean Squared Error (MSE)",
+      "formula": "$$\\text{MSE} = \\frac{1}{n}\\sum_{i=1}^{n}(y_i - \\hat{y}_i)^2$$",
+      "explanation": "Average of squared differences between predicted and actual values. Units are squared (seconds\u00b2).",
+      "context": "**Used in optimization algorithms** as the loss function (differentiable). Less interpretable than MAE/RMSE since units are squared. RMSE = sqrt(MSE).",
+      "range": "0 to infinity",
+      "optimal": "Lower is better",
+      "docs_url": {
+        "incremental": "https://riverml.xyz/latest/api/metrics/MSE/",
+        "batch": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.mean_squared_error.html"
+      }
+    },
+    "mean_squared_error": {
+      "name": "Mean Squared Error (MSE)",
+      "formula": "$$\\text{MSE} = \\frac{1}{n}\\sum_{i=1}^{n}(y_i - \\hat{y}_i)^2$$",
+      "explanation": "Average of squared errors. Units are seconds\u00b2. Heavily penalizes large prediction errors.",
+      "context": "Used as **loss function during training**. For ETA, large MSE indicates the model struggles with extreme cases (very long or very short trips).",
+      "range": "0 to infinity (seconds\u00b2)",
+      "optimal": "Lower is better",
+      "docs_url": {
+        "incremental": "https://riverml.xyz/latest/api/metrics/MSE/",
+        "batch": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.mean_squared_error.html"
+      }
+    },
+    "r2": {
+      "name": "R-Squared (R\u00b2)",
+      "formula": "$$R^2 = 1 - \\frac{\\sum_{i=1}^{n}(y_i - \\hat{y}_i)^2}{\\sum_{i=1}^{n}(y_i - \\bar{y})^2}$$",
+      "explanation": "Proportion of variance in travel time explained by the model. Compares model to a baseline that always predicts the mean.",
+      "context": "**Goodness of fit measure**. R\u00b2=1 means perfect predictions, R\u00b2=0 means model equals mean baseline, R\u00b2<0 means worse than mean. For ETA, R\u00b2>0.8 is typically good.",
+      "range": "-infinity to 1",
+      "optimal": "Higher is better (closer to 1)",
+      "docs_url": {
+        "incremental": "https://riverml.xyz/latest/api/metrics/R2/",
+        "batch": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.r2_score.html"
+      }
+    },
+    "r2_score": {
+      "name": "R\u00b2 Score (Coefficient of Determination)",
+      "formula": "$$R^2 = 1 - \\frac{SS_{res}}{SS_{tot}} = 1 - \\frac{\\sum(y_i - \\hat{y}_i)^2}{\\sum(y_i - \\bar{y})^2}$$",
+      "explanation": "Proportion of variance in travel time explained by the model features. 1.0 = perfect, 0 = same as mean prediction.",
+      "context": "For ETA prediction, R\u00b2 > 0.8 is good, > 0.9 is excellent. **Negative R\u00b2** means the model is worse than simply predicting the average travel time.",
+      "range": "-infinity to 1",
+      "optimal": "Higher is better (closer to 1)",
+      "docs_url": {
+        "incremental": "https://riverml.xyz/latest/api/metrics/R2/",
+        "batch": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.r2_score.html"
+      }
+    },
+    "mape": {
+      "name": "Mean Absolute Percentage Error (MAPE)",
+      "formula": "$$\\text{MAPE} = \\frac{100\\%}{n}\\sum_{i=1}^{n}\\left|\\frac{y_i - \\hat{y}_i}{y_i}\\right|$$",
+      "explanation": "Average percentage error relative to actual values. Scale-independent metric.",
+      "context": "**Allows comparison across different trip lengths**. A 10% MAPE means predictions are 10% off on average. Warning: undefined when actual=0.",
+      "range": "0 to infinity (%)",
+      "optimal": "Lower is better",
+      "docs_url": {
+        "batch": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.mean_absolute_percentage_error.html"
+      }
+    },
+    "mean_absolute_percentage_error": {
+      "name": "Mean Absolute Percentage Error (MAPE)",
+      "formula": "$$\\text{MAPE} = \\frac{100\\%}{n}\\sum_{i=1}^{n}\\left|\\frac{y_i - \\hat{y}_i}{y_i}\\right|$$",
+      "explanation": "Average percentage deviation from actual travel time. Scale-independent, allowing comparison across trip lengths.",
+      "context": "**Industry standard for ETA**. MAPE < 10% is excellent, < 20% is good. Allows comparing 5-minute trips vs 2-hour trips on equal footing.",
+      "range": "0 to infinity (%)",
+      "optimal": "Lower is better (< 20%)",
+      "docs_url": {
+        "batch": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.mean_absolute_percentage_error.html"
+      }
+    },
+    "smape": {
+      "name": "Symmetric MAPE (SMAPE)",
+      "formula": "$$\\text{SMAPE} = \\frac{100\\%}{n}\\sum_{i=1}^{n}\\frac{|y_i - \\hat{y}_i|}{(|y_i| + |\\hat{y}_i|)/2}$$",
+      "explanation": "Symmetric version of MAPE that treats over-predictions and under-predictions equally.",
+      "context": "**More robust than MAPE** - bounded between 0-200% and handles edge cases better. Preferred for ETA forecasting when actual values can be small.",
+      "range": "0 to 200%",
+      "optimal": "Lower is better",
+      "docs_url": {
+        "incremental": "https://riverml.xyz/latest/api/metrics/SMAPE/"
+      }
+    },
+    "symmetric_mean_absolute_percentage_error": {
+      "name": "Symmetric MAPE (SMAPE)",
+      "formula": "$$\\text{SMAPE} = \\frac{200\\%}{n}\\sum_{i=1}^{n}\\frac{|y_i - \\hat{y}_i|}{|y_i| + |\\hat{y}_i|}$$",
+      "explanation": "Symmetric percentage error that treats over and under-predictions equally. Bounded 0-200%.",
+      "context": "More stable than MAPE for **short trips** where small absolute errors can cause huge MAPE. SMAPE < 20% is good for ETA.",
+      "range": "0 to 200%",
+      "optimal": "Lower is better",
+      "docs_url": {
+        "incremental": "https://riverml.xyz/latest/api/metrics/SMAPE/"
+      }
+    },
+    "median_absolute_error": {
+      "name": "Median Absolute Error (MedAE)",
+      "formula": "$$\\text{MedAE} = \\text{median}(|y_1 - \\hat{y}_1|, ..., |y_n - \\hat{y}_n|)$$",
+      "explanation": "The median (50th percentile) of all absolute errors. Extremely robust to outliers.",
+      "context": "**Robust central tendency measure**. If MedAE << MAE, you have outlier predictions dragging up the average. For ETA, shows the 'typical' prediction error ignoring extreme cases.",
+      "range": "0 to infinity (seconds)",
+      "optimal": "Lower is better",
+      "docs_url": {
+        "batch": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.median_absolute_error.html"
+      }
+    },
+    "max_error": {
+      "name": "Maximum Error",
+      "formula": "$$\\text{MaxError} = \\max(|y_1 - \\hat{y}_1|, ..., |y_n - \\hat{y}_n|)$$",
+      "explanation": "The single largest absolute prediction error in the dataset. Captures worst-case performance.",
+      "context": "**Worst-case scenario metric**. For ETA, this is the trip where the model failed most dramatically. Useful for identifying edge cases - a max error of 30 minutes might indicate traffic incidents or data issues.",
+      "range": "0 to infinity (seconds)",
+      "optimal": "Lower is better",
+      "docs_url": {
+        "batch": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.max_error.html"
+      }
+    },
+    "explained_variance_score": {
+      "name": "Explained Variance Score",
+      "formula": "$$\\text{ExpVar} = 1 - \\frac{\\text{Var}(y - \\hat{y})}{\\text{Var}(y)}$$",
+      "explanation": "Proportion of target variance captured by predictions. Similar to R\u00b2 but doesn't penalize biased predictions.",
+      "context": "Unlike R\u00b2, **allows systematic bias**. If ExpVar >> R\u00b2, the model is accurate but consistently over/under-predicting. For ETA, this could mean always adding 2 minutes buffer.",
+      "range": "-infinity to 1",
+      "optimal": "Higher is better (closer to 1)",
+      "docs_url": {
+        "batch": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.explained_variance_score.html"
+      }
+    },
+    "d2_absolute_error_score": {
+      "name": "D\u00b2 Absolute Error Score",
+      "formula": "$$D^2_{\\text{abs}} = 1 - \\frac{\\sum|y_i - \\hat{y}_i|}{\\sum|y_i - \\text{median}(y)|}$$",
+      "explanation": "Deviance-based metric using absolute error. Compares model to median prediction baseline.",
+      "context": "**Robust R\u00b2 alternative** using L1 loss. For ETA with outliers, D\u00b2 abs gives a fairer assessment than R\u00b2 which is dominated by extreme errors.",
+      "range": "-infinity to 1",
+      "optimal": "Higher is better (closer to 1)",
+      "docs_url": {
+        "batch": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.d2_absolute_error_score.html"
+      }
+    },
+    "d2_pinball_score": {
+      "name": "D\u00b2 Pinball Score",
+      "formula": "$$D^2_{\\text{pinball}} = 1 - \\frac{L_{\\alpha}(y, \\hat{y})}{L_{\\alpha}(y, q_{\\alpha})}$$",
+      "explanation": "Quantile regression metric. At alpha=0.5, equivalent to D\u00b2 absolute error score.",
+      "context": "Useful for **asymmetric loss scenarios**. For ETA, you might want to penalize under-predictions (arriving late) more than over-predictions (arriving early).",
+      "range": "-infinity to 1",
+      "optimal": "Higher is better (closer to 1)",
+      "docs_url": {
+        "batch": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.d2_pinball_score.html"
+      }
+    },
+    "d2_tweedie_score": {
+      "name": "D\u00b2 Tweedie Score",
+      "formula": "$$D^2_{\\text{tweedie}} = 1 - \\frac{d_{\\text{tweedie}}(y, \\hat{y})}{d_{\\text{tweedie}}(y, \\bar{y})}$$",
+      "explanation": "Deviance metric for Tweedie distribution. At power=0, equivalent to Gaussian deviance (MSE-based).",
+      "context": "For ETA with **non-negative targets** and potential right skew (some very long trips), Tweedie can be more appropriate than Gaussian assumptions.",
+      "range": "-infinity to 1",
+      "optimal": "Higher is better (closer to 1)",
+      "docs_url": {
+        "batch": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.d2_tweedie_score.html"
+      }
+    },
+    "rmsle": {
+      "name": "Root Mean Squared Log Error",
+      "formula": "$$\\text{RMSLE} = \\sqrt{\\frac{1}{n}\\sum_{i=1}^{n}(\\log(y_i + 1) - \\log(\\hat{y}_i + 1))^2}$$",
+      "explanation": "RMSE on log-transformed values. Penalizes under-predictions more than over-predictions.",
+      "context": "**Useful when relative errors matter more than absolute**. For ETA, penalizes predicting too short more than too long.",
+      "range": "0 to infinity",
+      "optimal": "Lower is better",
+      "docs_url": {
+        "incremental": "https://riverml.xyz/latest/api/metrics/RMSLE/",
+        "batch": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.root_mean_squared_log_error.html"
+      }
+    },
+    "rolling_mae": {
+      "name": "Rolling MAE",
+      "formula": "$$\\text{Rolling MAE}_t = \\frac{1}{w}\\sum_{i=t-w}^{t}|y_i - \\hat{y}_i|$$",
+      "explanation": "MAE calculated over a sliding window of the most recent samples. Used to detect concept drift.",
+      "context": "Monitors recent model accuracy. A **sudden increase** indicates **concept drift** - traffic patterns may have changed.",
+      "range": "0 to infinity",
+      "optimal": "Lower and stable is better",
+      "docs_url": {
+        "incremental": "https://riverml.xyz/latest/api/metrics/MAE/"
+      }
+    },
+    "rolling_rmse": {
+      "name": "Rolling RMSE",
+      "formula": "$$\\text{Rolling RMSE}_t = \\sqrt{\\frac{1}{w}\\sum_{i=t-w}^{t}(y_i - \\hat{y}_i)^2}$$",
+      "explanation": "RMSE calculated over a sliding window. Detects drift in large prediction errors.",
+      "context": "If Rolling RMSE spikes while Rolling MAE is stable, it indicates **occasional large outliers**.",
+      "range": "0 to infinity",
+      "optimal": "Lower and stable is better",
+      "docs_url": {
+        "incremental": "https://riverml.xyz/latest/api/metrics/RMSE/"
+      }
+    },
+    "time_rolling_mae": {
+      "name": "Time Rolling MAE",
+      "formula": "$$\\text{TimeRolling MAE}_t = \\frac{1}{|W_t|}\\sum_{i \\in W_t}|y_i - \\hat{y}_i|$$",
+      "explanation": "MAE over a time-based window (last 5 minutes). Sample count varies based on traffic volume.",
+      "context": "Shows model accuracy for **recent real-world time**. Adapts to varying traffic volumes.",
+      "range": "0 to infinity",
+      "optimal": "Lower and stable is better",
+      "docs_url": {
+        "incremental": "https://riverml.xyz/latest/api/metrics/MAE/"
+      }
+    }
+  }
+}

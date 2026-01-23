@@ -199,5 +199,5 @@ SQL_QUERY_TIMEOUT = 60  # seconds
 # Cache TTL Settings
 # =============================================================================
 MLFLOW_METRICS_CACHE_TTL = 30  # seconds
-MODEL_CACHE_TTL = 300  # 5 minutes
-CLUSTER_CACHE_TTL = 60  # 1 minute
+MODEL_CACHE_TTL = 30  # seconds
+CLUSTER_CACHE_TTL = 30  # seconds

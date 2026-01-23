@@ -158,6 +158,78 @@ def parse_json_field(data: dict, key: str) -> dict:
 
 
 # =============================================================================
+# ComponentsState - Lightweight state for fast UI interactions
+# =============================================================================
+class ComponentsState(rx.State):
+    """Lightweight state for UI components that need fast updates.
+
+    Separated from SharedState to avoid recomputing all computed vars
+    on simple UI interactions like mode switching.
+    """
+
+    # Batch training mode: "percentage" or "max_rows"
+    batch_training_mode: dict[str, str] = {
+        "Transaction Fraud Detection": "max_rows",
+        "Estimated Time of Arrival": "max_rows",
+        "E-Commerce Customer Interactions": "max_rows"
+    }
+
+    # Batch training data percentage (1-100)
+    batch_training_data_percentage: dict[str, int] = {
+        "Transaction Fraud Detection": 100,
+        "Estimated Time of Arrival": 100,
+        "E-Commerce Customer Interactions": 100
+    }
+
+    # Batch training max rows
+    batch_training_max_rows: dict[str, int] = {
+        "Transaction Fraud Detection": 10000,
+        "Estimated Time of Arrival": 10000,
+        "E-Commerce Customer Interactions": 10000
+    }
+
+    # Delta Lake total rows (for max validation)
+    batch_delta_lake_total_rows: dict[str, int] = {
+        "Transaction Fraud Detection": 0,
+        "Estimated Time of Arrival": 0,
+        "E-Commerce Customer Interactions": 0
+    }
+
+    @rx.event
+    def set_batch_training_mode(self, project_name: str, mode: str):
+        """Set the training mode: 'percentage' or 'max_rows'."""
+        # Convert display values from dropdown to internal values
+        mode_map = {"Percentage": "percentage", "Max Rows": "max_rows"}
+        internal_mode = mode_map.get(mode, mode)
+        if internal_mode in ("percentage", "max_rows"):
+            self.batch_training_mode[project_name] = internal_mode
+
+    @rx.event
+    def set_batch_training_percentage(self, project_name: str, value: str):
+        """Set the training data percentage for a project (1-100)."""
+        try:
+            percentage = int(value)
+            if 1 <= percentage <= 100:
+                self.batch_training_data_percentage[project_name] = percentage
+        except (ValueError, TypeError):
+            pass
+
+    @rx.event
+    def set_batch_training_max_rows(self, project_name: str, value: str):
+        """Set the maximum training rows for a project."""
+        try:
+            max_rows = int(value)
+            delta_total = self.batch_delta_lake_total_rows.get(project_name, 10000000)
+            if max_rows < 1000:
+                max_rows = 1000
+            elif max_rows > delta_total and delta_total > 0:
+                max_rows = delta_total
+            self.batch_training_max_rows[project_name] = max_rows
+        except (ValueError, TypeError):
+            pass
+
+
+# =============================================================================
 # SharedState - Base state class with common variables and methods
 # =============================================================================
 class SharedState(rx.State):
@@ -345,30 +417,8 @@ class SharedState(rx.State):
         "E-Commerce Customer Interactions": {}
     }
 
-    # Batch training data percentage (0-100, where 100 = use all data)
-    batch_training_data_percentage: dict[str, int] = {
-        "Transaction Fraud Detection": 100,
-        "Estimated Time of Arrival": 100,
-        "E-Commerce Customer Interactions": 100
-    }
-    # Batch training mode: "percentage" or "max_rows"
-    batch_training_mode: dict[str, str] = {
-        "Transaction Fraud Detection": "percentage",
-        "Estimated Time of Arrival": "percentage",
-        "E-Commerce Customer Interactions": "percentage"
-    }
-    # Batch training max rows (when mode is "max_rows")
-    batch_training_max_rows: dict[str, int] = {
-        "Transaction Fraud Detection": 10000,
-        "Estimated Time of Arrival": 10000,
-        "E-Commerce Customer Interactions": 10000
-    }
-    # Total rows available in Delta Lake for each project
-    batch_delta_lake_total_rows: dict[str, int] = {
-        "Transaction Fraud Detection": 0,
-        "Estimated Time of Arrival": 0,
-        "E-Commerce Customer Interactions": 0
-    }
+    # NOTE: batch_training_data_percentage, batch_training_mode, batch_training_max_rows,
+    # and batch_delta_lake_total_rows are now in ComponentsState for faster UI updates
 
     # Live training status (updated during batch training)
     batch_training_status: dict[str, str] = {
@@ -1285,36 +1335,8 @@ class SharedState(rx.State):
     # ==========================================================================
     # BATCH ML EVENT HANDLERS (Scikit-Learn)
     # ==========================================================================
-    @rx.event
-    def set_batch_training_percentage(self, project_name: str, value: str):
-        """Set the training data percentage for a project (1-100)."""
-        try:
-            percentage = int(value)
-            if 1 <= percentage <= 100:
-                self.batch_training_data_percentage[project_name] = percentage
-        except (ValueError, TypeError):
-            pass  # Ignore invalid values
-
-    @rx.event
-    def set_batch_training_mode(self, project_name: str, mode: str):
-        """Set the training mode: 'percentage' or 'max_rows'."""
-        if mode in ("percentage", "max_rows"):
-            self.batch_training_mode[project_name] = mode
-
-    @rx.event
-    def set_batch_training_max_rows(self, project_name: str, value: str):
-        """Set the maximum training rows for a project."""
-        try:
-            max_rows = int(value)
-            # Minimum 100 rows, maximum is delta lake total (or 10M as upper bound)
-            delta_total = self.batch_delta_lake_total_rows.get(project_name, 10000000)
-            if max_rows < 100:
-                max_rows = 100
-            elif max_rows > delta_total and delta_total > 0:
-                max_rows = delta_total
-            self.batch_training_max_rows[project_name] = max_rows
-        except (ValueError, TypeError):
-            pass  # Ignore invalid values
+    # NOTE: set_batch_training_percentage, set_batch_training_mode, set_batch_training_max_rows
+    # are now in ComponentsState for faster UI updates
 
     @rx.event(background=True)
     async def fetch_delta_lake_total_rows(self, project_name: str):
@@ -1326,12 +1348,15 @@ class SharedState(rx.State):
                 timeout=30.0
             )
             result = response.json()
+            total = result.get("total_rows", 0)
+            # Update ComponentsState (lightweight UI state)
+            # Must be inside async with self to call get_state()
             async with self:
-                total = result.get("total_rows", 0)
-                self.batch_delta_lake_total_rows[project_name] = total
+                comp_state = await self.get_state(ComponentsState)
+                comp_state.batch_delta_lake_total_rows[project_name] = total
                 # If max_rows is 0 or exceeds total, set to total (or default)
-                if self.batch_training_max_rows[project_name] == 0 or self.batch_training_max_rows[project_name] > total:
-                    self.batch_training_max_rows[project_name] = min(total, 100000) if total > 0 else 10000
+                if comp_state.batch_training_max_rows[project_name] == 0 or comp_state.batch_training_max_rows[project_name] > total:
+                    comp_state.batch_training_max_rows[project_name] = min(total, 100000) if total > 0 else 10000
         except Exception as e:
             print(f"Error fetching Delta Lake total rows: {e}")
 
@@ -1350,12 +1375,14 @@ class SharedState(rx.State):
         training_script = self._batch_training_scripts.get(
             project_name, "ml_training/sklearn/tfd.py"
         )
-        # Get training mode and values
-        training_mode = self.batch_training_mode.get(project_name, "percentage")
-        data_percentage = self.batch_training_data_percentage.get(project_name, 100)
-        max_rows = self.batch_training_max_rows.get(project_name, 10000)
-
+        # Get training mode and values from ComponentsState (lightweight UI state)
+        # Must be inside async with self to call get_state()
         async with self:
+            comp_state = await self.get_state(ComponentsState)
+            training_mode = comp_state.batch_training_mode.get(project_name, "percentage")
+            data_percentage = comp_state.batch_training_data_percentage.get(project_name, 100)
+            max_rows = comp_state.batch_training_max_rows.get(project_name, 10000)
+            # Also set loading state
             self.batch_training_loading[project_name] = True
             # Reset live status
             self.batch_training_status[project_name] = "Starting training..."

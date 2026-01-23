@@ -1,3 +1,4 @@
+{{- if .Values.reflex }}
 apiVersion: v1
 {{- include "coelho-realtime.ConfigMapSettings" (dict "appName" "reflex" "root" .) | nindent 0}}
 data:
@@ -10,3 +11,4 @@ data:
   REFLEX_FRONTEND_PORT: "3000"
   REFLEX_DEPLOY_URL: "http://localhost:3000"
   REFLEX_ENV: "DEV" #"PROD"
+{{- end }}

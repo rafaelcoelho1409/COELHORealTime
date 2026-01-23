@@ -117,7 +117,7 @@ sklearn_healthcheck = SklearnHealthcheck()
 # =============================================================================
 class ModelCache:
     """Cache for loaded models and encoders from MLflow."""
-    def __init__(self, ttl_seconds: int = 300):
+    def __init__(self, ttl_seconds: int = 30):
         self.models: Dict[str, any] = {}
         self.encoders: Dict[str, any] = {}
         self.run_ids: Dict[str, str] = {}
@@ -164,7 +164,7 @@ class ModelCache:
             self.timestamps.clear()
 
 
-model_cache = ModelCache(ttl_seconds=300)  # 5 minute cache
+model_cache = ModelCache(ttl_seconds=30)  # 30 second cache
 
 
 # =============================================================================
@@ -920,7 +920,7 @@ async def batch_init(request: BatchInitRequest):
 # =============================================================================
 _cluster_feature_counts_cache: Dict[str, dict] = {}
 _cluster_feature_counts_cache_time: Dict[str, float] = {}
-CLUSTER_FEATURE_COUNTS_CACHE_TTL = 60.0  # seconds
+CLUSTER_FEATURE_COUNTS_CACHE_TTL = 30.0  # seconds
 
 
 @router.post("/cluster-feature-counts")

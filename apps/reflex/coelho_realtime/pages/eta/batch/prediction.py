@@ -365,7 +365,7 @@ def index() -> rx.Component:
                     batch_ml_run_and_training_box("CatBoostRegressor", PROJECT_NAME),
                     _form_card(),
                     spacing="4",
-                    width="30%"
+                    width="40%"
                 ),
                 # Right column - Tabs + Prediction result
                 rx.vstack(
@@ -373,7 +373,7 @@ def index() -> rx.Component:
                     _prediction_result(),
                     align_items="start",
                     spacing="4",
-                    width="70%"
+                    width="60%"
                 ),
                 spacing="6",
                 align_items="start",

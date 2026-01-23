@@ -12,6 +12,8 @@ Usage:
 from .shared import (
     # Base state class
     SharedState,
+    # Lightweight UI state
+    ComponentsState,
 
     # Pre-loaded constants
     METRIC_INFO,
@@ -46,6 +48,7 @@ from .ecci import ECCIState
 __all__ = [
     # State classes
     "SharedState",  # Base state
+    "ComponentsState",  # Lightweight UI state
     "TFDState",  # Transaction Fraud Detection
     "ETAState",  # Estimated Time of Arrival
     "ECCIState",  # E-Commerce Customer Interactions

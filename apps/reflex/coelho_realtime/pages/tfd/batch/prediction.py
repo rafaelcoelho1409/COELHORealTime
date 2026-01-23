@@ -298,109 +298,101 @@ def _prediction_result() -> rx.Component:
             align_items="center",
             width="100%"
         ),
-        rx.cond(
-            TFDState.tfd_batch_prediction_show,
-            # Show prediction results when available
-            rx.card(
-                rx.vstack(
-                    # Plotly Gauge Chart
-                    rx.plotly(data=TFDState.tfd_batch_fraud_gauge, width="100%"),
-                    # Prediction summary cards
-                    rx.hstack(
-                        rx.card(
-                            rx.vstack(
-                                rx.hstack(
-                                    rx.icon("triangle-alert", size=14, color=TFDState.tfd_batch_prediction_color),
-                                    rx.text("Classification", size="1", color="gray"),
-                                    spacing="1",
-                                    align_items="center"
-                                ),
-                                rx.text(
-                                    TFDState.tfd_batch_prediction_text,
-                                    size="5",
-                                    weight="bold",
-                                    color=TFDState.tfd_batch_prediction_color,
-                                    align="center"
-                                ),
+        # Always show prediction card (zeroed by default)
+        rx.card(
+            rx.vstack(
+                # Plotly Gauge Chart
+                rx.plotly(data=TFDState.tfd_batch_fraud_gauge, width="100%"),
+                # Prediction summary cards
+                rx.hstack(
+                    rx.card(
+                        rx.vstack(
+                            rx.hstack(
+                                rx.icon("triangle-alert", size=14, color=TFDState.tfd_batch_prediction_color),
+                                rx.text("Classification", size="1", color="gray"),
                                 spacing="1",
-                                align_items="center",
-                                width="100%"
+                                align_items="center"
                             ),
-                            variant="surface",
-                            size="1",
+                            rx.text(
+                                TFDState.tfd_batch_prediction_text,
+                                size="5",
+                                weight="bold",
+                                color=TFDState.tfd_batch_prediction_color,
+                                align="center"
+                            ),
+                            spacing="1",
+                            align_items="center",
                             width="100%"
                         ),
-                        rx.card(
-                            rx.vstack(
-                                rx.hstack(
-                                    rx.icon("percent", size=14, color="red"),
-                                    rx.text("Fraud", size="1", color="gray"),
-                                    spacing="1",
-                                    align_items="center"
-                                ),
-                                rx.text(
-                                    f"{TFDState.tfd_batch_fraud_probability * 100:.2f}%",
-                                    size="5",
-                                    weight="bold",
-                                    align="center",
-                                    color="red"
-                                ),
-                                spacing="1",
-                                align_items="center",
-                                width="100%"
-                            ),
-                            variant="surface",
-                            size="1",
-                            width="100%"
-                        ),
-                        rx.card(
-                            rx.vstack(
-                                rx.hstack(
-                                    rx.icon("circle-check", size=14, color="green"),
-                                    rx.text("Not Fraud", size="1", color="gray"),
-                                    spacing="1",
-                                    align_items="center"
-                                ),
-                                rx.text(
-                                    f"{(1 - TFDState.tfd_batch_fraud_probability) * 100:.2f}%",
-                                    size="5",
-                                    weight="bold",
-                                    align="center",
-                                    color="green"
-                                ),
-                                spacing="1",
-                                align_items="center",
-                                width="100%"
-                            ),
-                            variant="surface",
-                            size="1",
-                            width="100%"
-                        ),
-                        spacing="2",
+                        variant="surface",
+                        size="1",
                         width="100%"
                     ),
-                    spacing="4",
+                    rx.card(
+                        rx.vstack(
+                            rx.hstack(
+                                rx.icon("percent", size=14, color="red"),
+                                rx.text("Fraud", size="1", color="gray"),
+                                spacing="1",
+                                align_items="center"
+                            ),
+                            rx.text(
+                                f"{TFDState.tfd_batch_fraud_probability * 100:.2f}%",
+                                size="5",
+                                weight="bold",
+                                align="center",
+                                color="red"
+                            ),
+                            spacing="1",
+                            align_items="center",
+                            width="100%"
+                        ),
+                        variant="surface",
+                        size="1",
+                        width="100%"
+                    ),
+                    rx.card(
+                        rx.vstack(
+                            rx.hstack(
+                                rx.icon("circle-check", size=14, color="green"),
+                                rx.text("Not Fraud", size="1", color="gray"),
+                                spacing="1",
+                                align_items="center"
+                            ),
+                            rx.text(
+                                f"{(1 - TFDState.tfd_batch_fraud_probability) * 100:.2f}%",
+                                size="5",
+                                weight="bold",
+                                align="center",
+                                color="green"
+                            ),
+                            spacing="1",
+                            align_items="center",
+                            width="100%"
+                        ),
+                        variant="surface",
+                        size="1",
+                        width="100%"
+                    ),
+                    spacing="2",
                     width="100%"
                 ),
-                variant="classic",
+                spacing="4",
                 width="100%"
             ),
-            # Show info or warning message when no prediction yet
-            rx.cond(
-                SharedState.batch_model_available["Transaction Fraud Detection"],
-                rx.callout(
-                    "Fill in the transaction details and click **Predict** to get the fraud probability.",
-                    icon="info",
-                    color="blue",
-                    width="100%"
-                ),
-                rx.callout(
-                    "No trained model available. Click **Train** to train the batch model first.",
-                    icon="triangle-alert",
-                    color="orange",
-                    width="100%"
-                )
-            )
+            variant="classic",
+            width="100%"
+        ),
+        # Show warning if no model available
+        rx.cond(
+            ~SharedState.batch_model_available["Transaction Fraud Detection"],
+            rx.callout(
+                "No trained model available. Click **Train** to train the batch model first.",
+                icon="triangle-alert",
+                color="orange",
+                width="100%"
+            ),
+            rx.fragment()
         ),
         spacing="4",
         width="100%"
@@ -424,7 +416,7 @@ def index() -> rx.Component:
                     batch_ml_run_and_training_box("CatBoostClassifier", PROJECT_NAME),
                     _form_card(),
                     spacing="4",
-                    width="30%"
+                    width="40%"
                 ),
                 # Right column - Tabs + Prediction result
                 rx.vstack(
@@ -432,7 +424,7 @@ def index() -> rx.Component:
                     _prediction_result(),
                     align_items="start",
                     spacing="4",
-                    width="70%"
+                    width="60%"
                 ),
                 spacing="6",
                 align_items="start",

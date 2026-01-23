@@ -218,10 +218,10 @@ def _metrics_tabs() -> rx.Component:
         rx.tabs.list(
             rx.tabs.trigger("Overview", value="overview", flex="1"),
             rx.tabs.trigger("Regression", value="performance", flex="1"),
-            rx.tabs.trigger("Explainability", value="explainability", flex="1"),
             rx.tabs.trigger("Feature Analysis", value="features", flex="1"),
             rx.tabs.trigger("Target Analysis", value="target", flex="1"),
             rx.tabs.trigger("Model Diagnostics", value="diagnostics", flex="1"),
+            rx.tabs.trigger("Explainability", value="explainability", flex="1"),
             size="2",
             width="100%",
         ),
@@ -234,10 +234,6 @@ def _metrics_tabs() -> rx.Component:
             value="performance",
         ),
         rx.tabs.content(
-            rx.box(_explainability_tab(), padding_top="1em"),
-            value="explainability",
-        ),
-        rx.tabs.content(
             rx.box(_features_tab(), padding_top="1em"),
             value="features",
         ),
@@ -248,6 +244,10 @@ def _metrics_tabs() -> rx.Component:
         rx.tabs.content(
             rx.box(_diagnostics_tab(), padding_top="1em"),
             value="diagnostics",
+        ),
+        rx.tabs.content(
+            rx.box(_explainability_tab(), padding_top="1em"),
+            value="explainability",
         ),
         default_value="overview",
         width="100%",
