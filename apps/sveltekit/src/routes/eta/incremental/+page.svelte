@@ -240,6 +240,15 @@
 		trainingLoading = true;
 		try {
 			if (enabled) {
+				// Check if any training is already active (global training lock)
+				const statusResult = await incrementalApi.getTrainingStatus();
+				if (statusResult.data?.is_active && statusResult.data?.project_name !== PROJECT) {
+					toast.error(
+						`Cannot start training: ${statusResult.data.project_name} training is already running. Stop it first.`
+					);
+					return;
+				}
+
 				const result = await incrementalApi.startTraining(PROJECT);
 				if (result.error) {
 					toast.error(result.error);
@@ -558,9 +567,9 @@
 	});
 </script>
 
-<div class="flex gap-6">
+<div class="flex gap-4">
 	<!-- LEFT COLUMN (40%) - Training Switch + Form -->
-	<div class="w-[40%] space-y-4">
+	<div class="w-2/5 min-w-0 space-y-4">
 		<MLTrainingSwitch
 			enabled={isTrainingEnabled}
 			loading={trainingLoading}
@@ -848,7 +857,7 @@
 	</div>
 
 	<!-- RIGHT COLUMN (60%) - Tabs for Prediction and Metrics -->
-	<div class="w-[60%]">
+	<div class="w-3/5 min-w-0">
 		<Tabs value={activeTab} onValueChange={(v) => (activeTab = v)}>
 			<TabsList class="w-full">
 				<TabsTrigger value="prediction" class="flex-1">

@@ -431,7 +431,7 @@ def get_best_mlflow_run(project_name: str, model_name: str) -> Optional[str]:
         # Search for completed runs
         runs_df = mlflow.search_runs(
             experiment_ids=[experiment.experiment_id],
-            filter_string="status = 'FINISHED'",
+            filter_string="attributes.status = 'FINISHED'",
             order_by=["start_time DESC"],
             max_results=50,
         )
@@ -509,7 +509,7 @@ def get_all_mlflow_runs(project_name: str, model_name: str) -> list[dict]:
         # Search for completed runs
         runs_df = mlflow.search_runs(
             experiment_ids=[experiment.experiment_id],
-            filter_string="status = 'FINISHED'",
+            filter_string="attributes.status = 'FINISHED'",
             order_by=["start_time DESC"],
             max_results=100,
         )
@@ -1471,7 +1471,7 @@ except ImportError:
     from sklearn.metrics.classification import _check_targets
 
 
-class CatBoostWrapper(BaseEstimator, ClassifierMixin):
+class CatBoostClassifierWrapper(BaseEstimator, ClassifierMixin):
     """Wraps pre-fitted CatBoost model for YellowBrick sklearn compatibility.
 
     Exposes feature_importances_ for FeatureImportances visualizer.
@@ -1497,23 +1497,29 @@ class CatBoostWrapper(BaseEstimator, ClassifierMixin):
         return self.model.predict_proba(X)
 
 
-class CatBoostWrapperCV(BaseEstimator, ClassifierMixin):
+class CatBoostClassifierWrapperCV(BaseEstimator, ClassifierMixin):
     """CatBoost wrapper for CV-based visualizers (can be cloned and re-fitted).
 
     Exposes feature_importances_ after fitting for RFECV and FeatureImportances.
+    sklearn-compatible: all __init__ params are stored as attributes, fitted
+    attributes have trailing underscore and are set in fit().
     """
     _estimator_type = 'classifier'
+
     def __init__(self, iterations=100, depth=6, learning_rate=0.1,
                  auto_class_weights='Balanced', random_state=42):
+        # Only store __init__ parameters as attributes (sklearn requirement for clone())
         self.iterations = iterations
         self.depth = depth
         self.learning_rate = learning_rate
         self.auto_class_weights = auto_class_weights
         self.random_state = random_state
-        self.model_ = None
-        self.classes_ = None
-        self.feature_importances_ = None
+
     def fit(self, X, y):
+        # Convert to numpy if needed for shape access
+        X_arr = X.values if hasattr(X, 'values') else X
+        self.n_features_in_ = X_arr.shape[1]
+
         self.model_ = CatBoostClassifier(
             iterations=self.iterations,
             depth=self.depth,
@@ -1526,13 +1532,23 @@ class CatBoostWrapperCV(BaseEstimator, ClassifierMixin):
         self.classes_ = np.array(self.model_.classes_)
         self.feature_importances_ = self.model_.feature_importances_
         return self
+
     def predict(self, X):
         return self.model_.predict(X).flatten()
+
     def predict_proba(self, X):
         return self.model_.predict_proba(X)
+
     def score(self, X, y):
         from sklearn.metrics import accuracy_score
         return accuracy_score(y, self.predict(X))
+
+    @property
+    def coef_(self):
+        """Alias for feature_importances_ - needed by some RFECV implementations."""
+        if hasattr(self, 'feature_importances_') and self.feature_importances_ is not None:
+            return self.feature_importances_.reshape(1, -1)
+        return None
 
 
 class ClassPredictionErrorFixed(_ClassPredictionErrorBase):
@@ -1614,20 +1630,27 @@ class CatBoostRegressorWrapperCV(BaseEstimator, RegressorMixin):
     - CVScores
     - LearningCurve
     - ValidationCurve
+    - RFECV (Recursive Feature Elimination with CV)
+
+    sklearn-compatible: all __init__ params are stored as attributes, fitted
+    attributes have trailing underscore and are set in fit().
     """
     _estimator_type = 'regressor'
 
     def __init__(self, iterations=500, depth=6, learning_rate=0.05,
                  l2_leaf_reg=3, random_state=42):
+        # Only store __init__ parameters as attributes (sklearn requirement for clone())
         self.iterations = iterations
         self.depth = depth
         self.learning_rate = learning_rate
         self.l2_leaf_reg = l2_leaf_reg
         self.random_state = random_state
-        self.model_ = None
-        self.feature_importances_ = None
 
     def fit(self, X, y):
+        # Convert to numpy if needed for shape access
+        X_arr = X.values if hasattr(X, 'values') else X
+        self.n_features_in_ = X_arr.shape[1]
+
         self.model_ = CatBoostRegressor(
             iterations=self.iterations,
             depth=self.depth,
@@ -1651,19 +1674,12 @@ class CatBoostRegressorWrapperCV(BaseEstimator, RegressorMixin):
         from sklearn.metrics import r2_score
         return r2_score(y, self.predict(X))
 
-    def get_params(self, deep=True):
-        return {
-            'iterations': self.iterations,
-            'depth': self.depth,
-            'learning_rate': self.learning_rate,
-            'l2_leaf_reg': self.l2_leaf_reg,
-            'random_state': self.random_state,
-        }
-
-    def set_params(self, **params):
-        for key, value in params.items():
-            setattr(self, key, value)
-        return self
+    @property
+    def coef_(self):
+        """Alias for feature_importances_ - needed by some RFECV implementations."""
+        if hasattr(self, 'feature_importances_') and self.feature_importances_ is not None:
+            return self.feature_importances_.reshape(1, -1)
+        return None
 
 
 def yellowbrick_classification_kwargs(
@@ -1676,9 +1692,9 @@ def yellowbrick_classification_kwargs(
 
     Reference: https://www.scikit-yb.org/en/latest/api/classifier/index.html
 
-    All visualizers use CatBoostWrapper with is_fitted=True and force_model=True
+    All visualizers use CatBoostClassifierWrapper with is_fitted=True and force_model=True
     for CatBoost compatibility, except DiscriminationThreshold which uses
-    CatBoostWrapperCV for CV-based training.
+    CatBoostClassifierWrapperCV for CV-based training.
     """
     # Human-readable class names for fraud detection
     class_names = ["Non-Fraud", "Fraud"] if "Fraud" in project_name else binary_classes
@@ -1723,7 +1739,7 @@ def yellowbrick_classification_kwargs(
             "force_model": True,
         },
         # DiscriminationThreshold: Shows optimal threshold for binary classification
-        # NOTE: Uses CatBoostWrapperCV (unfitted) for internal CV
+    # NOTE: Uses CatBoostClassifierWrapperCV (unfitted) for internal CV
         "DiscriminationThreshold": {
             "n_trials": 10,
             "cv": 0.2,
@@ -1747,8 +1763,8 @@ def yellowbrick_classification_visualizers(
 
     Reference: https://www.scikit-yb.org/en/latest/api/classifier/index.html
 
-    Uses CatBoostWrapper for pre-fitted model visualizers, and
-    CatBoostWrapperCV for CV-based visualizers (DiscriminationThreshold).
+    Uses CatBoostClassifierWrapper for pre-fitted model visualizers, and
+    CatBoostClassifierWrapperCV for CV-based visualizers (DiscriminationThreshold).
     """
     from yellowbrick.classifier import (
         ConfusionMatrix,
@@ -1772,7 +1788,7 @@ def yellowbrick_classification_visualizers(
             raise ValueError(f"Unknown visualizer: {visualizer_name}")
         if visualizer_name == "DiscriminationThreshold":
             # DiscriminationThreshold needs CV-compatible unfitted wrapper
-            cv_estimator = CatBoostWrapperCV(iterations=100, depth=6, learning_rate=0.1)
+            cv_estimator = CatBoostClassifierWrapperCV(iterations=100, depth=6, learning_rate=0.1)
             visualizer = vis_class(cv_estimator, **params)
             # Fit on full data (CV happens internally)
             X_full = pd.concat([X_train, X_test], ignore_index=True)
@@ -1782,7 +1798,7 @@ def yellowbrick_classification_visualizers(
             # Other visualizers use pre-fitted wrapped model
             if model is None:
                 raise ValueError("Model required for classification visualizers")
-            wrapped_model = CatBoostWrapper(model) if 'CatBoost' in type(model).__name__ else model
+            wrapped_model = CatBoostClassifierWrapper(model) if 'CatBoost' in type(model).__name__ else model
             visualizer = vis_class(wrapped_model, **params)
             visualizer.fit(X_train, y_train)
             visualizer.score(X_test, y_test)
@@ -2207,7 +2223,7 @@ def yellowbrick_model_selection_visualizers(
     Reference: https://www.scikit-yb.org/en/latest/api/model_selection/index.html
 
     CatBoost Handling (selects wrapper based on task type):
-    - Classification: CatBoostWrapper/CatBoostWrapperCV
+    - Classification: CatBoostClassifierWrapper/CatBoostClassifierWrapperCV
     - Regression: CatBoostRegressorWrapper/CatBoostRegressorWrapperCV
 
     Clustering Handling (ECCI):
@@ -2286,7 +2302,7 @@ def yellowbrick_model_selection_visualizers(
                 raise ValueError("Model required for FeatureImportances")
             # Select wrapper based on task type
             if 'CatBoost' in type(model).__name__:
-                wrapped_estimator = CatBoostRegressorWrapper(model) if is_regression else CatBoostWrapper(model)
+                wrapped_estimator = CatBoostRegressorWrapper(model) if is_regression else CatBoostClassifierWrapper(model)
             else:
                 wrapped_estimator = model
             visualizer = vis_class(wrapped_estimator, **params)
@@ -2296,7 +2312,7 @@ def yellowbrick_model_selection_visualizers(
             if is_regression:
                 cv_wrapper = CatBoostRegressorWrapperCV(iterations=100, depth=6, learning_rate=0.1)
             else:
-                cv_wrapper = CatBoostWrapperCV(iterations=100, depth=6, learning_rate=0.1)
+                cv_wrapper = CatBoostClassifierWrapperCV(iterations=100, depth=6, learning_rate=0.1)
             visualizer = vis_class(cv_wrapper, **params)
             visualizer.fit(X_full, y_full)
         return visualizer

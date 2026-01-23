@@ -16,6 +16,9 @@ import os
 from datetime import datetime
 import mlflow
 
+# Disable EC2 metadata lookup to prevent timeouts when running locally
+os.environ["AWS_EC2_METADATA_DISABLED"] = "true"
+
 from models import (
     BatchSwitchModelRequest,
     BatchInitRequest,
@@ -208,7 +211,9 @@ def get_best_mlflow_run(project_name: str, model_name: str) -> Optional[str]:
 
     runs_df = mlflow.search_runs(
         experiment_ids=[experiment.experiment_id],
-        filter_string=f"tags.mlflow.runName = '{model_name}' AND attributes.status = 'FINISHED'",
+        filter_string=(
+            f"tags.mlflow.runName = '{model_name}' AND attributes.status = 'FINISHED'"
+        ),
         max_results=100,
     )
 
@@ -313,26 +318,32 @@ def stop_current_training() -> bool:
     batch_state.status = f"Stopping '{model_name}'..."
 
     try:
+        # Try graceful termination first with short timeout
         process.terminate()
-        process.wait(timeout=60)
-        if process.poll() is not None:
-            print(f"Training '{model_name}' stopped gracefully (exit code: {process.returncode})")
-            batch_state.status = f"Training '{model_name}' stopped."
-            batch_state.exit_code = process.returncode
-        else:
-            print(f"SIGTERM failed, sending SIGKILL to PID {pid}")
+        try:
+            process.wait(timeout=5)  # Short timeout for responsiveness
+            if process.poll() is not None:
+                print(f"Training '{model_name}' stopped gracefully (exit code: {process.returncode})")
+                batch_state.status = f"Training '{model_name}' stopped."
+                batch_state.exit_code = process.returncode
+        except subprocess.TimeoutExpired:
+            # If SIGTERM doesn't work quickly, force kill immediately
+            print(f"SIGTERM timeout after 5s, sending SIGKILL to PID {pid}")
             process.kill()
-            process.wait(timeout=10)
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass  # Process should be dead, continue cleanup
             batch_state.status = f"Training '{model_name}' force killed."
             batch_state.exit_code = -9
-    except subprocess.TimeoutExpired:
-        print(f"Timeout waiting for {model_name}, force killing...")
-        process.kill()
-        batch_state.status = f"Training '{model_name}' force killed after timeout."
-        batch_state.exit_code = -9
     except Exception as e:
         print(f"Error stopping training: {e}")
         batch_state.status = f"Error stopping training: {e}"
+        # Try force kill as last resort
+        try:
+            process.kill()
+        except Exception:
+            pass
     finally:
         batch_state.close_log_file()
         batch_state.current_process = None
@@ -758,7 +769,7 @@ async def list_mlflow_runs(request: BatchMLflowRunsRequest):
             asyncio.to_thread(get_all_mlflow_runs, project_name, model_name),
             timeout=30.0,
         )
-        return runs
+        return {"runs": runs}
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="MLflow query timed out")
     except Exception as e:
@@ -1430,14 +1441,17 @@ async def get_delta_total_rows(payload: dict):
             conn = duckdb.connect()
             conn.execute("INSTALL delta; LOAD delta;")
             conn.execute("INSTALL httpfs; LOAD httpfs;")
-            # Configure S3 credentials from environment
+            # Configure S3/MinIO credentials using CREATE SECRET (DuckDB recommended approach)
             conn.execute(f"""
-                SET s3_region = '{AWS_REGION}';
-                SET s3_access_key_id = '{AWS_ACCESS_KEY_ID}';
-                SET s3_secret_access_key = '{AWS_SECRET_ACCESS_KEY}';
-                SET s3_endpoint = '{AWS_S3_ENDPOINT}';
-                SET s3_use_ssl = false;
-                SET s3_url_style = 'path';
+                CREATE SECRET IF NOT EXISTS minio_secret (
+                    TYPE S3,
+                    KEY_ID '{AWS_ACCESS_KEY_ID}',
+                    SECRET '{AWS_SECRET_ACCESS_KEY}',
+                    REGION '{AWS_REGION}',
+                    ENDPOINT '{AWS_S3_ENDPOINT}',
+                    URL_STYLE 'path',
+                    USE_SSL false
+                );
             """)
             result = conn.execute(f"SELECT COUNT(*) FROM delta_scan('{delta_path}')").fetchone()
             conn.close()

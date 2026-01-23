@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { beforeNavigate } from '$app/navigation';
+	import { browser } from '$app/environment';
 	import {
 		Card,
 		CardContent,
@@ -14,6 +15,7 @@
 		TabsTrigger,
 		TabsContent
 	} from '$components/shared';
+	import Plotly from 'svelte-plotly.js';
 	import {
 		formData,
 		predictionResults,
@@ -37,7 +39,8 @@
 		Layers,
 		MapPin,
 		FlaskConical,
-		RefreshCw
+		RefreshCw,
+		PieChart
 	} from 'lucide-svelte';
 	import type { DropdownOptions, ProjectName } from '$types';
 
@@ -137,6 +140,10 @@
 		await checkTrainingStatus();
 		await fetchMetrics();
 
+		// Fetch analytics data
+		await fetchClusterCounts();
+		await fetchAllClustersFeatureCounts();
+
 		if ($incrementalMlEnabled[PROJECT]) {
 			startMetricsPolling();
 		}
@@ -203,6 +210,15 @@
 		trainingLoading = true;
 		try {
 			if (enabled) {
+				// Check if any training is already active (global training lock)
+				const statusResult = await incrementalApi.getTrainingStatus();
+				if (statusResult.data?.is_active && statusResult.data?.project_name !== PROJECT) {
+					toast.error(
+						`Cannot start training: ${statusResult.data.project_name} training is already running. Stop it first.`
+					);
+					return;
+				}
+
 				const result = await incrementalApi.startTraining(PROJECT);
 				if (result.error) {
 					toast.error(result.error);
@@ -333,6 +349,272 @@
 			? Math.max(...topClusterFeatureEntries.map(([, count]) => count))
 			: 1
 	);
+
+	// =========================================================================
+	// Map State and Functions (similar to ETA but single point)
+	// =========================================================================
+	let mapContainer: HTMLDivElement | null = null;
+	let leafletMap: any = null;
+	let locationMarker: any = null;
+	let L: any = null;
+
+	// Derived coordinates
+	const customerLat = $derived(Number(currentForm?.lat) || 29.8);
+	const customerLon = $derived(Number(currentForm?.lon) || -95.4);
+
+	// Initialize Leaflet map
+	async function initMap() {
+		if (!browser || !mapContainer) return;
+
+		// Add Leaflet CSS if not already loaded
+		if (!document.getElementById('leaflet-css')) {
+			const link = document.createElement('link');
+			link.id = 'leaflet-css';
+			link.rel = 'stylesheet';
+			link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+			document.head.appendChild(link);
+		}
+
+		// Load Leaflet JS from CDN if not already loaded
+		if (!(window as any).L) {
+			await new Promise<void>((resolve, reject) => {
+				const script = document.createElement('script');
+				script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+				script.onload = () => resolve();
+				script.onerror = reject;
+				document.head.appendChild(script);
+			});
+		}
+
+		// Wait for CSS to load
+		await new Promise((r) => setTimeout(r, 100));
+
+		L = (window as any).L;
+		if (!L) return;
+
+		leafletMap = L.map(mapContainer).setView([customerLat, customerLon], 12);
+
+		L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+			attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+		}).addTo(leafletMap);
+
+		// Add marker
+		updateMapMarker();
+	}
+
+	function updateMapMarker() {
+		if (!L || !leafletMap) return;
+
+		// Remove existing marker
+		if (locationMarker) leafletMap.removeLayer(locationMarker);
+
+		// Create custom icon (green for customer location)
+		const greenIcon = L.divIcon({
+			className: 'custom-marker',
+			html: '<div style="background-color: #22c55e; width: 24px; height: 24px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>',
+			iconSize: [24, 24],
+			iconAnchor: [12, 12]
+		});
+
+		// Add marker
+		locationMarker = L.marker([customerLat, customerLon], { icon: greenIcon })
+			.addTo(leafletMap)
+			.bindPopup('Customer Location');
+
+		// Center map on marker
+		leafletMap.setView([customerLat, customerLon], 12);
+	}
+
+	// Watch for coordinate changes
+	$effect(() => {
+		// Reference coordinates to track changes
+		const _lat = customerLat;
+		const _lon = customerLon;
+
+		if (leafletMap && L) {
+			updateMapMarker();
+		}
+	});
+
+	// Initialize or reinitialize map when tab switches to prediction
+	$effect(() => {
+		const currentTab = activeTab;
+
+		if (browser && currentTab === 'prediction') {
+			setTimeout(() => {
+				if (mapContainer) {
+					if (leafletMap) {
+						try {
+							leafletMap.remove();
+						} catch (e) {
+							// Ignore errors when removing invalid map
+						}
+						leafletMap = null;
+					}
+					initMap();
+				}
+			}, 50);
+		}
+	});
+
+	// =========================================================================
+	// Plotly Charts for Prediction and Analytics
+	// =========================================================================
+
+	// Predicted Cluster Indicator
+	const clusterPredictionData = $derived.by(() => {
+		return [
+			{
+				type: 'indicator',
+				mode: 'number',
+				value: predictedCluster,
+				title: { text: '<b>Cluster ID</b>', font: { size: 18 } },
+				number: { font: { size: 72, color: '#22c55e' } },
+				domain: { x: [0, 1], y: [0, 1] }
+			}
+		];
+	});
+
+	const clusterPredictionLayout = {
+		height: 200,
+		margin: { l: 20, r: 20, t: 40, b: 20 },
+		paper_bgcolor: 'transparent',
+		plot_bgcolor: 'transparent'
+	};
+
+	// Cluster Behavior Vertical Bar Chart
+	const clusterBehaviorData = $derived.by(() => {
+		if (topClusterFeatureEntries.length === 0) return [];
+		// Limit to 8 entries max to fit in small space
+		const entries = topClusterFeatureEntries.slice(0, 8);
+		const labels = entries.map(([label]) => label.length > 10 ? label.slice(0, 10) + '…' : label);
+		const values = entries.map(([, count]) => count);
+		const fullLabels = entries.map(([label]) => label);
+		return [
+			{
+				type: 'bar',
+				x: labels,
+				y: values,
+				marker: { color: '#3b82f6' },
+				customdata: fullLabels,
+				hovertemplate: '%{customdata}: %{y}<extra></extra>'
+			}
+		];
+	});
+
+	const clusterBehaviorLayout = {
+		width: 240,
+		height: 190,
+		autosize: false,
+		margin: { l: 25, r: 5, t: 5, b: 55 },
+		paper_bgcolor: 'transparent',
+		plot_bgcolor: 'transparent',
+		xaxis: {
+			tickangle: -45,
+			tickfont: { size: 7 },
+			fixedrange: true
+		},
+		yaxis: {
+			tickfont: { size: 7 },
+			fixedrange: true
+		},
+		bargap: 0.2
+	};
+
+	// Cluster Counts Bar Chart for Analytics tab
+	let clusterCounts = $state<Record<string, number>>({});
+	let clusterCountsLoading = $state(false);
+
+	async function fetchClusterCounts() {
+		clusterCountsLoading = true;
+		try {
+			const result = await incrementalApi.getClusterCounts();
+			if (result.data) {
+				clusterCounts = result.data;
+			}
+		} finally {
+			clusterCountsLoading = false;
+		}
+	}
+
+	const clusterCountsData = $derived.by(() => {
+		const clusters = Object.keys(clusterCounts).sort((a, b) => Number(a) - Number(b));
+		const counts = clusters.map((k) => clusterCounts[k]);
+		return [
+			{
+				type: 'bar',
+				x: clusters.map((c) => `Cluster ${c}`),
+				y: counts,
+				marker: { color: '#3b82f6' }
+			}
+		];
+	});
+
+	const clusterCountsLayout = {
+		height: 200,
+		margin: { l: 40, r: 20, t: 20, b: 40 },
+		paper_bgcolor: 'transparent',
+		plot_bgcolor: 'transparent',
+		xaxis: { title: '' },
+		yaxis: { title: 'Samples' }
+	};
+
+	// Feature Distribution Bar Chart for Analytics tab
+	let allClustersFeatureCounts = $state<Record<string, Record<string, number>>>({});
+
+	async function fetchAllClustersFeatureCounts() {
+		const result = await incrementalApi.getClusterFeatureCounts(selectedFeature);
+		if (result.data) {
+			allClustersFeatureCounts = result.data;
+		}
+	}
+
+	const featureDistributionData = $derived.by(() => {
+		const clusters = Object.keys(allClustersFeatureCounts).sort((a, b) => Number(a) - Number(b));
+		if (clusters.length === 0) return [];
+
+		// Get all unique feature values across all clusters
+		const allFeatureValues = new Set<string>();
+		clusters.forEach((cluster) => {
+			Object.keys(allClustersFeatureCounts[cluster] || {}).forEach((v) => allFeatureValues.add(v));
+		});
+		const featureValues = Array.from(allFeatureValues).slice(0, 10);
+
+		// Create a trace for each cluster
+		return clusters.map((cluster, idx) => {
+			const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+			return {
+				type: 'bar',
+				name: `Cluster ${cluster}`,
+				x: featureValues,
+				y: featureValues.map((fv) => allClustersFeatureCounts[cluster]?.[fv] || 0),
+				marker: { color: colors[idx % colors.length] }
+			};
+		});
+	});
+
+	const featureDistributionLayout = {
+		height: 200,
+		margin: { l: 40, r: 20, t: 20, b: 60 },
+		paper_bgcolor: 'transparent',
+		plot_bgcolor: 'transparent',
+		barmode: 'group',
+		legend: { orientation: 'h', y: -0.3 }
+	};
+
+	const plotlyConfig = { displayModeBar: false, responsive: true };
+
+	// Cleanup map on component destroy
+	onDestroy(() => {
+		if (leafletMap) {
+			try {
+				leafletMap.remove();
+			} catch (e) {
+				// Ignore errors
+			}
+			leafletMap = null;
+		}
+	});
 </script>
 
 <div class="flex gap-6">
@@ -377,7 +659,7 @@
 					<div class="space-y-1">
 						<p class="text-xs text-muted-foreground">Browser</p>
 						<Select
-							value={(currentForm.browser as string) ?? 'Chrome'}
+							value={(currentForm.browser as string) || ''}
 							options={dropdownOptions.browser || ['Chrome']}
 							class="h-8 text-sm"
 							onchange={(e) => updateFormField(PROJECT, 'browser', e.currentTarget.value)}
@@ -387,7 +669,7 @@
 					<div class="space-y-1">
 						<p class="text-xs text-muted-foreground">Device</p>
 						<Select
-							value={(currentForm.device_type as string) ?? 'Desktop'}
+							value={(currentForm.device_type as string) || ''}
 							options={dropdownOptions.device_type || ['Desktop']}
 							class="h-8 text-sm"
 							onchange={(e) => updateFormField(PROJECT, 'device_type', e.currentTarget.value)}
@@ -397,7 +679,7 @@
 					<div class="space-y-1">
 						<p class="text-xs text-muted-foreground">OS</p>
 						<Select
-							value={(currentForm.os as string) ?? 'Windows'}
+							value={(currentForm.os as string) || ''}
 							options={dropdownOptions.os || ['Windows']}
 							class="h-8 text-sm"
 							onchange={(e) => updateFormField(PROJECT, 'os', e.currentTarget.value)}
@@ -407,7 +689,7 @@
 					<div class="space-y-1">
 						<p class="text-xs text-muted-foreground">Event Type</p>
 						<Select
-							value={(currentForm.event_type as string) ?? 'page_view'}
+							value={(currentForm.event_type as string) || ''}
 							options={dropdownOptions.event_type || ['page_view']}
 							class="h-8 text-sm"
 							onchange={(e) => updateFormField(PROJECT, 'event_type', e.currentTarget.value)}
@@ -417,7 +699,7 @@
 					<div class="space-y-1">
 						<p class="text-xs text-muted-foreground">Category</p>
 						<Select
-							value={(currentForm.product_category as string) ?? 'Electronics'}
+							value={(currentForm.product_category as string) || ''}
 							options={dropdownOptions.product_category || ['Electronics']}
 							class="h-8 text-sm"
 							onchange={(e) => updateFormField(PROJECT, 'product_category', e.currentTarget.value)}
@@ -587,6 +869,7 @@
 			<!-- Prediction Tab -->
 			<TabsContent value="prediction" class="mt-4">
 				<div class="space-y-4 pt-4">
+					<!-- MLflow Run Info Badge -->
 					<div class="flex flex-wrap items-center gap-2 rounded-md bg-muted/50 p-2">
 						<span
 							class="inline-flex items-center gap-1 rounded-md bg-purple-500/10 px-2 py-1 text-xs font-medium text-purple-600"
@@ -620,6 +903,8 @@
 							<span class="text-xs text-muted-foreground">Started: {mlflowRunInfo.start_time}</span>
 						{/if}
 					</div>
+
+					<!-- Customer Location Map -->
 					<Card>
 						<CardContent class="p-4">
 							<div class="mb-2 flex items-center gap-2">
@@ -627,20 +912,17 @@
 								<span class="text-sm font-bold">Customer Location</span>
 							</div>
 							<div
-								class="flex h-[200px] items-center justify-center rounded-md bg-gradient-to-br from-green-100 to-green-50 dark:from-green-900/20 dark:to-green-800/10"
-							>
-								<div class="space-y-2 text-center text-sm text-muted-foreground">
-									<MapPin class="mx-auto h-8 w-8" />
-									<p>Map visualization</p>
-									<p class="text-xs">
-										Location: ({currentForm.lat || '-'}, {currentForm.lon || '-'})
-									</p>
-								</div>
+								bind:this={mapContainer}
+								class="h-[200px] rounded-md overflow-hidden"
+							></div>
+							<div class="mt-2 text-xs text-muted-foreground">
+								Location: ({customerLat.toFixed(4)}, {customerLon.toFixed(4)})
 							</div>
 						</CardContent>
 					</Card>
 
 					<div class="flex gap-3">
+						<!-- Predicted Cluster Card -->
 						<Card class="h-[320px] w-1/2">
 							<CardContent class="h-full p-4">
 								<div class="flex h-full flex-col">
@@ -650,14 +932,11 @@
 									</div>
 									<div class="flex flex-1 items-center justify-center">
 										{#if hasPrediction}
-											<div class="text-center">
-												<div
-													class="mx-auto flex h-32 w-32 items-center justify-center rounded-full border-8 border-green-500 bg-green-50 dark:bg-green-900/20"
-												>
-													<span class="text-4xl font-bold text-green-600">{predictedCluster}</span>
-												</div>
-												<p class="mt-4 text-sm text-muted-foreground">Customer Segment</p>
-											</div>
+											<Plotly
+												data={clusterPredictionData}
+												layout={clusterPredictionLayout}
+												config={plotlyConfig}
+											/>
 										{:else}
 											<div
 												class="rounded-lg border border-blue-200 bg-blue-50 p-4 text-center text-sm text-blue-600 dark:border-blue-800 dark:bg-blue-900/20"
@@ -670,6 +949,7 @@
 							</CardContent>
 						</Card>
 
+						<!-- Cluster Behavior Card -->
 						<Card class="h-[320px] w-1/2">
 							<CardContent class="h-full p-4">
 								<div class="flex h-full flex-col">
@@ -678,31 +958,24 @@
 										<span class="text-sm font-bold">Cluster Behavior</span>
 									</div>
 									{#if hasPrediction}
-										<div class="space-y-3">
+										<div class="flex flex-1 flex-col space-y-2">
 											<Select
 												value={selectedFeature}
 												options={ECCI_FEATURE_OPTIONS}
 												class="h-8 text-sm"
 												onchange={handleFeatureChange}
 											/>
-											<div class="space-y-2">
-												{#if topClusterFeatureEntries.length > 0}
-													{#each topClusterFeatureEntries as [label, count]}
-														<div class="flex items-center gap-2 text-xs">
-															<span class="w-24 truncate text-muted-foreground">{label}</span>
-															<div class="h-2 flex-1 rounded bg-muted">
-																<div
-																	class="h-2 rounded bg-blue-500"
-																	style={`width: ${(count / maxClusterFeatureCount) * 100}%`}
-																></div>
-															</div>
-															<span class="w-10 text-right text-muted-foreground">{count}</span>
-														</div>
-													{/each}
-												{:else}
-													<p class="text-xs text-muted-foreground">No feature data available.</p>
-												{/if}
-											</div>
+											{#if clusterBehaviorData.length > 0}
+												<div class="flex flex-1 items-center justify-center">
+													<Plotly
+														data={clusterBehaviorData}
+														layout={clusterBehaviorLayout}
+														config={plotlyConfig}
+													/>
+												</div>
+											{:else}
+												<p class="text-xs text-muted-foreground">No feature data available.</p>
+											{/if}
 										</div>
 									{:else}
 										<div
@@ -905,19 +1178,34 @@
 					<CardContent class="p-4">
 						<div class="mb-4 flex items-center justify-between">
 							<div class="flex items-center gap-2">
-								<BarChart3 class="h-4 w-4 text-primary" />
+								<PieChart class="h-4 w-4 text-primary" />
 								<span class="text-sm font-bold">Samples per Cluster</span>
 							</div>
-							<Button variant="outline" size="sm">
+							<Button
+								variant="outline"
+								size="sm"
+								onclick={fetchClusterCounts}
+								loading={clusterCountsLoading}
+							>
 								<RefreshCw class="mr-2 h-3 w-3" />
 								Refresh
 							</Button>
 						</div>
-						<div
-							class="flex h-[200px] items-center justify-center rounded-md bg-muted/30 p-4"
-						>
-							<p class="text-sm text-muted-foreground">Cluster distribution chart</p>
-						</div>
+						{#if Object.keys(clusterCounts).length > 0}
+							<Plotly
+								data={clusterCountsData}
+								layout={clusterCountsLayout}
+								config={plotlyConfig}
+							/>
+						{:else}
+							<div
+								class="flex h-[200px] items-center justify-center rounded-md bg-muted/30 p-4"
+							>
+								<p class="text-sm text-muted-foreground">
+									Click Refresh to load cluster distribution
+								</p>
+							</div>
+						{/if}
 					</CardContent>
 				</Card>
 
@@ -930,16 +1218,30 @@
 								<span class="text-sm font-bold">Feature Distribution</span>
 							</div>
 							<Select
-								value="price"
-								options={['price', 'quantity', 'time_on_page_seconds', 'session_event_sequence']}
+								value={selectedFeature}
+								options={ECCI_FEATURE_OPTIONS}
 								class="w-[200px]"
+								onchange={(e) => {
+									selectedFeature = e.currentTarget.value;
+									fetchAllClustersFeatureCounts();
+								}}
 							/>
 						</div>
-						<div
-							class="flex h-[200px] items-center justify-center rounded-md bg-muted/30 p-4"
-						>
-							<p class="text-sm text-muted-foreground">Feature distribution across clusters</p>
-						</div>
+						{#if featureDistributionData.length > 0}
+							<Plotly
+								data={featureDistributionData}
+								layout={featureDistributionLayout}
+								config={plotlyConfig}
+							/>
+						{:else}
+							<div
+								class="flex h-[200px] items-center justify-center rounded-md bg-muted/30 p-4"
+							>
+								<p class="text-sm text-muted-foreground">
+									Select a feature to view distribution across clusters
+								</p>
+							</div>
+						{/if}
 					</CardContent>
 				</Card>
 

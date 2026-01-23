@@ -10,13 +10,27 @@ import type {
 	FormData
 } from '$types';
 import { MLFLOW_MODEL_NAMES } from '$types';
+import {
+	buildTFDPredictPayload,
+	buildETAPredictPayload,
+	buildECCIPredictPayload
+} from '../utils/randomize';
+
+// =============================================================================
+// Training Script Mapping (matches Reflex _batch_training_scripts)
+// =============================================================================
+const BATCH_TRAINING_SCRIPTS: Record<ProjectName, string> = {
+	'Transaction Fraud Detection': 'ml_training/sklearn/tfd.py',
+	'Estimated Time of Arrival': 'ml_training/sklearn/eta.py',
+	'E-Commerce Customer Interactions': 'ml_training/sklearn/ecci.py'
+};
 
 // =============================================================================
 // Training Control
 // =============================================================================
 
 /**
- * Start batch model training
+ * Start batch model training using /switch-model endpoint (matches Reflex)
  */
 export async function startTraining(
 	projectName: ProjectName,
@@ -26,32 +40,64 @@ export async function startTraining(
 		maxRows?: number;
 	}
 ) {
-	const modelName = MLFLOW_MODEL_NAMES.batch[projectName];
-	return apiPost<TrainingResponse>(`${API.BATCH}/train`, {
+	const trainingScript = BATCH_TRAINING_SCRIPTS[projectName];
+
+	// Build payload matching Reflex's train_batch_model
+	const payload: Record<string, unknown> = {
+		model_key: trainingScript
+	};
+
+	if (options.mode === 'percentage' && options.percentage && options.percentage < 100) {
+		payload.sample_frac = options.percentage / 100.0; // Convert to 0.0-1.0
+	} else if (options.mode === 'max_rows' && options.maxRows) {
+		payload.max_rows = options.maxRows;
+	}
+
+	return apiPost<TrainingResponse>(`${API.BATCH}/switch-model`, payload);
+}
+
+/**
+ * Stop batch training using /stop-training endpoint (matches Reflex)
+ */
+export async function stopTraining(_projectName: ProjectName) {
+	return apiPost<{ status: string; message?: string }>(`${API.BATCH}/stop-training`, {});
+}
+
+/**
+ * Get training status using /status endpoint (matches Reflex)
+ */
+export async function getTrainingStatus(_projectName: ProjectName) {
+	return apiGet<BatchTrainingStatus>(`${API.BATCH}/status`);
+}
+
+// =============================================================================
+// Page Initialization (optimized single call - matches Reflex init_batch_page)
+// =============================================================================
+
+export interface BatchInitResponse {
+	runs: MLflowRunInfo[];
+	model_available: boolean;
+	experiment_url?: string;
+	metrics: Record<string, unknown>;
+	total_rows: number;
+	best_run_id?: string;
+}
+
+/**
+ * Initialize batch ML page with optimized single API call.
+ * Fetches all data in parallel: runs, model availability, metrics, experiment URL.
+ * This matches Reflex's init_batch_page function.
+ */
+export async function initBatchPage(projectName: ProjectName, runId?: string) {
+	const endpoint = `${API.BATCH}/init`;
+	const payload = {
 		project_name: projectName,
-		model_name: modelName,
-		training_mode: options.mode,
-		data_percentage: options.percentage,
-		max_rows: options.maxRows
-	});
-}
-
-/**
- * Stop batch training
- */
-export async function stopTraining(projectName: ProjectName) {
-	return apiPost<{ message: string }>(`${API.BATCH}/stop`, {
-		project_name: projectName
-	});
-}
-
-/**
- * Get training status
- */
-export async function getTrainingStatus(projectName: ProjectName) {
-	return apiGet<BatchTrainingStatus>(
-		`${API.BATCH}/training-status/${encodeURIComponent(projectName)}`
-	);
+		run_id: runId
+	};
+	console.log('[BatchAPI] initBatchPage - endpoint:', endpoint, 'payload:', payload);
+	const result = await apiPost<BatchInitResponse>(endpoint, payload);
+	console.log('[BatchAPI] initBatchPage - result:', result);
+	return result;
 }
 
 // =============================================================================
@@ -70,15 +116,19 @@ export async function checkModelAvailable(projectName: ProjectName) {
 }
 
 /**
- * Get MLflow metrics for a batch model
+ * Get MLflow metrics for a batch model.
+ * Response includes run_url which should be used to update the experiment URL.
  */
 export async function getMLflowMetrics(projectName: ProjectName, runId?: string) {
 	const modelName = MLFLOW_MODEL_NAMES.batch[projectName];
-	return apiPost<{
-		metrics: MLflowMetrics;
-		run_id?: string;
-		params?: Record<string, string>;
-	}>(`${API.BATCH}/mlflow-metrics`, {
+	return apiPost<
+		Record<string, unknown> & {
+			_no_runs?: boolean;
+			run_url?: string;
+			run_id?: string;
+			params?: Record<string, string>;
+		}
+	>(`${API.BATCH}/mlflow-metrics`, {
 		project_name: projectName,
 		model_name: modelName,
 		run_id: runId
@@ -90,10 +140,15 @@ export async function getMLflowMetrics(projectName: ProjectName, runId?: string)
  */
 export async function getMLflowRuns(projectName: ProjectName) {
 	const modelName = MLFLOW_MODEL_NAMES.batch[projectName];
-	return apiPost<{ runs: MLflowRunInfo[] }>(`${API.BATCH}/mlflow-runs`, {
+	const endpoint = `${API.BATCH}/mlflow-runs`;
+	const payload = {
 		project_name: projectName,
 		model_name: modelName
-	});
+	};
+	console.log('[BatchAPI] getMLflowRuns - endpoint:', endpoint, 'payload:', payload);
+	const result = await apiPost<{ runs: MLflowRunInfo[] }>(endpoint, payload);
+	console.log('[BatchAPI] getMLflowRuns - result:', result);
+	return result;
 }
 
 // =============================================================================
@@ -105,11 +160,28 @@ export async function getMLflowRuns(projectName: ProjectName) {
  */
 export async function predict(projectName: ProjectName, formData: FormData, runId?: string) {
 	const modelName = MLFLOW_MODEL_NAMES.batch[projectName];
+
+	// Build proper payload based on project (matching incremental API)
+	let payload: Record<string, unknown>;
+	switch (projectName) {
+		case 'Transaction Fraud Detection':
+			payload = buildTFDPredictPayload(formData);
+			break;
+		case 'Estimated Time of Arrival':
+			payload = buildETAPredictPayload(formData);
+			break;
+		case 'E-Commerce Customer Interactions':
+			payload = buildECCIPredictPayload(formData);
+			break;
+		default:
+			payload = formData as Record<string, unknown>;
+	}
+
 	return apiPost<PredictResponse>(`${API.BATCH}/predict`, {
 		project_name: projectName,
 		model_name: modelName,
 		run_id: runId,
-		...formData
+		...payload
 	});
 }
 
@@ -118,20 +190,21 @@ export async function predict(projectName: ProjectName, formData: FormData, runI
 // =============================================================================
 
 /**
- * Get YellowBrick visualization image
+ * Get YellowBrick visualization image (matching Reflex's fetch_yellowbrick_metric)
+ * Note: Some visualizations like Manifold can take several minutes
  */
 export async function getYellowBrickImage(
 	projectName: ProjectName,
-	visualizerName: string,
+	metricType: string,
+	metricName: string,
 	runId?: string
 ) {
-	const modelName = MLFLOW_MODEL_NAMES.batch[projectName];
-	return apiPost<{ image_base64: string; visualizer_name: string }>(
-		`${API.BATCH}/yellowbrick`,
+	return apiPost<{ image_base64: string; error?: string }>(
+		`${API.BATCH}/yellowbrick-metric`,
 		{
 			project_name: projectName,
-			model_name: modelName,
-			visualizer_name: visualizerName,
+			metric_type: metricType,
+			metric_name: metricName,
 			run_id: runId
 		}
 	);

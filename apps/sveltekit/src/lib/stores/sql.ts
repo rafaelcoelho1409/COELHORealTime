@@ -40,26 +40,59 @@ export const sqlExecutionTime = writable<Record<ProjectName, number>>({
 // =============================================================================
 export const SQL_QUERY_TEMPLATES = {
 	'Transaction Fraud Detection': [
-		{ name: 'All Data (100 rows)', query: 'SELECT * FROM data LIMIT 100' },
-		{ name: 'Fraudulent Transactions', query: "SELECT * FROM data WHERE is_fraud = true LIMIT 100" },
-		{ name: 'Legitimate Transactions', query: "SELECT * FROM data WHERE is_fraud = false LIMIT 100" },
-		{ name: 'High Value Transactions', query: 'SELECT * FROM data WHERE amount > 1000 ORDER BY amount DESC LIMIT 100' },
-		{ name: 'Count by Fraud Status', query: 'SELECT is_fraud, COUNT(*) as count FROM data GROUP BY is_fraud' },
-		{ name: 'Transaction Stats', query: 'SELECT COUNT(*) as total, AVG(amount) as avg_amount, MAX(amount) as max_amount FROM data' }
+		{ name: 'Sample Data', query: 'SELECT * FROM data LIMIT 100' },
+		{ name: 'Fraud Cases', query: 'SELECT * FROM data WHERE is_fraud = 1 LIMIT 100' },
+		{ name: 'High Value (>$1000)', query: 'SELECT * FROM data WHERE amount > 1000 LIMIT 100' },
+		{
+			name: 'Fraud by Merchant',
+			query:
+				'SELECT merchant_id, COUNT(*) as fraud_count FROM data WHERE is_fraud = 1 GROUP BY merchant_id ORDER BY fraud_count DESC LIMIT 20'
+		},
+		{
+			name: 'Transaction Types',
+			query:
+				'SELECT transaction_type, COUNT(*) as count, AVG(amount) as avg_amount FROM data GROUP BY transaction_type ORDER BY count DESC'
+		},
+		{ name: 'Row Count', query: 'SELECT COUNT(*) as total_rows FROM data' }
 	],
 	'Estimated Time of Arrival': [
-		{ name: 'All Data (100 rows)', query: 'SELECT * FROM data LIMIT 100' },
-		{ name: 'Long Trips (>30min)', query: 'SELECT * FROM data WHERE actual_eta_minutes > 30 ORDER BY actual_eta_minutes DESC LIMIT 100' },
-		{ name: 'Short Trips (<10min)', query: 'SELECT * FROM data WHERE actual_eta_minutes < 10 LIMIT 100' },
-		{ name: 'Trip Stats', query: 'SELECT COUNT(*) as total, AVG(actual_eta_minutes) as avg_eta, MAX(actual_eta_minutes) as max_eta FROM data' },
-		{ name: 'By Hour of Day', query: 'SELECT HOUR(timestamp) as hour, COUNT(*) as count, AVG(actual_eta_minutes) as avg_eta FROM data GROUP BY HOUR(timestamp) ORDER BY hour' }
+		{ name: 'Sample Data', query: 'SELECT * FROM data LIMIT 100' },
+		{ name: 'Long Trips (>50km)', query: 'SELECT * FROM data WHERE estimated_distance_km > 50 LIMIT 100' },
+		{
+			name: 'Weather Impact',
+			query:
+				'SELECT weather, COUNT(*) as trips, AVG(simulated_actual_travel_time_seconds) as avg_time FROM data GROUP BY weather ORDER BY trips DESC'
+		},
+		{
+			name: 'Driver Performance',
+			query:
+				'SELECT driver_id, COUNT(*) as trips, AVG(driver_rating) as avg_rating FROM data GROUP BY driver_id ORDER BY trips DESC LIMIT 20'
+		},
+		{
+			name: 'Vehicle Types',
+			query:
+				'SELECT vehicle_type, COUNT(*) as count, AVG(estimated_distance_km) as avg_distance FROM data GROUP BY vehicle_type ORDER BY count DESC'
+		},
+		{ name: 'Row Count', query: 'SELECT COUNT(*) as total_rows FROM data' }
 	],
 	'E-Commerce Customer Interactions': [
-		{ name: 'All Data (100 rows)', query: 'SELECT * FROM data LIMIT 100' },
-		{ name: 'High Spenders', query: 'SELECT * FROM data ORDER BY total_spend DESC LIMIT 100' },
-		{ name: 'Frequent Customers', query: 'SELECT * FROM data ORDER BY purchase_frequency DESC LIMIT 100' },
-		{ name: 'Customer Stats', query: 'SELECT COUNT(*) as total, AVG(total_spend) as avg_spend, AVG(purchase_frequency) as avg_frequency FROM data' },
-		{ name: 'By Region', query: 'SELECT region, COUNT(*) as count, AVG(total_spend) as avg_spend FROM data GROUP BY region ORDER BY count DESC' }
+		{ name: 'Sample Data', query: 'SELECT * FROM data LIMIT 100' },
+		{ name: 'Purchases', query: "SELECT * FROM data WHERE event_type = 'purchase' LIMIT 100" },
+		{
+			name: 'By Category',
+			query:
+				'SELECT product_category, COUNT(*) as count FROM data GROUP BY product_category ORDER BY count DESC'
+		},
+		{
+			name: 'Event Types',
+			query: 'SELECT event_type, COUNT(*) as count FROM data GROUP BY event_type ORDER BY count DESC'
+		},
+		{
+			name: 'Top Products',
+			query:
+				"SELECT product_id, COUNT(*) as views, SUM(CASE WHEN event_type = 'purchase' THEN 1 ELSE 0 END) as purchases FROM data GROUP BY product_id ORDER BY views DESC LIMIT 20"
+		},
+		{ name: 'Row Count', query: 'SELECT COUNT(*) as total_rows FROM data' }
 	]
 } as const;
 

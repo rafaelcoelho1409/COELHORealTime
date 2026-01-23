@@ -274,7 +274,20 @@ def main():
                             except Exception as e:
                                 print(f"Error updating metric {metric}: {str(e)}")
                     predicted_cluster_label = prediction # prediction is likely an int
+                    # Flatten interaction_event for feature counting
+                    flattened_event = {}
                     for feature_key, feature_value in interaction_event.items():
+                        if feature_key == 'device_info' and isinstance(feature_value, dict):
+                            # Flatten device_info: extract browser, device_type, os
+                            for nested_key, nested_value in feature_value.items():
+                                flattened_event[nested_key] = nested_value
+                        elif feature_key == 'location' and isinstance(feature_value, dict):
+                            # Skip location (lat/lon not useful for categorical counting)
+                            pass
+                        else:
+                            flattened_event[feature_key] = feature_value
+
+                    for feature_key, feature_value in flattened_event.items():
                         if feature_key not in [
                             'event_id',
                             'customer_id',
@@ -282,7 +295,9 @@ def main():
                             'timestamp',
                             'price',
                             'page_url',
-                            'search_query'
+                            'search_query',
+                            'lat',
+                            'lon'
                             ]:
                             # Ensure feature_value is hashable for Counter keys.
                             # Convert complex types (like dicts or lists) to their string representation.

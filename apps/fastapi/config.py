@@ -21,9 +21,11 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 
 # AWS/MinIO configuration for Delta Lake
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
-AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
-AWS_S3_ENDPOINT = os.getenv("AWS_S3_ENDPOINT", "")
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "minioadmin")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "minioadmin123")
+MINIO_HOST = os.getenv("MINIO_HOST", "localhost")
+MINIO_PORT = os.getenv("MINIO_PORT", "9000")
+AWS_S3_ENDPOINT = os.getenv("AWS_S3_ENDPOINT", f"{MINIO_HOST}:{MINIO_PORT}")
 
 # =============================================================================
 # Project Definitions
@@ -52,9 +54,9 @@ PROJECT_TARGET_COLUMNS = {
 # Delta Lake Paths (S3/MinIO)
 # =============================================================================
 DELTA_PATHS = {
-    "Transaction Fraud Detection": "s3a://coelho-realtime/delta/transaction_fraud_detection",
-    "Estimated Time of Arrival": "s3a://coelho-realtime/delta/estimated_time_of_arrival",
-    "E-Commerce Customer Interactions": "s3a://coelho-realtime/delta/e_commerce_customer_interactions",
+    "Transaction Fraud Detection": "s3://lakehouse/delta/transaction_fraud_detection",
+    "Estimated Time of Arrival": "s3://lakehouse/delta/estimated_time_of_arrival",
+    "E-Commerce Customer Interactions": "s3://lakehouse/delta/e_commerce_customer_interactions",
 }
 
 # =============================================================================

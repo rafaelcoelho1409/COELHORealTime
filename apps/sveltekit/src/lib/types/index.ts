@@ -91,14 +91,16 @@ export interface SQLQueryResult {
 	execution_time_ms?: number;
 }
 
-// Batch training status
+// Batch training status (matching Reflex /status endpoint)
 export interface BatchTrainingStatus {
-	status: string;
-	progress: number;
-	stage: string;
-	metrics_preview: Record<string, number>;
-	catboost_log: Record<string, number | string>;
-	total_rows: number;
+	status: string; // 'running', 'completed', 'failed', 'idle'
+	status_message?: string;
+	progress_percent?: number;
+	current_stage?: string;
+	metrics_preview?: Record<string, number>;
+	catboost_log?: Record<string, number | string>;
+	total_rows?: number;
+	error?: string;
 }
 
 // Training mode
@@ -118,7 +120,8 @@ export interface ApiResponse<T> {
 }
 
 export interface TrainingResponse {
-	success: boolean;
+	success?: boolean;
+	status?: string; // 'started', 'error', etc.
 	message?: string;
 	run_id?: string;
 	error?: string;

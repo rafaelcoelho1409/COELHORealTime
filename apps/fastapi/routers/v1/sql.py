@@ -21,6 +21,8 @@ from config import (
     AWS_S3_ENDPOINT,
 )
 
+# Disable EC2 metadata lookup to prevent timeouts when running locally
+os.environ["AWS_EC2_METADATA_DISABLED"] = "true"
 
 router = APIRouter()
 
@@ -31,22 +33,37 @@ router = APIRouter()
 _duckdb_connection = None
 
 
-def _get_duckdb_connection():
-    """Get or create a DuckDB connection with Delta Lake and S3 support."""
+def _get_duckdb_connection(force_reconnect: bool = False):
+    """Get or create a DuckDB connection with Delta Lake and S3 support.
+
+    Args:
+        force_reconnect: If True, close existing connection and create new one
+    """
     global _duckdb_connection
+
+    if force_reconnect and _duckdb_connection is not None:
+        try:
+            _duckdb_connection.close()
+        except Exception:
+            pass
+        _duckdb_connection = None
+
     if _duckdb_connection is None:
         import duckdb
         _duckdb_connection = duckdb.connect()
         _duckdb_connection.execute("INSTALL delta; LOAD delta;")
         _duckdb_connection.execute("INSTALL httpfs; LOAD httpfs;")
-        # Configure S3/MinIO credentials
+        # Configure S3/MinIO credentials using CREATE SECRET (DuckDB recommended approach)
         _duckdb_connection.execute(f"""
-            SET s3_region = '{AWS_REGION}';
-            SET s3_access_key_id = '{AWS_ACCESS_KEY_ID}';
-            SET s3_secret_access_key = '{AWS_SECRET_ACCESS_KEY}';
-            SET s3_endpoint = '{AWS_S3_ENDPOINT}';
-            SET s3_use_ssl = false;
-            SET s3_url_style = 'path';
+            CREATE SECRET IF NOT EXISTS minio_secret (
+                TYPE S3,
+                KEY_ID '{AWS_ACCESS_KEY_ID}',
+                SECRET '{AWS_SECRET_ACCESS_KEY}',
+                REGION '{AWS_REGION}',
+                ENDPOINT '{AWS_S3_ENDPOINT}',
+                URL_STYLE 'path',
+                USE_SSL false
+            );
         """)
     return _duckdb_connection
 
@@ -68,7 +85,7 @@ def _validate_query(query: str) -> None:
 
 
 def execute_delta_sql_duckdb(project_name: str, query: str, limit: int = SQL_DEFAULT_LIMIT) -> dict:
-    """Execute SQL query against Delta Lake using DuckDB."""
+    """Execute SQL query against Delta Lake using DuckDB with retry on connection errors."""
     delta_path = DELTA_PATHS.get(project_name)
     if not delta_path:
         return {"error": f"Unknown project: {project_name}"}
@@ -78,73 +95,89 @@ def execute_delta_sql_duckdb(project_name: str, query: str, limit: int = SQL_DEF
     # Enforce limit
     limit = min(limit, SQL_MAX_LIMIT)
 
-    start_time = time.time()
+    # Replace 'data' table reference with delta_scan
+    # Simple replacement - assumes table is named 'data'
+    modified_query = query.replace("FROM data", f"FROM delta_scan('{delta_path}')")
+    modified_query = modified_query.replace("from data", f"FROM delta_scan('{delta_path}')")
 
-    try:
-        conn = _get_duckdb_connection()
+    # Add LIMIT if not present
+    if "LIMIT" not in modified_query.upper():
+        modified_query = f"{modified_query} LIMIT {limit}"
 
-        # Replace 'data' table reference with delta_scan
-        # Simple replacement - assumes table is named 'data'
-        modified_query = query.replace("FROM data", f"FROM delta_scan('{delta_path}')")
-        modified_query = modified_query.replace("from data", f"FROM delta_scan('{delta_path}')")
+    # Retry logic: try once, if connection error retry with fresh connection
+    for attempt in range(2):
+        start_time = time.time()
+        try:
+            conn = _get_duckdb_connection(force_reconnect=(attempt > 0))
+            result = conn.execute(modified_query).fetchdf()
 
-        # Add LIMIT if not present
-        if "LIMIT" not in modified_query.upper():
-            modified_query = f"{modified_query} LIMIT {limit}"
+            execution_time_ms = (time.time() - start_time) * 1000
 
-        result = conn.execute(modified_query).fetchdf()
+            return {
+                "columns": result.columns.tolist(),
+                "data": result.to_dict(orient="records"),
+                "row_count": len(result),
+                "execution_time_ms": execution_time_ms,
+                "engine": "duckdb",
+            }
+        except Exception as e:
+            error_str = str(e).lower()
+            # Retry on connection-related errors
+            if attempt == 0 and ("connection" in error_str or "closed" in error_str or "invalid" in error_str):
+                print(f"[SQL] Connection error, retrying with fresh connection: {e}")
+                continue
+            return {"error": str(e)}
 
-        execution_time_ms = (time.time() - start_time) * 1000
-
-        return {
-            "columns": result.columns.tolist(),
-            "data": result.to_dict(orient="records"),
-            "row_count": len(result),
-            "execution_time_ms": execution_time_ms,
-            "engine": "duckdb",
-        }
-    except Exception as e:
-        return {"error": str(e)}
+    return {"error": "Failed after retry"}
 
 
 def get_delta_table_schema(project_name: str) -> dict:
-    """Get schema and metadata for a Delta Lake table using DuckDB."""
+    """Get schema and metadata for a Delta Lake table using DuckDB with retry."""
     delta_path = DELTA_PATHS.get(project_name)
     if not delta_path:
         return {"error": f"Unknown project: {project_name}"}
 
-    try:
-        conn = _get_duckdb_connection()
-
-        # Get schema using DESCRIBE
-        schema_query = f"DESCRIBE SELECT * FROM delta_scan('{delta_path}')"
-        schema_result = conn.execute(schema_query).fetchdf()
-
-        columns = [
-            {
-                "name": row["column_name"],
-                "type": row["column_type"],
-                "nullable": row.get("null", "YES") == "YES",
-            }
-            for _, row in schema_result.iterrows()
-        ]
-
-        # Get approximate row count
+    # Retry logic: try once, if connection error retry with fresh connection
+    for attempt in range(2):
         try:
-            count_query = f"SELECT COUNT(*) as cnt FROM delta_scan('{delta_path}')"
-            count_result = conn.execute(count_query).fetchone()
-            row_count = count_result[0] if count_result else 0
-        except Exception:
-            row_count = 0
+            conn = _get_duckdb_connection(force_reconnect=(attempt > 0))
 
-        return {
-            "table_name": project_name.lower().replace(" ", "_"),
-            "delta_path": delta_path,
-            "columns": columns,
-            "approximate_row_count": row_count,
-        }
-    except Exception as e:
-        return {"error": str(e)}
+            # Get schema using DESCRIBE
+            schema_query = f"DESCRIBE SELECT * FROM delta_scan('{delta_path}')"
+            schema_result = conn.execute(schema_query).fetchdf()
+
+            columns = [
+                {
+                    "name": row["column_name"],
+                    "type": row["column_type"],
+                    "nullable": row.get("null", "YES") == "YES",
+                }
+                for _, row in schema_result.iterrows()
+            ]
+
+            # Get approximate row count
+            try:
+                count_query = f"SELECT COUNT(*) as cnt FROM delta_scan('{delta_path}')"
+                count_result = conn.execute(count_query).fetchone()
+                row_count = count_result[0] if count_result else 0
+            except Exception:
+                row_count = 0
+
+            return {
+                "table_name": project_name.lower().replace(" ", "_"),
+                "delta_path": delta_path,
+                "columns": columns,
+                "approximate_row_count": row_count,
+            }
+        except Exception as e:
+            error_str = str(e).lower()
+            # Retry on connection-related errors
+            if attempt == 0 and ("connection" in error_str or "closed" in error_str or "invalid" in error_str):
+                print(f"[SQL] Schema query connection error, retrying: {e}")
+                continue
+            return {"error": str(e)}
+
+    return {"error": "Failed after retry"}
 
 
 # =============================================================================
@@ -234,26 +267,13 @@ async def get_total_rows(request: TableSchemaRequest):
     This is useful for setting the maximum value for training row limits.
     """
     try:
-        import duckdb
-
         delta_path = DELTA_PATHS.get(request.project_name)
         if not delta_path:
             raise HTTPException(status_code=400, detail=f"Unknown project: {request.project_name}")
 
         def query_count():
-            conn = duckdb.connect()
-            conn.execute("INSTALL delta; LOAD delta;")
-            conn.execute("INSTALL httpfs; LOAD httpfs;")
-            conn.execute(f"""
-                SET s3_region = '{AWS_REGION}';
-                SET s3_access_key_id = '{AWS_ACCESS_KEY_ID}';
-                SET s3_secret_access_key = '{AWS_SECRET_ACCESS_KEY}';
-                SET s3_endpoint = '{AWS_S3_ENDPOINT}';
-                SET s3_use_ssl = false;
-                SET s3_url_style = 'path';
-            """)
+            conn = _get_duckdb_connection()
             result = conn.execute(f"SELECT COUNT(*) FROM delta_scan('{delta_path}')").fetchone()
-            conn.close()
             return result[0] if result else 0
 
         total_rows = await asyncio.wait_for(

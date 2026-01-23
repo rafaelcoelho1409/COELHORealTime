@@ -43,8 +43,9 @@ function formatTime(date: Date): string {
 }
 
 function formatTimestamp(datePart?: string, timePart?: string): string {
-	const safeDate = datePart || formatDate(new Date());
-	const safeTime = timePart || formatTime(new Date());
+	// Handle undefined, null, and empty strings
+	const safeDate = datePart && datePart.trim() ? datePart.trim() : formatDate(new Date());
+	const safeTime = timePart && timePart.trim() ? timePart.trim() : formatTime(new Date());
 	return `${safeDate}T${safeTime}:00.000000+00:00`;
 }
 

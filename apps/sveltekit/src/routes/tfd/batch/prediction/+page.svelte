@@ -178,6 +178,9 @@
 	const isTraining = $derived($batchTrainingLoading[PROJECT]);
 	const runs = $derived($batchMlflowRuns[PROJECT] || []);
 	const modelAvailable = $derived($batchModelAvailable[PROJECT]);
+	const hasPrediction = $derived(
+		currentPrediction && Object.keys(currentPrediction).length > 0
+	);
 
 	// Fraud probability for gauge
 	const fraudProbability = $derived(currentPrediction?.fraud_probability ?? 0);
@@ -508,13 +511,22 @@
 			<Card>
 				<CardContent class="space-y-4 pt-6">
 					<!-- Gauge Chart (Plotly) -->
-					<div class="flex w-full items-center justify-center">
-						<Plotly
-							data={gaugeData}
-							layout={{ ...gaugeLayout, width: 300 }}
-							config={gaugeConfig}
-						/>
-					</div>
+						<div class="flex w-full items-center justify-center">
+							{#if hasPrediction}
+								<Plotly
+									data={gaugeData}
+									layout={{ ...gaugeLayout, width: 300 }}
+									config={gaugeConfig}
+								/>
+							{:else}
+								<div
+									class="flex h-[220px] w-[300px] flex-col items-center justify-center rounded-full border-8 border-muted bg-muted/30"
+								>
+									<span class="text-3xl font-bold text-muted-foreground">--</span>
+									<span class="text-xs text-muted-foreground">Fraud Probability</span>
+								</div>
+							{/if}
+						</div>
 
 					<!-- Prediction Summary Cards -->
 					<div class="grid grid-cols-3 gap-3">
@@ -526,7 +538,7 @@
 									<span class="text-xs text-muted-foreground">Classification</span>
 								</div>
 								<p class="text-lg font-bold" style="color: {predictionColor}">
-									{predictionText}
+									{hasPrediction ? predictionText : '--'}
 								</p>
 							</CardContent>
 						</Card>
@@ -539,7 +551,7 @@
 									<span class="text-xs text-muted-foreground">Fraud</span>
 								</div>
 								<p class="text-lg font-bold text-red-500">
-									{(fraudProbability * 100).toFixed(2)}%
+									{hasPrediction ? `${(fraudProbability * 100).toFixed(2)}%` : '--'}
 								</p>
 							</CardContent>
 						</Card>
@@ -552,7 +564,7 @@
 									<span class="text-xs text-muted-foreground">Not Fraud</span>
 								</div>
 								<p class="text-lg font-bold text-green-500">
-									{(notFraudProbability * 100).toFixed(2)}%
+									{hasPrediction ? `${(notFraudProbability * 100).toFixed(2)}%` : '--'}
 								</p>
 							</CardContent>
 						</Card>

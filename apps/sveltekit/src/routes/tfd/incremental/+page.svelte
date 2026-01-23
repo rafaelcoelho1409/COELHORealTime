@@ -230,6 +230,15 @@
 		trainingLoading = true;
 		try {
 			if (enabled) {
+				// Check if any training is already active (global training lock)
+				const statusResult = await incrementalApi.getTrainingStatus();
+				if (statusResult.data?.is_active && statusResult.data?.project_name !== PROJECT) {
+					toast.error(
+						`Cannot start training: ${statusResult.data.project_name} training is already running. Stop it first.`
+					);
+					return;
+				}
+
 				const result = await incrementalApi.startTraining(PROJECT);
 				if (result.error) {
 					toast.error(result.error);
@@ -319,6 +328,9 @@
 	const isLoading = $derived($predictionLoading[PROJECT]);
 	const isTrainingEnabled = $derived($incrementalMlEnabled[PROJECT]);
 	const currentMlflowUrl = $derived($mlflowExperimentUrl[PROJECT]);
+	const hasPrediction = $derived(
+		currentPrediction && Object.keys(currentPrediction).length > 0
+	);
 
 	// Derived values for prediction display
 	const fraudProbability = $derived(currentPrediction?.fraud_probability ?? 0);
@@ -835,7 +847,7 @@
 												Classification
 											</div>
 											<p class="mt-1 text-lg font-bold" style="color: {predictionColor}">
-												{predictionText}
+												{hasPrediction ? predictionText : '--'}
 											</p>
 										</CardContent>
 									</Card>
@@ -846,7 +858,7 @@
 												Fraud
 											</div>
 											<p class="mt-1 text-lg font-bold text-red-500">
-												{(fraudProbability * 100).toFixed(2)}%
+												{hasPrediction ? `${(fraudProbability * 100).toFixed(2)}%` : '--'}
 											</p>
 										</CardContent>
 									</Card>
@@ -857,7 +869,7 @@
 												Not Fraud
 											</div>
 											<p class="mt-1 text-lg font-bold text-green-500">
-												{((1 - fraudProbability) * 100).toFixed(2)}%
+												{hasPrediction ? `${((1 - fraudProbability) * 100).toFixed(2)}%` : '--'}
 											</p>
 										</CardContent>
 									</Card>

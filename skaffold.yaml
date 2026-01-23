@@ -44,7 +44,7 @@ build:
       context: ./apps/sveltekit
       docker:
         dockerfile: Dockerfile.sveltekit
-        noCache: false
+        noCache: true  # Force fresh build to clear SvelteKit cache
       sync:
         manual:
           - src: "**/*.svelte"
@@ -259,7 +259,7 @@ profiles:
           context: ./apps/sveltekit
           docker:
             dockerfile: Dockerfile.sveltekit
-            noCache: false
+            noCache: true  # Force fresh build to clear SvelteKit cache
           sync:
             manual:
               - src: "**/*.svelte"
