@@ -118,8 +118,17 @@
 	}
 
 	// YellowBrick visualizer options organized by category (matching Reflex exactly)
+	const YELLOWBRICK_LABEL_SUFFIX = ' — YellowBrick';
+	const SKLEARN_LABEL_SUFFIX = ' — Scikit-Learn';
+	const SKLEARN_PREFIX = 'sklearn:';
+	const withYellowBrickSuffix = (options: Array<{ value: string; label: string }>) =>
+		options.map((option) =>
+			option.value
+				? { ...option, label: `${option.label}${YELLOWBRICK_LABEL_SUFFIX}` }
+				: option
+		);
 	const YELLOWBRICK_CATEGORIES = {
-		Classification: [
+		Classification: withYellowBrickSuffix([
 			{ value: '', label: 'Select visualization...' },
 			{ value: 'ConfusionMatrix', label: 'Confusion Matrix' },
 			{ value: 'ClassificationReport', label: 'Classification Report' },
@@ -127,8 +136,14 @@
 			{ value: 'PrecisionRecallCurve', label: 'Precision-Recall Curve' },
 			{ value: 'ClassPredictionError', label: 'Class Prediction Error' },
 			{ value: 'DiscriminationThreshold', label: 'Discrimination Threshold' }
-		],
-		'Feature Analysis': [
+		]).concat([
+			{ value: `${SKLEARN_PREFIX}ConfusionMatrixDisplay`, label: `Confusion Matrix${SKLEARN_LABEL_SUFFIX}` },
+			{ value: `${SKLEARN_PREFIX}CalibrationDisplay`, label: `Calibration Curve${SKLEARN_LABEL_SUFFIX}` },
+			{ value: `${SKLEARN_PREFIX}PrecisionRecallDisplay`, label: `Precision-Recall Curve${SKLEARN_LABEL_SUFFIX}` },
+			{ value: `${SKLEARN_PREFIX}RocCurveDisplay`, label: `ROC Curve${SKLEARN_LABEL_SUFFIX}` },
+			{ value: `${SKLEARN_PREFIX}DetCurveDisplay`, label: `DET Curve${SKLEARN_LABEL_SUFFIX}` }
+		]),
+		'Feature Analysis': withYellowBrickSuffix([
 			{ value: '', label: 'Select visualization...' },
 			{ value: 'Rank1D', label: 'Rank 1D' },
 			{ value: 'Rank2D', label: 'Rank 2D' },
@@ -137,15 +152,18 @@
 			{ value: 'ParallelCoordinates', label: 'Parallel Coordinates' },
 			{ value: 'RadViz', label: 'RadViz' },
 			{ value: 'JointPlot', label: 'Joint Plot' }
-		],
-		Target: [
+		]).concat([
+			{ value: `${SKLEARN_PREFIX}PartialDependenceDisplay`, label: `Partial Dependence${SKLEARN_LABEL_SUFFIX}` },
+			{ value: `${SKLEARN_PREFIX}DecisionBoundaryDisplay`, label: `Decision Boundary${SKLEARN_LABEL_SUFFIX}` }
+		]),
+		Target: withYellowBrickSuffix([
 			{ value: '', label: 'Select visualization...' },
 			{ value: 'ClassBalance', label: 'Class Balance' },
 			{ value: 'FeatureCorrelation', label: 'Feature Correlation (Mutual Info)' },
 			{ value: 'FeatureCorrelation_Pearson', label: 'Feature Correlation (Pearson)' },
 			{ value: 'BalancedBinningReference', label: 'Balanced Binning Reference' }
-		],
-		'Model Selection': [
+		]),
+		'Model Selection': withYellowBrickSuffix([
 			{ value: '', label: 'Select visualization...' },
 			{ value: 'FeatureImportances', label: 'Feature Importances' },
 			{ value: 'CVScores', label: 'Cross-Validation Scores' },
@@ -153,7 +171,10 @@
 			{ value: 'LearningCurve', label: 'Learning Curve' },
 			{ value: 'RFECV', label: 'Recursive Feature Elimination' },
 			{ value: 'DroppingCurve', label: 'Dropping Curve' }
-		]
+		]).concat([
+			{ value: `${SKLEARN_PREFIX}LearningCurveDisplay`, label: `Learning Curve${SKLEARN_LABEL_SUFFIX}` },
+			{ value: `${SKLEARN_PREFIX}ValidationCurveDisplay`, label: `Validation Curve${SKLEARN_LABEL_SUFFIX}` }
+		])
 	};
 
 	let activeTab = $state('prediction');
@@ -403,17 +424,25 @@
 			return;
 		}
 
+		const isSklearnVisualizer = visualizerName.startsWith(SKLEARN_PREFIX);
+		const metricName = isSklearnVisualizer
+			? visualizerName.replace(SKLEARN_PREFIX, '')
+			: visualizerName;
+		const visualizerKey = visualizerName;
+
 		// Reset cancel flag before starting new load
 		yellowBrickCancelRequested = false;
 
 		// Update category and visualizer
 		currentYellowBrickCategory = category;
-		updateProjectStore(selectedYellowBrickVisualizer, PROJECT, visualizerName);
-		updateProjectStore(yellowBrickLoading, PROJECT, { [visualizerName]: true });
+		updateProjectStore(selectedYellowBrickVisualizer, PROJECT, visualizerKey);
+		updateProjectStore(yellowBrickLoading, PROJECT, { [visualizerKey]: true });
 
 		const runId = $selectedBatchRun[PROJECT] || undefined;
 		// API expects: metric_type (category), metric_name (visualizerName)
-		const result = await batchApi.getYellowBrickImage(PROJECT, category, visualizerName, runId);
+		const result = isSklearnVisualizer
+			? await batchApi.getSklearnImage(PROJECT, category, metricName, runId)
+			: await batchApi.getYellowBrickImage(PROJECT, category, metricName, runId);
 
 		// Check if cancelled before updating UI (matching Reflex pattern)
 		if (yellowBrickCancelRequested) {
@@ -425,14 +454,14 @@
 				...imgs,
 				[PROJECT]: {
 					...imgs[PROJECT],
-					[visualizerName]: result.data!.image_base64
+					[visualizerKey]: result.data!.image_base64
 				}
 			}));
 		} else if (result.error || result.data?.error) {
-			toast.error(`Failed to load ${visualizerName}: ${result.error || result.data?.error}`);
+			toast.error(`Failed to load ${metricName}: ${result.error || result.data?.error}`);
 		}
 
-		updateProjectStore(yellowBrickLoading, PROJECT, { [visualizerName]: false });
+		updateProjectStore(yellowBrickLoading, PROJECT, { [visualizerKey]: false });
 	}
 
 	function openMetricInfo(metricKey: string) {

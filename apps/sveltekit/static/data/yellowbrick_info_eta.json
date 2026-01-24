@@ -23,6 +23,16 @@
       "parameters": "`identity`: Show identity line (y=x), `best_fit`: Show linear fit line, `alpha`: Point transparency",
       "docs_url": "https://www.scikit-yb.org/en/latest/api/regressor/peplot.html"
     },
+    "sklearn:PredictionErrorDisplay": {
+      "name": "Prediction Error (Sklearn)",
+      "category": "Regression",
+      "description": "Sklearn display showing residuals vs predicted values or true vs predicted values for regression diagnostics.",
+      "interpretation": "A random scatter around zero indicates unbiased predictions. Patterns or funnels suggest heteroscedasticity or missing nonlinearities.",
+      "eta_context": "Highlights whether ETA errors grow for long trips or specific ranges. Systematic offsets imply biased travel-time estimation.",
+      "when_to_use": "Use to validate regression accuracy and quickly diagnose bias.",
+      "parameters": "`kind`: residual_vs_predicted for diagnostics, `subsample`: cap points for speed, `scatter_kwargs`: point styling",
+      "docs_url": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.PredictionErrorDisplay.html"
+    },
     "Rank1D": {
       "name": "Rank 1D (Feature Ranking)",
       "category": "Feature Analysis",
@@ -72,6 +82,16 @@
       "when_to_use": "Use for deep-dive into specific feature relationships. Best after identifying interesting correlations in Rank2D.",
       "parameters": "`columns`: Feature pair to plot, `alpha`: Point transparency",
       "docs_url": "https://www.scikit-yb.org/en/latest/api/features/jointplot.html"
+    },
+    "sklearn:PartialDependenceDisplay": {
+      "name": "Partial Dependence (Sklearn)",
+      "category": "Feature Analysis",
+      "description": "Shows how a feature or feature pair affects predicted travel time on average.",
+      "interpretation": "Curves reveal monotonic or nonlinear effects. Flat curves mean low influence; steep curves indicate strong impact on ETA.",
+      "eta_context": "Use to confirm that distance, weather, and traffic factors influence ETA in realistic directions and magnitudes.",
+      "when_to_use": "Use for model interpretability and sanity-checking feature behavior.",
+      "parameters": "`features`: Feature names, `categorical_features`: Categorical indices, `grid_resolution`: Curve detail",
+      "docs_url": "https://scikit-learn.org/stable/modules/generated/sklearn.inspection.PartialDependenceDisplay.html"
     },
     "FeatureCorrelation": {
       "name": "Feature-Target Correlation (Mutual Info)",
@@ -142,6 +162,26 @@
       "when_to_use": "Use to decide between collecting more data vs engineering better features. Important for production planning and data strategy.",
       "parameters": "`train_sizes`: Training set fractions to test, `cv`: Cross-validation folds, `scoring`: Metric",
       "docs_url": "https://www.scikit-yb.org/en/latest/api/model_selection/learning_curve.html"
+    },
+    "sklearn:LearningCurveDisplay": {
+      "name": "Learning Curve (Sklearn)",
+      "category": "Model Selection",
+      "description": "Plots training and validation score vs number of training samples for regression models.",
+      "interpretation": "Large train-test gap indicates overfitting; low scores for both indicate underfitting. Convergence suggests more data may not help.",
+      "eta_context": "Reveals whether collecting more ETA trip data would improve RMSE or if model capacity is the bottleneck.",
+      "when_to_use": "Use for bias/variance analysis and data collection decisions.",
+      "parameters": "`scoring`: neg_root_mean_squared_error, `train_sizes`: Sample fractions, `std_display_style`: fill_between",
+      "docs_url": "https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.LearningCurveDisplay.html"
+    },
+    "sklearn:ValidationCurveDisplay": {
+      "name": "Validation Curve (Sklearn)",
+      "category": "Model Selection",
+      "description": "Plots training and validation score as a hyperparameter varies.",
+      "interpretation": "Find the hyperparameter value that maximizes validation score while minimizing the train-test gap.",
+      "eta_context": "Use to tune tree depth or other complexity controls for stable ETA predictions.",
+      "when_to_use": "Use during hyperparameter tuning to select robust settings.",
+      "parameters": "`param_name`: Hyperparameter, `param_range`: Values to test, `scoring`: neg_root_mean_squared_error",
+      "docs_url": "https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.ValidationCurveDisplay.html"
     },
     "RFECV": {
       "name": "Recursive Feature Elimination CV",

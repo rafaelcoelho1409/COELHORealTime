@@ -203,6 +203,36 @@
       "parameters": "`feature_sizes`: Fractions of features to test, `cv`: Cross-validation folds, `random_state`: Reproducibility",
       "docs_url": "https://www.scikit-yb.org/en/latest/api/model_selection/dropping_curve.html"
     },
+    "sklearn:PartialDependenceDisplay": {
+      "name": "Partial Dependence (Sklearn)",
+      "category": "Feature Analysis",
+      "description": "Shows how features influence the probability of belonging to a specific cluster, using pseudo-labels from clustering.",
+      "interpretation": "Curves highlight which feature values push events toward a cluster. Flat lines indicate low influence.",
+      "ecci_context": "Helps interpret cluster drivers: e.g., higher prices or longer sessions might increase the probability of a premium segment.",
+      "when_to_use": "Use for explaining cluster characteristics and validating that cluster drivers make sense.",
+      "parameters": "`features`: Feature names, `target`: Cluster index, `grid_resolution`: Curve detail",
+      "docs_url": "https://scikit-learn.org/stable/modules/generated/sklearn.inspection.PartialDependenceDisplay.html"
+    },
+    "sklearn:LearningCurveDisplay": {
+      "name": "Learning Curve (Sklearn)",
+      "category": "Model Selection",
+      "description": "Plots train and validation accuracy as training sample size increases for the pseudo-supervised cluster classifier.",
+      "interpretation": "Converging curves imply stable cluster separability. Large gaps suggest overfitting to cluster labels.",
+      "ecci_context": "Indicates whether cluster assignments are robust across more events or sensitive to sample size.",
+      "when_to_use": "Use when validating stability of cluster labeling or deciding if more data improves separation.",
+      "parameters": "`train_sizes`: Sample fractions, `cv`: Splits, `scoring`: accuracy",
+      "docs_url": "https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.LearningCurveDisplay.html"
+    },
+    "sklearn:ValidationCurveDisplay": {
+      "name": "Validation Curve (Sklearn)",
+      "category": "Model Selection",
+      "description": "Plots train and validation accuracy as a classifier hyperparameter varies for pseudo-label modeling.",
+      "interpretation": "Find the parameter region where validation accuracy peaks without a large train-test gap.",
+      "ecci_context": "Use to tune the surrogate classifier that explains clusters, not the KMeans model itself.",
+      "when_to_use": "Use when you want a stable surrogate model for explaining clusters.",
+      "parameters": "`param_name`: Hyperparameter, `param_range`: Values to test",
+      "docs_url": "https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.ValidationCurveDisplay.html"
+    },
     "FreqDistVisualizer": {
       "name": "Frequency Distribution Visualizer",
       "category": "Text Analysis",

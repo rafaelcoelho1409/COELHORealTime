@@ -110,27 +110,40 @@
 	}
 
 	// YellowBrick visualizer options organized by category (regression)
+	const YELLOWBRICK_LABEL_SUFFIX = ' — YellowBrick';
+	const SKLEARN_LABEL_SUFFIX = ' — Scikit-Learn';
+	const SKLEARN_PREFIX = 'sklearn:';
+	const withYellowBrickSuffix = (options: Array<{ value: string; label: string }>) =>
+		options.map((option) =>
+			option.value
+				? { ...option, label: `${option.label}${YELLOWBRICK_LABEL_SUFFIX}` }
+				: option
+		);
 	const YELLOWBRICK_CATEGORIES = {
-		Regression: [
+		Regression: withYellowBrickSuffix([
 			{ value: '', label: 'Select visualization...' },
 			{ value: 'ResidualsPlot', label: 'Residuals Plot' },
 			{ value: 'PredictionError', label: 'Prediction Error' }
-		],
-		'Feature Analysis': [
+		]).concat([
+			{ value: `${SKLEARN_PREFIX}PredictionErrorDisplay`, label: `Prediction Error${SKLEARN_LABEL_SUFFIX}` }
+		]),
+		'Feature Analysis': withYellowBrickSuffix([
 			{ value: '', label: 'Select visualization...' },
 			{ value: 'Rank1D', label: 'Rank 1D' },
 			{ value: 'Rank2D', label: 'Rank 2D' },
 			{ value: 'PCA', label: 'PCA Decomposition' },
 			{ value: 'Manifold', label: 'Manifold' },
 			{ value: 'JointPlot', label: 'Joint Plot' }
-		],
-		Target: [
+		]).concat([
+			{ value: `${SKLEARN_PREFIX}PartialDependenceDisplay`, label: `Partial Dependence${SKLEARN_LABEL_SUFFIX}` }
+		]),
+		Target: withYellowBrickSuffix([
 			{ value: '', label: 'Select visualization...' },
 			{ value: 'FeatureCorrelation', label: 'Feature Correlation (Mutual Info)' },
 			{ value: 'FeatureCorrelation_Pearson', label: 'Feature Correlation (Pearson)' },
 			{ value: 'BalancedBinningReference', label: 'Balanced Binning Reference' }
-		],
-		'Model Selection': [
+		]),
+		'Model Selection': withYellowBrickSuffix([
 			{ value: '', label: 'Select visualization...' },
 			{ value: 'FeatureImportances', label: 'Feature Importances' },
 			{ value: 'CVScores', label: 'Cross-Validation Scores' },
@@ -138,7 +151,10 @@
 			{ value: 'LearningCurve', label: 'Learning Curve' },
 			{ value: 'RFECV', label: 'Recursive Feature Elimination' },
 			{ value: 'DroppingCurve', label: 'Dropping Curve' }
-		]
+		]).concat([
+			{ value: `${SKLEARN_PREFIX}LearningCurveDisplay`, label: `Learning Curve${SKLEARN_LABEL_SUFFIX}` },
+			{ value: `${SKLEARN_PREFIX}ValidationCurveDisplay`, label: `Validation Curve${SKLEARN_LABEL_SUFFIX}` }
+		])
 	};
 
 	let activeTab = $state('prediction');
@@ -330,13 +346,21 @@
 			return;
 		}
 
+		const isSklearnVisualizer = visualizerName.startsWith(SKLEARN_PREFIX);
+		const metricName = isSklearnVisualizer
+			? visualizerName.replace(SKLEARN_PREFIX, '')
+			: visualizerName;
+		const visualizerKey = visualizerName;
+
 		yellowBrickCancelRequested = false;
 		currentYellowBrickCategory = category;
-		updateProjectStore(selectedYellowBrickVisualizer, PROJECT, visualizerName);
-		updateProjectStore(yellowBrickLoading, PROJECT, { [visualizerName]: true });
+		updateProjectStore(selectedYellowBrickVisualizer, PROJECT, visualizerKey);
+		updateProjectStore(yellowBrickLoading, PROJECT, { [visualizerKey]: true });
 
 		const runId = $selectedBatchRun[PROJECT] || undefined;
-		const result = await batchApi.getYellowBrickImage(PROJECT, category, visualizerName, runId);
+		const result = isSklearnVisualizer
+			? await batchApi.getSklearnImage(PROJECT, category, metricName, runId)
+			: await batchApi.getYellowBrickImage(PROJECT, category, metricName, runId);
 
 		if (yellowBrickCancelRequested) return;
 
@@ -345,14 +369,14 @@
 				...imgs,
 				[PROJECT]: {
 					...imgs[PROJECT],
-					[visualizerName]: result.data!.image_base64
+					[visualizerKey]: result.data!.image_base64
 				}
 			}));
 		} else if (result.error || result.data?.error) {
-			toast.error(`Failed to load ${visualizerName}: ${result.error || result.data?.error}`);
+			toast.error(`Failed to load ${metricName}: ${result.error || result.data?.error}`);
 		}
 
-		updateProjectStore(yellowBrickLoading, PROJECT, { [visualizerName]: false });
+		updateProjectStore(yellowBrickLoading, PROJECT, { [visualizerKey]: false });
 	}
 
 	function openMetricInfo(metricKey: string) {

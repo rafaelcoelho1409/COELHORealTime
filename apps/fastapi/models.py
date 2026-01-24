@@ -304,6 +304,14 @@ class YellowBrickRequest(BaseModel):
     run_id: Optional[str] = None  # Optional: specific run, or None for best
 
 
+class SklearnVisualizationRequest(BaseModel):
+    """Request for sklearn visualization generation."""
+    project_name: str
+    metric_type: str  # Classification, Feature Analysis, Model Selection
+    metric_name: str  # ConfusionMatrixDisplay, RocCurveDisplay, etc.
+    run_id: Optional[str] = None  # Optional: specific run, or None for best
+
+
 # =============================================================================
 # API Request Models - Delta Lake SQL
 # =============================================================================

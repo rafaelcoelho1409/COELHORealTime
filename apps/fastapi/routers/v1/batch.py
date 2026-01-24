@@ -27,6 +27,7 @@ from models import (
     MLflowMetricsRequest,
     TrainingStatusUpdate,
     YellowBrickRequest,
+    SklearnVisualizationRequest,
     PredictRequest,
     SklearnHealthcheck,
 )
@@ -1192,6 +1193,17 @@ def _get_visualization_artifact_path(metric_type: str, metric_name: str) -> str:
     return f"visualizations/{module_name}/{metric_name}.png"
 
 
+def _get_sklearn_visualization_artifact_path(metric_type: str, metric_name: str) -> str:
+    """Get MLflow artifact path for a sklearn visualization."""
+    module_map = {
+        "Classification": "classifier",
+        "Feature Analysis": "features",
+        "Model Selection": "model_selection",
+    }
+    module_name = module_map.get(metric_type, metric_type.lower().replace(" ", "_"))
+    return f"visualizations/sklearn/{module_name}/{metric_name}.png"
+
+
 def _check_visualization_artifact(run_id: str, artifact_path: str) -> Optional[bytes]:
     """Check if visualization artifact exists in MLflow run.
 
@@ -1460,6 +1472,94 @@ def _sync_generate_yellowbrick_plot(
             fig_buf.close()
 
 
+def _sync_generate_sklearn_plot(
+    project_name: str,
+    metric_type: str,
+    metric_name: str,
+    run_id: str = None,
+) -> tuple:
+    """Synchronous sklearn plot generation with MLflow artifact caching."""
+    import io
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from utils.sklearn import (
+        load_training_data_from_mlflow,
+        sklearn_classification_visualizers,
+        sklearn_regression_visualizers,
+        sklearn_clustering_visualizers,
+    )
+
+    task_type = PROJECT_TASK_TYPES.get(project_name)
+    if task_type not in {"classification", "regression", "clustering"}:
+        raise ValueError(f"Sklearn visualizations not supported for project: {project_name}")
+
+    if run_id is None:
+        model_name = BATCH_MODEL_NAMES.get(project_name)
+        run_id = get_best_mlflow_run(project_name, model_name)
+        if run_id is None:
+            raise ValueError("No trained model found in MLflow.")
+
+    artifact_path = _get_sklearn_visualization_artifact_path(metric_type, metric_name)
+    cached_image = _check_visualization_artifact(run_id, artifact_path)
+    if cached_image is not None:
+        print(f"MLflow artifact cache HIT: {artifact_path} (run_id={run_id[:8]}...)")
+        return cached_image, run_id, True
+
+    print(f"MLflow artifact cache MISS: {artifact_path} (run_id={run_id[:8]}...) - generating...")
+
+    result = load_training_data_from_mlflow(project_name, run_id=run_id)
+    if result is None:
+        raise ValueError(
+            "No training data found in MLflow. Train a model first to generate visualizations."
+        )
+
+    X_train, X_test, y_train, y_test, feature_names = result
+    fig_buf = io.BytesIO()
+
+    try:
+        if task_type == "classification":
+            display = sklearn_classification_visualizers(
+                metric_name,
+                X_train,
+                X_test,
+                y_train,
+                y_test,
+                feature_names,
+                project_name,
+            )
+        elif task_type == "regression":
+            display = sklearn_regression_visualizers(
+                metric_name,
+                X_train,
+                X_test,
+                y_train,
+                y_test,
+                feature_names,
+                project_name,
+            )
+        else:
+            display = sklearn_clustering_visualizers(
+                metric_name,
+                X_train,
+                X_test,
+                y_train,
+                y_test,
+                feature_names,
+                project_name,
+            )
+        display.figure_.savefig(fig_buf, format="png", bbox_inches="tight")
+        fig_buf.seek(0)
+        image_bytes = fig_buf.getvalue()
+        _save_artifact(run_id, artifact_path, image_bytes)
+        return image_bytes, run_id, False
+    finally:
+        plt.clf()
+        plt.close("all")
+        fig_buf.close()
+
+
 @router.post("/yellowbrick-metric")
 async def yellowbrick_metric(request: YellowBrickRequest):
     """Generate YellowBrick visualizations for a specific MLflow run.
@@ -1512,6 +1612,57 @@ async def yellowbrick_metric(request: YellowBrickRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         print(f"Error generating yellowbrick plot: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to generate visualization: {str(e)}")
+
+
+@router.post("/sklearn-metric")
+async def sklearn_metric(request: SklearnVisualizationRequest):
+    """Generate sklearn visualizations for a specific MLflow run."""
+    import base64
+
+    project_name = request.project_name
+    metric_type = request.metric_type
+    metric_name = request.metric_name
+    run_id = request.run_id
+
+    print(f"[DEBUG] sklearn_metric called: project={project_name}, type={metric_type}, name={metric_name}, run_id={run_id}")
+
+    if not all([project_name, metric_type, metric_name]):
+        raise HTTPException(
+            status_code=400,
+            detail="Missing required fields: project_name, metric_type, metric_name"
+        )
+
+    try:
+        image_bytes, actual_run_id, cache_hit = await asyncio.wait_for(
+            asyncio.to_thread(
+                _sync_generate_sklearn_plot,
+                project_name,
+                metric_type,
+                metric_name,
+                run_id,
+            ),
+            timeout=300.0,
+        )
+
+        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+        return {
+            "image_base64": image_base64,
+            "cache": "HIT" if cache_hit else "MISS",
+            "cache_type": "mlflow_artifact",
+            "metric_type": metric_type,
+            "metric_name": metric_name,
+            "run_id": actual_run_id,
+        }
+
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Visualization generation timed out")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"Error generating sklearn plot: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to generate visualization: {str(e)}")

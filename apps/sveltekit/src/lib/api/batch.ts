@@ -210,6 +210,23 @@ export async function getYellowBrickImage(
 	);
 }
 
+/**
+ * Get sklearn visualization image
+ */
+export async function getSklearnImage(
+	projectName: ProjectName,
+	metricType: string,
+	metricName: string,
+	runId?: string
+) {
+	return apiPost<{ image_base64: string; error?: string }>(`${API.BATCH}/sklearn-metric`, {
+		project_name: projectName,
+		metric_type: metricType,
+		metric_name: metricName,
+		run_id: runId
+	});
+}
+
 // =============================================================================
 // Delta Lake Info
 // =============================================================================

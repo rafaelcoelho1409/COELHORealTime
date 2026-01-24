@@ -63,6 +63,96 @@
       "parameters": "`n_trials`: Number of CV trials, `cv`: Cross-validation fraction, `argmax`: Metric to optimize (fscore, precision, recall)",
       "docs_url": "https://www.scikit-yb.org/en/latest/api/classifier/threshold.html"
     },
+    "sklearn:ConfusionMatrixDisplay": {
+      "name": "Confusion Matrix (Sklearn)",
+      "category": "Classification",
+      "description": "Sklearn's confusion matrix display showing normalized or raw counts of true vs predicted labels.",
+      "interpretation": "The diagonal shows correct predictions. Off-diagonal cells show false positives and false negatives. With normalization, values represent percentages per true class.",
+      "fraud_context": "Focus on the fraud row: high false negatives mean missed fraud. Normalized values help compare across imbalanced classes.",
+      "when_to_use": "Use as the first sanity check for any classification model. Best paired with ROC/PR curves.",
+      "parameters": "`normalize`: 'true' for per-class rates, `display_labels`: Class names, `values_format`: Numeric format, `cmap`: Color palette",
+      "docs_url": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.ConfusionMatrixDisplay.html"
+    },
+    "sklearn:CalibrationDisplay": {
+      "name": "Calibration Curve (Sklearn)",
+      "category": "Classification",
+      "description": "Reliability diagram comparing predicted probabilities to observed frequencies across bins.",
+      "interpretation": "A perfectly calibrated model lies on the diagonal. Curves above the line mean under-confident probabilities; below mean over-confident.",
+      "fraud_context": "Calibrated probabilities are critical when thresholds drive automated actions or risk scoring. Over-confident fraud scores can trigger unnecessary declines.",
+      "when_to_use": "Use when you rely on predicted probabilities for decisioning, not just class labels.",
+      "parameters": "`n_bins`: Number of bins, `strategy`: 'quantile' for equal-sized bins, `pos_label`: Fraud class",
+      "docs_url": "https://scikit-learn.org/stable/modules/generated/sklearn.calibration.CalibrationDisplay.html"
+    },
+    "sklearn:PrecisionRecallDisplay": {
+      "name": "Precision-Recall Curve (Sklearn)",
+      "category": "Classification",
+      "description": "Plots precision vs recall across thresholds using sklearn's display API.",
+      "interpretation": "Top-right is ideal. The chance level is the fraud rate baseline. Curves above it indicate useful signal.",
+      "fraud_context": "Most informative curve for imbalanced fraud data. Prioritize recall improvements without collapsing precision.",
+      "when_to_use": "Use for comparing classifiers under class imbalance and tuning thresholds.",
+      "parameters": "`response_method`: 'predict_proba', `plot_chance_level`: Show baseline, `pos_label`: Fraud class",
+      "docs_url": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.PrecisionRecallDisplay.html"
+    },
+    "sklearn:RocCurveDisplay": {
+      "name": "ROC Curve (Sklearn)",
+      "category": "Classification",
+      "description": "ROC curve plotting true positive rate vs false positive rate across thresholds.",
+      "interpretation": "Closer to top-left is better. The diagonal is random performance. AUC summarizes the curve.",
+      "fraud_context": "Use ROC for model comparison, but also review PR curve due to imbalance.",
+      "when_to_use": "Use to compare models or tune thresholds when you need a global view of TPR/FPR tradeoffs.",
+      "parameters": "`response_method`: 'predict_proba', `plot_chance_level`: Baseline line, `curve_kwargs`: Styling",
+      "docs_url": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.RocCurveDisplay.html"
+    },
+    "sklearn:DetCurveDisplay": {
+      "name": "DET Curve (Sklearn)",
+      "category": "Classification",
+      "description": "Detection Error Tradeoff curve showing false negative rate vs false positive rate on a probit scale.",
+      "interpretation": "Lower-left is better. DET curves magnify differences in low-error regions, helpful for high-precision systems.",
+      "fraud_context": "Useful when you need to compare detectors at very low false positive rates (e.g., minimize customer friction).",
+      "when_to_use": "Use when operating in strict low-FP regimes or comparing detectors in high-precision environments.",
+      "parameters": "`response_method`: 'predict_proba', `drop_intermediate`: False for full curve",
+      "docs_url": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.DetCurveDisplay.html"
+    },
+    "sklearn:PartialDependenceDisplay": {
+      "name": "Partial Dependence (Sklearn)",
+      "category": "Feature Analysis",
+      "description": "Shows the marginal effect of a feature (or pair) on predicted fraud probability.",
+      "interpretation": "Curves reveal how prediction changes as a feature varies, averaging out other features. Flat lines = low influence.",
+      "fraud_context": "Highlights feature behaviors that drive fraud risk (e.g., high amounts increasing probability). Helps explain model behavior.",
+      "when_to_use": "Use for model interpretability and to validate that feature effects match domain expectations.",
+      "parameters": "`features`: Feature names, `categorical_features`: Categorical indices, `grid_resolution`: Curve granularity",
+      "docs_url": "https://scikit-learn.org/stable/modules/generated/sklearn.inspection.PartialDependenceDisplay.html"
+    },
+    "sklearn:DecisionBoundaryDisplay": {
+      "name": "Decision Boundary (Sklearn)",
+      "category": "Feature Analysis",
+      "description": "2D decision surface for two features, showing where the classifier switches between classes.",
+      "interpretation": "Regions show predicted class probability. Overlay points reveal separability for those features.",
+      "fraud_context": "Helps evaluate whether two key features (amount + account age) can separate fraud from legitimate transactions.",
+      "when_to_use": "Use for intuitive 2D explanations or to validate feature pairs.",
+      "parameters": "`grid_resolution`: Surface detail, `plot_method`: 'contourf', `class_of_interest`: Fraud class",
+      "docs_url": "https://scikit-learn.org/stable/modules/generated/sklearn.inspection.DecisionBoundaryDisplay.html"
+    },
+    "sklearn:LearningCurveDisplay": {
+      "name": "Learning Curve (Sklearn)",
+      "category": "Model Selection",
+      "description": "Plots training and validation score vs number of training samples.",
+      "interpretation": "Large gap between curves = overfitting. Low scores for both = underfitting. Convergence suggests more data may not help.",
+      "fraud_context": "Shows if more labeled fraud data will materially improve recall/precision.",
+      "when_to_use": "Use for diagnosing bias/variance and deciding whether to collect more data.",
+      "parameters": "`train_sizes`: Sample fractions, `scoring`: 'roc_auc', `std_display_style`: 'fill_between'",
+      "docs_url": "https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.LearningCurveDisplay.html"
+    },
+    "sklearn:ValidationCurveDisplay": {
+      "name": "Validation Curve (Sklearn)",
+      "category": "Model Selection",
+      "description": "Plots training and validation score as a single hyperparameter varies.",
+      "interpretation": "Find the hyperparameter value that maximizes validation score while minimizing train-test gap.",
+      "fraud_context": "Use to tune regularization strength for stable fraud detection without overfitting rare fraud patterns.",
+      "when_to_use": "Use during hyperparameter tuning to identify robust settings.",
+      "parameters": "`param_name`: Hyperparameter, `param_range`: Values to test, `scoring`: 'roc_auc'",
+      "docs_url": "https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.ValidationCurveDisplay.html"
+    },
     "Rank1D": {
       "name": "Rank 1D (Feature Ranking)",
       "category": "Feature Analysis",

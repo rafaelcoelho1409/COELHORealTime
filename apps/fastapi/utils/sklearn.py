@@ -19,7 +19,22 @@ import mlflow
 from sklearn.model_selection import (
     train_test_split,
     StratifiedKFold,
+    KFold,
 )
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.calibration import CalibrationDisplay
+from sklearn.inspection import DecisionBoundaryDisplay, PartialDependenceDisplay
+from sklearn.metrics import (
+    ConfusionMatrixDisplay,
+    DetCurveDisplay,
+    PrecisionRecallDisplay,
+    RocCurveDisplay,
+    PredictionErrorDisplay,
+)
+from sklearn.model_selection import LearningCurveDisplay, ValidationCurveDisplay
+from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from catboost import CatBoostClassifier, CatBoostRegressor
 from yellowbrick import (
     classifier,
@@ -1815,6 +1830,517 @@ def yellowbrick_classification_visualizers(
         return visualizer
     return None
 
+
+# =============================================================================
+# Sklearn Classification Visualizers
+# Reference: https://scikit-learn.org/stable/visualizations.html
+# =============================================================================
+
+def sklearn_classification_viz_config(
+    project_name: str,
+    feature_names: list,
+) -> dict:
+    """Get kwargs for sklearn classification display objects."""
+    categorical_features = PROJECT_CATEGORICAL_FEATURES.get(project_name, [])
+    categorical_indices = [
+        feature_names.index(name)
+        for name in categorical_features
+        if name in feature_names
+    ]
+
+    boundary_candidates = ["amount", "account_age_days"]
+    boundary_features = [
+        name for name in boundary_candidates if name in feature_names
+    ]
+    if len(boundary_features) < 2:
+        boundary_features = feature_names[:2]
+
+    partial_candidates = [
+        "amount",
+        "account_age_days",
+        "payment_method",
+        "product_category",
+    ]
+    partial_features = [name for name in partial_candidates if name in feature_names]
+    if not partial_features:
+        partial_features = feature_names[:4]
+
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    pos_label = 1
+
+    return {
+        "boundary_features": boundary_features,
+        "partial_features": partial_features,
+        "categorical_indices": categorical_indices,
+        "cv": cv,
+        "kwargs": {
+            "CalibrationDisplay": {
+                "n_bins": 10,
+                "strategy": "quantile",
+                "pos_label": pos_label,
+                "ref_line": True,
+                "name": "LogReg (balanced)",
+            },
+            "ConfusionMatrixDisplay": {
+                "normalize": "true",
+                "display_labels": ["Legit", "Fraud"],
+                "include_values": True,
+                "values_format": ".2f",
+                "xticks_rotation": "horizontal",
+                "cmap": "Blues",
+                "colorbar": True,
+            },
+            "DetCurveDisplay": {
+                "drop_intermediate": False,
+                "response_method": "predict_proba",
+                "pos_label": pos_label,
+                "name": "LogReg (balanced)",
+            },
+            "PrecisionRecallDisplay": {
+                "drop_intermediate": False,
+                "response_method": "predict_proba",
+                "pos_label": pos_label,
+                "name": "LogReg (balanced)",
+                "plot_chance_level": True,
+                "chance_level_kw": {
+                    "linestyle": "--",
+                    "color": "gray",
+                    "alpha": 0.6,
+                },
+            },
+            "RocCurveDisplay": {
+                "drop_intermediate": False,
+                "response_method": "predict_proba",
+                "pos_label": pos_label,
+                "name": "LogReg (balanced)",
+                "plot_chance_level": True,
+                "curve_kwargs": {
+                    "linewidth": 2,
+                },
+                "chance_level_kw": {
+                    "linestyle": "--",
+                    "color": "gray",
+                    "alpha": 0.6,
+                },
+            },
+            "DecisionBoundaryDisplay": {
+                "grid_resolution": 200,
+                "eps": 0.5,
+                "plot_method": "contourf",
+                "response_method": "predict_proba",
+                "class_of_interest": pos_label,
+                "xlabel": boundary_features[0],
+                "ylabel": boundary_features[1],
+            },
+            "PartialDependenceDisplay": {
+                "features": partial_features,
+                "categorical_features": categorical_indices,
+                "feature_names": feature_names,
+                "target": pos_label,
+                "response_method": "predict_proba",
+                "grid_resolution": 50,
+                "percentiles": (0.05, 0.95),
+                "n_cols": 2,
+                "subsample": 2000,
+                "random_state": 42,
+                "kind": "average",
+                "line_kw": {
+                    "linewidth": 2,
+                    "color": "#1f77b4",
+                },
+            },
+            "LearningCurveDisplay": {
+                "train_sizes": np.linspace(0.1, 1.0, 5),
+                "cv": StratifiedKFold(n_splits=3, shuffle=True, random_state=42),
+                "scoring": "f1",
+                "shuffle": True,
+                "random_state": 42,
+                "score_type": "both",
+                "std_display_style": "fill_between",
+                "line_kw": {
+                    "linewidth": 2,
+                },
+                "fill_between_kw": {
+                    "alpha": 0.2,
+                },
+            },
+            "ValidationCurveDisplay": {
+                "param_name": "logisticregression__C",
+                "param_range": np.logspace(-2, 1, 4),
+                "cv": StratifiedKFold(n_splits=3, shuffle=True, random_state=42),
+                "scoring": "f1",
+                "score_type": "both",
+                "std_display_style": "fill_between",
+                "line_kw": {
+                    "linewidth": 2,
+                },
+                "fill_between_kw": {
+                    "alpha": 0.2,
+                },
+            },
+        },
+    }
+
+
+def sklearn_classification_visualizers(
+    metric_name: str,
+    X_train: pd.DataFrame,
+    X_test: pd.DataFrame,
+    y_train: pd.Series,
+    y_test: pd.Series,
+    feature_names: list,
+    project_name: str,
+):
+    """Create sklearn classification display object for a metric."""
+    viz_config = sklearn_classification_viz_config(project_name, feature_names)
+    kwargs = viz_config["kwargs"].get(metric_name)
+    if kwargs is None:
+        raise ValueError(f"Unknown sklearn visualizer: {metric_name}")
+
+    base_estimator = make_pipeline(
+        StandardScaler(),
+        LogisticRegression(
+            max_iter=2000,
+            class_weight="balanced",
+            solver="liblinear",
+            random_state=42,
+        ),
+    )
+    base_estimator.fit(X_train, y_train)
+
+    if metric_name in {
+        "CalibrationDisplay",
+        "ConfusionMatrixDisplay",
+        "DetCurveDisplay",
+        "PrecisionRecallDisplay",
+        "RocCurveDisplay",
+    }:
+        display_map = {
+            "CalibrationDisplay": CalibrationDisplay,
+            "ConfusionMatrixDisplay": ConfusionMatrixDisplay,
+            "DetCurveDisplay": DetCurveDisplay,
+            "PrecisionRecallDisplay": PrecisionRecallDisplay,
+            "RocCurveDisplay": RocCurveDisplay,
+        }
+        display_class = display_map[metric_name]
+        return display_class.from_estimator(base_estimator, X_test, y_test, **kwargs)
+
+    if metric_name == "DecisionBoundaryDisplay":
+        boundary_features = viz_config["boundary_features"]
+        X_train_boundary = X_train[boundary_features]
+        X_test_boundary = X_test[boundary_features]
+        boundary_estimator = make_pipeline(
+            StandardScaler(),
+            LogisticRegression(
+                max_iter=2000,
+                class_weight="balanced",
+                solver="liblinear",
+                random_state=42,
+            ),
+        )
+        boundary_estimator.fit(X_train_boundary, y_train)
+        fig, ax = plt.subplots(figsize=(6, 5))
+        display = DecisionBoundaryDisplay.from_estimator(
+            boundary_estimator,
+            X_train_boundary,
+            ax=ax,
+            **kwargs,
+        )
+        ax.scatter(
+            X_test_boundary[boundary_features[0]],
+            X_test_boundary[boundary_features[1]],
+            c=y_test,
+            cmap="coolwarm",
+            alpha=0.6,
+            s=12,
+            edgecolor="k",
+        )
+        ax.set_title("Decision Boundary (LogReg)")
+        return display
+
+    if metric_name == "PartialDependenceDisplay":
+        return PartialDependenceDisplay.from_estimator(base_estimator, X_train, **kwargs)
+
+    if metric_name == "LearningCurveDisplay":
+        return LearningCurveDisplay.from_estimator(base_estimator, X_train, y_train, **kwargs)
+
+    if metric_name == "ValidationCurveDisplay":
+        return ValidationCurveDisplay.from_estimator(base_estimator, X_train, y_train, **kwargs)
+
+    raise ValueError(f"Unsupported sklearn visualizer: {metric_name}")
+
+
+# =============================================================================
+# Sklearn Regression Visualizers
+# Reference: https://scikit-learn.org/stable/visualizations.html
+# =============================================================================
+
+def sklearn_regression_viz_config(
+    project_name: str,
+    feature_names: list,
+) -> dict:
+    """Get kwargs for sklearn regression display objects."""
+    categorical_features = PROJECT_CATEGORICAL_FEATURES.get(project_name, [])
+    categorical_indices = [
+        feature_names.index(name)
+        for name in categorical_features
+        if name in feature_names
+    ]
+
+    partial_candidates = [
+        "estimated_distance_km",
+        "temperature_celsius",
+        "driver_rating",
+        "weather",
+    ]
+    partial_features = [name for name in partial_candidates if name in feature_names]
+    if not partial_features:
+        partial_features = feature_names[:4]
+
+    cv = KFold(n_splits=5, shuffle=True, random_state=42)
+
+    return {
+        "partial_features": partial_features,
+        "categorical_indices": categorical_indices,
+        "cv": cv,
+        "kwargs": {
+            "PredictionErrorDisplay": {
+                "kind": "residual_vs_predicted",
+                "subsample": 2000,
+                "random_state": 42,
+                "scatter_kwargs": {
+                    "alpha": 0.6,
+                    "s": 12,
+                    "edgecolor": "k",
+                },
+                "line_kwargs": {
+                    "color": "#2c7fb8",
+                    "linewidth": 2,
+                },
+            },
+            "PartialDependenceDisplay": {
+                "features": partial_features,
+                "categorical_features": categorical_indices,
+                "feature_names": feature_names,
+                "grid_resolution": 50,
+                "percentiles": (0.05, 0.95),
+                "n_cols": 2,
+                "subsample": 2000,
+                "random_state": 42,
+                "kind": "average",
+                "line_kw": {
+                    "linewidth": 2,
+                    "color": "#1f77b4",
+                },
+            },
+            "LearningCurveDisplay": {
+                "train_sizes": np.linspace(0.1, 1.0, 5),
+                "cv": KFold(n_splits=3, shuffle=True, random_state=42),
+                "scoring": "r2",
+                "shuffle": True,
+                "random_state": 42,
+                "score_type": "both",
+                "std_display_style": "fill_between",
+                "line_kw": {
+                    "linewidth": 2,
+                },
+                "fill_between_kw": {
+                    "alpha": 0.2,
+                },
+            },
+            "ValidationCurveDisplay": {
+                "param_name": "max_depth",
+                "param_range": [4, 8, 12, 16],
+                "cv": KFold(n_splits=3, shuffle=True, random_state=42),
+                "scoring": "r2",
+                "score_type": "both",
+                "std_display_style": "fill_between",
+                "line_kw": {
+                    "linewidth": 2,
+                },
+                "fill_between_kw": {
+                    "alpha": 0.2,
+                },
+            },
+        },
+    }
+
+
+def sklearn_regression_visualizers(
+    metric_name: str,
+    X_train: pd.DataFrame,
+    X_test: pd.DataFrame,
+    y_train: pd.Series,
+    y_test: pd.Series,
+    feature_names: list,
+    project_name: str,
+):
+    """Create sklearn regression display object for a metric."""
+    viz_config = sklearn_regression_viz_config(project_name, feature_names)
+    kwargs = viz_config["kwargs"].get(metric_name)
+    if kwargs is None:
+        raise ValueError(f"Unknown sklearn visualizer: {metric_name}")
+
+    base_estimator = RandomForestRegressor(
+        n_estimators=200,
+        max_depth=12,
+        min_samples_split=4,
+        min_samples_leaf=2,
+        random_state=42,
+        n_jobs=-1,
+    )
+    base_estimator.fit(X_train, y_train)
+
+    if metric_name == "PredictionErrorDisplay":
+        return PredictionErrorDisplay.from_estimator(
+            base_estimator, X_test, y_test, **kwargs
+        )
+
+    if metric_name == "PartialDependenceDisplay":
+        return PartialDependenceDisplay.from_estimator(
+            base_estimator, X_train, **kwargs
+        )
+
+    if metric_name == "LearningCurveDisplay":
+        return LearningCurveDisplay.from_estimator(
+            base_estimator, X_train, y_train, **kwargs
+        )
+
+    if metric_name == "ValidationCurveDisplay":
+        return ValidationCurveDisplay.from_estimator(
+            base_estimator, X_train, y_train, **kwargs
+        )
+
+    raise ValueError(f"Unsupported sklearn visualizer: {metric_name}")
+
+
+# =============================================================================
+# Sklearn Clustering Visualizers (Pseudo-supervised on cluster labels)
+# =============================================================================
+
+def sklearn_clustering_viz_config(
+    project_name: str,
+    feature_names: list,
+) -> dict:
+    """Get kwargs for sklearn clustering display objects."""
+    categorical_features = PROJECT_CATEGORICAL_FEATURES.get(project_name, [])
+    categorical_indices = [
+        feature_names.index(name)
+        for name in categorical_features
+        if name in feature_names
+    ]
+
+    partial_candidates = [
+        "price",
+        "time_on_page_seconds",
+        "event_type",
+        "product_category",
+    ]
+    partial_features = [name for name in partial_candidates if name in feature_names]
+    if not partial_features:
+        partial_features = feature_names[:4]
+
+    cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
+
+    return {
+        "partial_features": partial_features,
+        "categorical_indices": categorical_indices,
+        "cv": cv,
+        "kwargs": {
+            "PartialDependenceDisplay": {
+                "features": partial_features,
+                "categorical_features": categorical_indices,
+                "feature_names": feature_names,
+                "target": 0,
+                "response_method": "predict_proba",
+                "grid_resolution": 50,
+                "percentiles": (0.05, 0.95),
+                "n_cols": 2,
+                "subsample": 2000,
+                "random_state": 42,
+                "kind": "average",
+                "line_kw": {
+                    "linewidth": 2,
+                    "color": "#1f77b4",
+                },
+            },
+            "LearningCurveDisplay": {
+                "train_sizes": np.linspace(0.1, 1.0, 5),
+                "cv": cv,
+                "scoring": "accuracy",
+                "shuffle": True,
+                "random_state": 42,
+                "score_type": "both",
+                "std_display_style": "fill_between",
+                "line_kw": {
+                    "linewidth": 2,
+                },
+                "fill_between_kw": {
+                    "alpha": 0.2,
+                },
+            },
+            "ValidationCurveDisplay": {
+                "param_name": "max_depth",
+                "param_range": [4, 8, 12, 16],
+                "cv": cv,
+                "scoring": "accuracy",
+                "score_type": "both",
+                "std_display_style": "fill_between",
+                "line_kw": {
+                    "linewidth": 2,
+                },
+                "fill_between_kw": {
+                    "alpha": 0.2,
+                },
+            },
+        },
+    }
+
+
+def sklearn_clustering_visualizers(
+    metric_name: str,
+    X_train: pd.DataFrame,
+    X_test: pd.DataFrame,
+    y_train: pd.Series,
+    y_test: pd.Series,
+    feature_names: list,
+    project_name: str,
+):
+    """Create sklearn clustering display object for a metric."""
+    viz_config = sklearn_clustering_viz_config(project_name, feature_names)
+    kwargs = viz_config["kwargs"].get(metric_name)
+    if kwargs is None:
+        raise ValueError(f"Unknown sklearn visualizer: {metric_name}")
+
+    X_full = pd.concat([X_train, X_test], ignore_index=True)
+    y_full = pd.concat([y_train, y_test], ignore_index=True)
+
+    rf_estimator = RandomForestClassifier(
+        n_estimators=200,
+        max_depth=12,
+        min_samples_split=4,
+        min_samples_leaf=2,
+        random_state=42,
+        n_jobs=-1,
+    )
+    rf_estimator.fit(X_full, y_full)
+
+    if metric_name == "PartialDependenceDisplay":
+        return PartialDependenceDisplay.from_estimator(
+            rf_estimator, X_full, **kwargs
+        )
+
+    if metric_name == "LearningCurveDisplay":
+        return LearningCurveDisplay.from_estimator(
+            rf_estimator, X_full, y_full, **kwargs
+        )
+
+    if metric_name == "ValidationCurveDisplay":
+        return ValidationCurveDisplay.from_estimator(
+            rf_estimator, X_full, y_full, **kwargs
+        )
+
+    raise ValueError(f"Unsupported sklearn visualizer: {metric_name}")
 
 # =============================================================================
 # YellowBrick Regression Visualizers
