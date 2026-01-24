@@ -8,21 +8,18 @@ metadata:
   annotations:
     # ArgoCD Image Updater Configuration
     # Automatically updates image tags when new images are pushed to k3d registry
-    # NOTE: fastapi service has been terminated and merged into river/sklearn services
-    argocd-image-updater.argoproj.io/image-list: kafka=master-registry:5000/coelho-realtime-kafka,reflex=master-registry:5000/coelho-realtime-reflex,river=master-registry:5000/coelho-realtime-river,sklearn=master-registry:5000/coelho-realtime-sklearn
+    argocd-image-updater.argoproj.io/image-list: kafka=master-registry:5000/coelho-realtime-kafka,fastapi=master-registry:5000/coelho-realtime-fastapi,sveltekit=master-registry:5000/coelho-realtime-sveltekit
     # Write changes back to Git
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/git-creds
     argocd-image-updater.argoproj.io/git-branch: master
     # Update strategy: use latest tag
     argocd-image-updater.argoproj.io/kafka.update-strategy: latest
-    argocd-image-updater.argoproj.io/reflex.update-strategy: latest
-    argocd-image-updater.argoproj.io/river.update-strategy: latest
-    argocd-image-updater.argoproj.io/sklearn.update-strategy: latest
+    argocd-image-updater.argoproj.io/fastapi.update-strategy: latest
+    argocd-image-updater.argoproj.io/sveltekit.update-strategy: latest
     # Helm parameter paths for each image
     argocd-image-updater.argoproj.io/kafka.helm.image-name: kafka.image
-    argocd-image-updater.argoproj.io/reflex.helm.image-name: reflex.image
-    argocd-image-updater.argoproj.io/river.helm.image-name: river.image
-    argocd-image-updater.argoproj.io/sklearn.helm.image-name: sklearn.image
+    argocd-image-updater.argoproj.io/fastapi.helm.image-name: fastapi.image
+    argocd-image-updater.argoproj.io/sveltekit.helm.image-name: sveltekit.image
 spec:
   project: default
   source:

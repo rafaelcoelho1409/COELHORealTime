@@ -12,7 +12,6 @@ registry:
 # Image configurations
 # Note: Skaffold overrides these with local builds during 'skaffold dev'
 # ArgoCD Image Updater updates these tags when new images are pushed to registry
-# NOTE: fastapi service (port 8001) has been terminated and merged into river/sklearn services
 
 
 # Bitnami Kafka chart configuration (https://github.com/bitnami/charts/tree/main/bitnami/kafka)
@@ -111,9 +110,6 @@ kafka-producers:
       cpu: "250m"
 
 
-# NOTE: Streamlit has been removed - replaced by SvelteKit
-
-
 # MLflow subchart configuration (community-charts/mlflow)
 # Connects to MinIO for artifacts, PostgreSQL for metadata
 mlflow:
@@ -173,52 +169,6 @@ mlflow:
     AWS_DEFAULT_REGION: "us-east-1"
 
 
-# =============================================================================
-# DISABLED: Reflex frontend service
-# Replaced by SvelteKit frontend (apps/sveltekit/) on port 5173
-# Code remains in apps/reflex/ as reference
-# =============================================================================
-# reflex:
-#   image: coelho-realtime-reflex:latest
-#   imagePullPolicy: IfNotPresent
-#   replicas: 1
-#   resources:
-#     requests:
-#       memory: "2Gi"
-#       cpu: "1000m"
-#     limits:
-#       memory: "4Gi"
-#       cpu: "2000m"
-#   portsSettings:
-#     ports:
-#       - name: frontend
-#         port: 3000
-#         targetPort: 3000
-#         nodePort: 30004
-#         protocol: TCP
-#       - name: backend
-#         port: 8000
-#         targetPort: 8000
-#         nodePort: 30005
-#         protocol: TCP
-#     type: LoadBalancer
-#   livenessProbeSettings:
-#     livenessProbe:
-#       tcpSocket:
-#         port: 3000
-#       initialDelaySeconds: 120
-#       periodSeconds: 20
-#       failureThreshold: 5
-#   readinessProbeSettings:
-#     readinessProbe:
-#       tcpSocket:
-#         port: 3000
-#       initialDelaySeconds: 90
-#       periodSeconds: 10
-#       failureThreshold: 6
-# =============================================================================
-
-
 # SvelteKit frontend (primary frontend)
 sveltekit:
   image: coelho-realtime-sveltekit:latest
@@ -255,85 +205,7 @@ sveltekit:
       failureThreshold: 6
 
 
-# =============================================================================
-# DISABLED: River and Sklearn services
-# Migrating to unified FastAPI service (apps/fastapi/) on port 8001
-# Code remains in apps/river/ and apps/sklearn/ as reference
-# =============================================================================
-# river:
-#   image: coelho-realtime-river:latest
-#   imagePullPolicy: IfNotPresent
-#   replicas: 1
-#   resources:
-#     requests:
-#       memory: "2Gi"
-#       cpu: "1000m"
-#     limits:
-#       memory: "4Gi"
-#       cpu: "2000m"
-#   portsSettings:
-#     ports:
-#       - name: http
-#         port: 8002
-#         targetPort: 8002
-#         nodePort: 30006
-#         protocol: TCP
-#     type: LoadBalancer
-#   livenessProbeSettings:
-#     livenessProbe:
-#       httpGet:
-#         path: /health
-#         port: 8002
-#       initialDelaySeconds: 180
-#       periodSeconds: 30
-#       failureThreshold: 5
-#   readinessProbeSettings:
-#     readinessProbe:
-#       httpGet:
-#         path: /health
-#         port: 8002
-#       initialDelaySeconds: 120
-#       periodSeconds: 10
-#       failureThreshold: 3
-#
-# sklearn:
-#   image: coelho-realtime-sklearn:latest
-#   imagePullPolicy: IfNotPresent
-#   replicas: 1
-#   resources:
-#     requests:
-#       memory: "4Gi"
-#       cpu: "1000m"
-#     limits:
-#       memory: "8Gi"
-#       cpu: "2000m"
-#   portsSettings:
-#     ports:
-#       - name: http
-#         port: 8003
-#         targetPort: 8003
-#         nodePort: 30007
-#         protocol: TCP
-#     type: LoadBalancer
-#   livenessProbeSettings:
-#     livenessProbe:
-#       httpGet:
-#         path: /health
-#         port: 8003
-#       initialDelaySeconds: 120
-#       periodSeconds: 30
-#       failureThreshold: 5
-#   readinessProbeSettings:
-#     readinessProbe:
-#       httpGet:
-#         path: /health
-#         port: 8003
-#       initialDelaySeconds: 60
-#       periodSeconds: 10
-#       failureThreshold: 3
-# =============================================================================
-
-
+# FastAPI unified ML backend (includes River incremental and Sklearn batch training)
 fastapi:
   image: coelho-realtime-fastapi:latest
   imagePullPolicy: IfNotPresent
@@ -975,14 +847,14 @@ spark:
     tag: "4.0.0"
   # Master configuration
   master:
-    # Resource limits for local k3d (reduced to save CPU)
+    # Resource limits for local k3d
     resources:
       requests:
-        memory: "512Mi"
-        cpu: "100m"
-      limits:
         memory: "1Gi"
         cpu: "500m"
+      limits:
+        memory: "2Gi"
+        cpu: "1000m"
     # Extra environment variables for Spark configuration
     extraEnvVars:
       # Delta Lake and S3 configuration
@@ -1035,14 +907,14 @@ spark:
   worker:
     # Single worker for local development
     replicaCount: 1
-    # Resource limits (reduced to save CPU)
+    # Resource limits
     resources:
       requests:
-        memory: "512Mi"
-        cpu: "100m"
-      limits:
         memory: "2Gi"
         cpu: "1000m"
+      limits:
+        memory: "4Gi"
+        cpu: "2000m"
     # Same init container for workers
     extraEnvVars:
       - name: SPARK_EXTRA_CLASSPATH

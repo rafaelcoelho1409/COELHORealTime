@@ -22,7 +22,7 @@
     {
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
       "id": 100,
-      "title": "FastAPI Analytics Service",
+      "title": "FastAPI ML Backend",
       "type": "row"
     },
     {
@@ -81,65 +81,6 @@
     },
     {
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 8 },
-      "id": 101,
-      "title": "River ML Training Service",
-      "type": "row"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": { "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 20, "gradientMode": "none", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" } },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
-          "unit": "reqps"
-        }
-      },
-      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 9 },
-      "id": 4,
-      "options": { "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "title": "River - Request Rate",
-      "type": "timeseries",
-      "targets": [{ "expr": "sum(rate(http_requests_total{job=~\".*river.*\"}[5m])) by (method, endpoint)", "legendFormat": "{{ method }} {{ endpoint }}", "refId": "A" }]
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": { "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 20, "gradientMode": "none", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" } },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.1 }, { "color": "red", "value": 0.5 }] },
-          "unit": "s"
-        }
-      },
-      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 9 },
-      "id": 5,
-      "options": { "legend": { "calcs": ["mean", "p99"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "title": "River - Prediction Latency",
-      "type": "timeseries",
-      "targets": [{ "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{job=~\".*river.*\", endpoint=~\".*predict.*\"}[5m])) by (le))", "legendFormat": "p99", "refId": "A" }, { "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{job=~\".*river.*\", endpoint=~\".*predict.*\"}[5m])) by (le))", "legendFormat": "p50", "refId": "B" }]
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
-          "unit": "short"
-        }
-      },
-      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 9 },
-      "id": 6,
-      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "title": "River - Total Predictions",
-      "type": "stat",
-      "targets": [{ "expr": "sum(increase(http_requests_total{job=~\".*river.*\", endpoint=~\".*predict.*\"}[24h]))", "legendFormat": "", "refId": "A" }]
-    },
-    {
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
       "id": 102,
       "title": "Kafka Data Pipeline",
       "type": "row"
@@ -155,7 +96,7 @@
           "unit": "short"
         }
       },
-      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 17 },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 9 },
       "id": 7,
       "options": { "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "title": "Kafka - Messages per Topic",
@@ -172,7 +113,7 @@
           "unit": "short"
         }
       },
-      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 17 },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 9 },
       "id": 8,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
       "title": "Kafka - Consumer Lag",
@@ -180,7 +121,7 @@
       "targets": [{ "expr": "sum(kafka_consumer_group_lag) by (group, topic)", "legendFormat": "{{ group }} - {{ topic }}", "refId": "A" }]
     },
     {
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
       "id": 103,
       "title": "MLflow Experiment Tracking",
       "type": "row"
@@ -196,7 +137,7 @@
           "unit": "reqps"
         }
       },
-      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 25 },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 17 },
       "id": 9,
       "options": { "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "title": "MLflow - API Request Rate",
@@ -214,7 +155,7 @@
           "unit": "s"
         }
       },
-      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 25 },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 17 },
       "id": 10,
       "options": { "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "title": "MLflow - Response Latency",
@@ -225,7 +166,7 @@
   "refresh": "10s",
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["coelho-realtime", "ml-pipeline", "fastapi", "river", "kafka", "mlflow"],
+  "tags": ["coelho-realtime", "ml-pipeline", "fastapi", "kafka", "mlflow"],
   "templating": { "list": [] },
   "time": { "from": "now-1h", "to": "now" },
   "timepicker": {},

@@ -55,9 +55,9 @@
       "gridPos": { "h": 3, "w": 4, "x": 4, "y": 1 },
       "id": 2,
       "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "title": "River ML",
+      "title": "SvelteKit",
       "type": "stat",
-      "targets": [{ "expr": "up{job=~\".*river.*\"}", "legendFormat": "", "refId": "A" }]
+      "targets": [{ "expr": "up{job=~\".*sveltekit.*\"}", "legendFormat": "", "refId": "A" }]
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
@@ -123,9 +123,9 @@
       "gridPos": { "h": 3, "w": 4, "x": 20, "y": 1 },
       "id": 6,
       "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "title": "Reflex",
+      "title": "Redis",
       "type": "stat",
-      "targets": [{ "expr": "up{job=~\".*reflex.*\"}", "legendFormat": "", "refId": "A" }]
+      "targets": [{ "expr": "redis_up", "legendFormat": "", "refId": "A" }]
     },
     {
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 4 },

@@ -14,23 +14,7 @@ build:
         manual:
           - src: "**/*.py"
             dest: /app
-    # ==========================================================================
-    # DISABLED: Reflex service - replaced by SvelteKit frontend
-    # Code remains in apps/reflex/ as reference
-    # ==========================================================================
-    # - image: coelho-realtime-reflex
-    #   context: ./apps/reflex
-    #   docker:
-    #     dockerfile: Dockerfile.reflex
-    #     noCache: false
-    #   sync:
-    #     manual:
-    #       - src: "**/*.py"
-    #         dest: /app
-    #       - src: "**/*.json"
-    #         dest: /app
-    # ==========================================================================
-    # FastAPI
+    # FastAPI (unified ML backend - includes River incremental and Sklearn batch training)
     - image: coelho-realtime-fastapi
       context: ./apps/fastapi
       docker:
@@ -57,27 +41,6 @@ build:
             dest: /app
           - src: "**/*.css"
             dest: /app
-    # ==========================================================================
-    # DISABLED: River and Sklearn services - migrating to unified FastAPI
-    # Code remains in apps/river/ and apps/sklearn/ as reference
-    # ==========================================================================
-    # - image: coelho-realtime-river
-    #   context: ./apps/river
-    #   docker:
-    #     dockerfile: Dockerfile.river
-    #   sync:
-    #     manual:
-    #       - src: "**/*.py"
-    #         dest: /app
-    # - image: coelho-realtime-sklearn
-    #   context: ./apps/sklearn
-    #   docker:
-    #     dockerfile: Dockerfile.sklearn
-    #   sync:
-    #     manual:
-    #       - src: "**/*.py"
-    #         dest: /app
-    # ==========================================================================
   local:
     push: true  # Push to localhost:5000, K3d registry mirrors handle the rest
     useBuildkit: true
@@ -93,20 +56,14 @@ manifests:
         createNamespace: true
         skipBuildDependencies: true  # Dependencies committed to repo - see docs/helm_dependencies.md
         setValueTemplates:
-          # Skaffold will automatically replace these with built image tags
           kafka-producers.image: "{{.IMAGE_NAME_coelho_realtime_kafka_producers}}:{{.IMAGE_TAG_coelho_realtime_kafka_producers}}"
-          # DISABLED: reflex.image: "{{.IMAGE_NAME_coelho_realtime_reflex}}:{{.IMAGE_TAG_coelho_realtime_reflex}}"
           fastapi.image: "{{.IMAGE_NAME_coelho_realtime_fastapi}}:{{.IMAGE_TAG_coelho_realtime_fastapi}}"
           sveltekit.image: "{{.IMAGE_NAME_coelho_realtime_sveltekit}}:{{.IMAGE_TAG_coelho_realtime_sveltekit}}"
-          # DISABLED: river/sklearn migrating to unified FastAPI
-          # river.image: "{{.IMAGE_NAME_coelho_realtime_river}}:{{.IMAGE_TAG_coelho_realtime_river}}"
-          # sklearn.image: "{{.IMAGE_NAME_coelho_realtime_sklearn}}:{{.IMAGE_TAG_coelho_realtime_sklearn}}"
 
 deploy:
   helm: {}
 
 portForward:
-  # NOTE: FastAPI service (port 8001) has been terminated and merged into river/sklearn services
   # MLFlow
   - resourceType: service
     resourceName: coelho-realtime-mlflow
@@ -114,19 +71,6 @@ portForward:
     port: 5000
     localPort: 5001
     address: 0.0.0.0
-  # DISABLED: Reflex - replaced by SvelteKit frontend
-  # - resourceType: service
-  #   resourceName: coelho-realtime-reflex
-  #   namespace: coelho-realtime
-  #   port: 3000
-  #   localPort: 3000
-  #   address: 0.0.0.0
-  # - resourceType: service
-  #   resourceName: coelho-realtime-reflex
-  #   namespace: coelho-realtime
-  #   port: 8000
-  #   localPort: 8000
-  #   address: 0.0.0.0
   # MinIO S3 API
   - resourceType: service
     resourceName: coelho-realtime-minio
@@ -148,33 +92,20 @@ portForward:
     port: 9092
     localPort: 9092
     address: 0.0.0.0
-  # FastAPI
+  # FastAPI (unified ML backend)
   - resourceType: service
     resourceName: coelho-realtime-fastapi
     namespace: coelho-realtime
     port: 8001
     localPort: 8001
     address: 0.0.0.0
-  # SvelteKit (parallel frontend to Reflex during transition)
+  # SvelteKit (primary frontend)
   - resourceType: service
     resourceName: coelho-realtime-sveltekit
     namespace: coelho-realtime
     port: 5173
     localPort: 5173
     address: 0.0.0.0
-  # DISABLED: River and Sklearn - migrating to unified FastAPI on port 8001
-  # - resourceType: service
-  #   resourceName: coelho-realtime-river
-  #   namespace: coelho-realtime
-  #   port: 8002
-  #   localPort: 8002
-  #   address: 0.0.0.0
-  # - resourceType: service
-  #   resourceName: coelho-realtime-sklearn
-  #   namespace: coelho-realtime
-  #   port: 8003
-  #   localPort: 8003
-  #   address: 0.0.0.0
   # Prometheus (service name truncated by Helm)
   - resourceType: service
     resourceName: coelho-realtime-kube-prome-prometheus
@@ -203,14 +134,6 @@ portForward:
     port: 80
     localPort: 4040
     address: 0.0.0.0
-  # Kafka JMX metrics disabled (JMX exporter incompatible with Kafka 4.0)
-  # - resourceType: service
-  #   resourceName: coelho-realtime-kafka-jmx-metrics
-  #   namespace: coelho-realtime
-  #   port: 5556
-  #   localPort: 5556
-  #   address: 0.0.0.0
-  # NOTE: Streamlit removed - replaced by SvelteKit
 
 
 profiles:
@@ -220,7 +143,6 @@ profiles:
       - command: dev
     build:
       artifacts:
-        # NOTE: FastAPI service has been terminated and merged into river/sklearn services
         # Kafka Producers - Manual sync for hot-reload
         - image: coelho-realtime-kafka-producers
           context: ./apps/kafka-producers
@@ -230,22 +152,7 @@ profiles:
             manual:
               - src: "**/*.py"
                 dest: /app
-        # ==========================================================================
-        # DISABLED: Reflex - replaced by SvelteKit frontend
-        # ==========================================================================
-        # - image: coelho-realtime-reflex
-        #   context: ./apps/reflex
-        #   docker:
-        #     dockerfile: Dockerfile.reflex
-        #     noCache: false
-        #   sync:
-        #     manual:
-        #       - src: "**/*.py"
-        #         dest: /app
-        #       - src: "**/*.json"
-        #         dest: /app
-        # ==========================================================================
-        # FastAPI
+        # FastAPI (unified ML backend)
         - image: coelho-realtime-fastapi
           context: ./apps/fastapi
           docker:
@@ -272,26 +179,6 @@ profiles:
                 dest: /app
               - src: "**/*.css"
                 dest: /app
-        # ==========================================================================
-        # DISABLED: River and Sklearn - migrating to unified FastAPI
-        # ==========================================================================
-        # - image: coelho-realtime-river
-        #   context: ./apps/river
-        #   docker:
-        #     dockerfile: Dockerfile.river
-        #   sync:
-        #     manual:
-        #       - src: "**/*.py"
-        #         dest: /app
-        # - image: coelho-realtime-sklearn
-        #   context: ./apps/sklearn
-        #   docker:
-        #     dockerfile: Dockerfile.sklearn
-        #   sync:
-        #     manual:
-        #       - src: "**/*.py"
-        #         dest: /app
-        # ==========================================================================
     # Profile-specific manifests override (if needed)
     manifests:
       helm:
@@ -303,12 +190,8 @@ profiles:
             skipBuildDependencies: true  # Dependencies committed to repo - see docs/helm_dependencies.md
             setValueTemplates:
               kafka-producers.image: "{{.IMAGE_NAME_coelho_realtime_kafka_producers}}:{{.IMAGE_TAG_coelho_realtime_kafka_producers}}"
-              # DISABLED: reflex.image: "{{.IMAGE_NAME_coelho_realtime_reflex}}:{{.IMAGE_TAG_coelho_realtime_reflex}}"
               fastapi.image: "{{.IMAGE_NAME_coelho_realtime_fastapi}}:{{.IMAGE_TAG_coelho_realtime_fastapi}}"
               sveltekit.image: "{{.IMAGE_NAME_coelho_realtime_sveltekit}}:{{.IMAGE_TAG_coelho_realtime_sveltekit}}"
-              # DISABLED: river/sklearn migrating to unified FastAPI
-              # river.image: "{{.IMAGE_NAME_coelho_realtime_river}}:{{.IMAGE_TAG_coelho_realtime_river}}"
-              # sklearn.image: "{{.IMAGE_NAME_coelho_realtime_sklearn}}:{{.IMAGE_TAG_coelho_realtime_sklearn}}"
     deploy:
       helm: {}
 

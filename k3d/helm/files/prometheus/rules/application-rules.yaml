@@ -1,71 +1,34 @@
 # Application-Level Alerting Rules for COELHORealTime
 # These rules monitor the ML pipeline services
-# NOTE: FastAPI Analytics service has been terminated and merged into River/Sklearn services
 groups:
-  # River ML Training Service Alerts (now also handles data endpoints)
-  - name: river.rules
+  # FastAPI Unified ML Backend Alerts (includes River incremental and Sklearn batch training)
+  - name: fastapi.rules
     interval: 30s
     rules:
-      - alert: RiverMLDown
-        expr: up{job="river"} == 0
+      - alert: FastAPIDown
+        expr: up{job=~".*fastapi.*"} == 0
         for: 1m
         labels:
           severity: critical
         annotations:
-          summary: "River ML Training service is down"
-          description: "River instance {{ $labels.instance }} has been down for more than 1 minute."
-      - alert: RiverTrainingStalled
-        expr: rate(river_samples_processed_total[10m]) == 0
-        for: 15m
-        labels:
-          severity: warning
-        annotations:
-          summary: "River ML training has stalled"
-          description: "No samples have been processed in the last 15 minutes."
-      - alert: RiverHighPredictionLatency
-        expr: histogram_quantile(0.99, rate(river_prediction_duration_seconds_bucket[5m])) > 0.5
+          summary: "FastAPI ML backend is down"
+          description: "FastAPI instance {{ $labels.instance }} has been down for more than 1 minute."
+      - alert: FastAPIHighLatency
+        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job=~".*fastapi.*"}[5m])) > 2
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "River predictions are slow"
-          description: "River p99 prediction latency is {{ $value }}s (threshold: 0.5s)."
-  # Scikit-Learn Batch ML Service Alerts
-  - name: sklearn.rules
-    interval: 30s
-    rules:
-      - alert: SklearnDown
-        expr: up{job="sklearn"} == 0
-        for: 1m
-        labels:
-          severity: critical
-        annotations:
-          summary: "Scikit-Learn Batch ML service is down"
-          description: "Sklearn instance {{ $labels.instance }} has been down for more than 1 minute."
-      - alert: SklearnHighPredictionLatency
-        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job="sklearn", handler="/predict"}[5m])) > 2
+          summary: "FastAPI has high latency"
+          description: "FastAPI p99 latency is {{ $value }}s (threshold: 2s)."
+      - alert: FastAPIHighErrorRate
+        expr: rate(http_requests_total{job=~".*fastapi.*", status=~"5.."}[5m]) / rate(http_requests_total{job=~".*fastapi.*"}[5m]) > 0.05
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "Sklearn batch predictions are slow"
-          description: "Sklearn p99 prediction latency is {{ $value }}s (threshold: 2s)."
-      - alert: SklearnHighErrorRate
-        expr: rate(http_requests_total{job="sklearn", status=~"5.."}[5m]) / rate(http_requests_total{job="sklearn"}[5m]) > 0.05
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Sklearn has high error rate"
-          description: "Sklearn error rate is {{ $value | printf \"%.1f\" }}% (threshold: 5%)."
-      - alert: SklearnYellowBrickTimeout
-        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job="sklearn", handler="/yellowbrick_metric"}[5m])) > 30
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "YellowBrick visualizations are timing out"
-          description: "YellowBrick p99 latency is {{ $value }}s (threshold: 30s)."
+          summary: "FastAPI has high error rate"
+          description: "FastAPI error rate is {{ $value | printf \"%.1f\" }}% (threshold: 5%)."
   # Kafka Data Pipeline Alerts (JMX Exporter metrics)
   - name: kafka.rules
     interval: 30s
@@ -202,7 +165,7 @@ groups:
         annotations:
           summary: "PostgreSQL has deadlocks"
           description: "PostgreSQL instance {{ $labels.instance }} has {{ $value }} deadlocks."
-  # Redis Alerts (used by Reflex)
+  # Redis Alerts
   - name: redis.rules
     interval: 30s
     rules:
@@ -258,26 +221,18 @@ groups:
         annotations:
           summary: "MinIO storage usage is high"
           description: "MinIO storage usage is {{ $value }}%."
-  # Reflex Frontend Alerts
-  - name: reflex.rules
+  # SvelteKit Frontend Alerts
+  - name: sveltekit.rules
     interval: 30s
     rules:
-      - alert: ReflexDown
-        expr: up{job="reflex"} == 0
+      - alert: SvelteKitDown
+        expr: up{job=~".*sveltekit.*"} == 0
         for: 1m
         labels:
           severity: critical
         annotations:
-          summary: "Reflex frontend is down"
-          description: "Reflex instance {{ $labels.instance }} has been down for more than 1 minute."
-      - alert: ReflexHighLatency
-        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job="reflex"}[5m])) > 3
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Reflex has high latency"
-          description: "Reflex p99 latency is {{ $value }}s (threshold: 3s)."
+          summary: "SvelteKit frontend is down"
+          description: "SvelteKit instance {{ $labels.instance }} has been down for more than 1 minute."
   # Spark Data Pipeline Alerts (Master, Worker, and Streaming jobs)
   - name: spark.rules
     interval: 30s

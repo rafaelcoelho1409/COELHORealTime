@@ -1,6 +1,6 @@
 {{/*
 Generate image name based on environment
-Usage: {{ include "coelho-realtime.imageName" (dict "appName" "river" "root" .) }}
+Usage: {{ include "coelho-realtime.imageName" (dict "appName" "fastapi" "root" .) }}
 */}}
 {{- define "coelho-realtime.imageName" -}}
 {{- $image := index .root.Values .appName "image" -}}
@@ -18,15 +18,12 @@ Usage: {{ include "coelho-realtime.imageName" (dict "appName" "river" "root" .) 
 
 {{/*
 Common environment variables for all services
-NOTE: FASTAPI service (port 8001) has been terminated and merged into River/Sklearn services
 */}}
 {{- define "coelho-realtime.commonEnvVars" -}}
 KAFKA_HOST: "coelho-realtime-kafka"
 MLFLOW_HOST: "coelho-realtime-mlflow"
-REFLEX_HOST: "coelho-realtime-reflex"
-RIVER_HOST: "coelho-realtime-river"
-SKLEARN_HOST: "coelho-realtime-sklearn"
 FASTAPI_HOST: "coelho-realtime-fastapi"
+SVELTEKIT_HOST: "coelho-realtime-sveltekit"
 REDIS_HOST: "redis://coelho-realtime-redis-master:6379"
 MINIO_HOST: "coelho-realtime-minio"
 MINIO_ACCESS_KEY: "{{ .Values.minio.rootUser }}"

@@ -28,32 +28,21 @@ build:
     - echo "Testing connectivity to Docker Registry..."
     - wget -q --spider http://${REGISTRY}/v2/ && echo "✓ Registry is accessible" || echo "⚠ Registry check completed"
   script:
-    # Build and push FastAPI
+    # Build and push Kafka Producers
+    - echo "Building Kafka Producers image..."
+    - docker build -t ${REGISTRY}/coelho-realtime-kafka-producers:${CI_COMMIT_SHA} -t ${REGISTRY}/coelho-realtime-kafka-producers:latest ./apps/kafka-producers -f ./apps/kafka-producers/Dockerfile.kafka-producers
+    - docker push ${REGISTRY}/coelho-realtime-kafka-producers:${CI_COMMIT_SHA}
+    - docker push ${REGISTRY}/coelho-realtime-kafka-producers:latest
+    # Build and push FastAPI (unified ML backend)
     - echo "Building FastAPI image..."
     - docker build -t ${REGISTRY}/coelho-realtime-fastapi:${CI_COMMIT_SHA} -t ${REGISTRY}/coelho-realtime-fastapi:latest ./apps/fastapi -f ./apps/fastapi/Dockerfile.fastapi
     - docker push ${REGISTRY}/coelho-realtime-fastapi:${CI_COMMIT_SHA}
     - docker push ${REGISTRY}/coelho-realtime-fastapi:latest
-    # Build and push River
-    - echo "Building River image..."
-    - docker build -t ${REGISTRY}/coelho-realtime-river:${CI_COMMIT_SHA} -t ${REGISTRY}/coelho-realtime-river:latest ./apps/river -f ./apps/river/Dockerfile.river
-    - docker push ${REGISTRY}/coelho-realtime-river:${CI_COMMIT_SHA}
-    - docker push ${REGISTRY}/coelho-realtime-river:latest
-    # Build and push Sklearn
-    - echo "Building Sklearn image..."
-    - docker build -t ${REGISTRY}/coelho-realtime-sklearn:${CI_COMMIT_SHA} -t ${REGISTRY}/coelho-realtime-sklearn:latest ./apps/sklearn -f ./apps/sklearn/Dockerfile.sklearn
-    - docker push ${REGISTRY}/coelho-realtime-sklearn:${CI_COMMIT_SHA}
-    - docker push ${REGISTRY}/coelho-realtime-sklearn:latest
-    # Build and push Kafka
-    - echo "Building Kafka image..."
-    - docker build -t ${REGISTRY}/coelho-realtime-kafka:${CI_COMMIT_SHA} -t ${REGISTRY}/coelho-realtime-kafka:latest ./apps/kafka -f ./apps/kafka/Dockerfile.kafka
-    - docker push ${REGISTRY}/coelho-realtime-kafka:${CI_COMMIT_SHA}
-    - docker push ${REGISTRY}/coelho-realtime-kafka:latest
-    # NOTE: Streamlit has been removed - fully replaced by Reflex
-    # Build and push Reflex
-    - echo "Building Reflex image..."
-    - docker build -t ${REGISTRY}/coelho-realtime-reflex:${CI_COMMIT_SHA} -t ${REGISTRY}/coelho-realtime-reflex:latest ./apps/reflex -f ./apps/reflex/Dockerfile.reflex
-    - docker push ${REGISTRY}/coelho-realtime-reflex:${CI_COMMIT_SHA}
-    - docker push ${REGISTRY}/coelho-realtime-reflex:latest
+    # Build and push SvelteKit (primary frontend)
+    - echo "Building SvelteKit image..."
+    - docker build -t ${REGISTRY}/coelho-realtime-sveltekit:${CI_COMMIT_SHA} -t ${REGISTRY}/coelho-realtime-sveltekit:latest ./apps/sveltekit -f ./apps/sveltekit/Dockerfile.sveltekit
+    - docker push ${REGISTRY}/coelho-realtime-sveltekit:${CI_COMMIT_SHA}
+    - docker push ${REGISTRY}/coelho-realtime-sveltekit:latest
   only:
     - master
 
