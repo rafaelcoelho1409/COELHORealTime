@@ -312,6 +312,14 @@ class SklearnVisualizationRequest(BaseModel):
     run_id: Optional[str] = None  # Optional: specific run, or None for best
 
 
+class ScikitplotVisualizationRequest(BaseModel):
+    """Request for scikit-plot visualization generation."""
+    project_name: str
+    metric_type: str  # Classification, Regression, Clustering, Feature Analysis, Model Selection
+    metric_name: str  # ConfusionMatrix, RocCurve, LearningCurve, etc.
+    run_id: Optional[str] = None  # Optional: specific run, or None for best
+
+
 # =============================================================================
 # API Request Models - Delta Lake SQL
 # =============================================================================

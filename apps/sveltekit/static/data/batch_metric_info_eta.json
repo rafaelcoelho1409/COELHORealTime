@@ -1,0 +1,257 @@
+{
+  "project": "Estimated Time of Arrival",
+  "model": "CatBoostRegressor (Batch ML)",
+  "task": "Regression",
+  "visualizers": {
+    "scikitplot:FeatureImportances": {
+      "name": "Feature Importances (Scikit-plot)",
+      "category": "Model Selection",
+      "description": "Feature importance bar chart computed from the estimator.",
+      "interpretation": "Higher bars indicate features with stronger influence on ETA predictions.",
+      "eta_context": "Validates that expected drivers (distance, traffic, weather) are influential.",
+      "when_to_use": "Use for global interpretability and sanity-checking model drivers.",
+      "parameters": "`feature_names`, `max_num_features`, `order`, `x_tick_rotation`",
+      "docs_url": "https://scikit-plot.readthedocs.io/en/stable/estimators.html#scikitplot.estimators.plot_feature_importances"
+    },
+    "scikitplot:LearningCurve": {
+      "name": "Learning Curve (Scikit-plot)",
+      "category": "Model Selection",
+      "description": "Scikit-plot learning curves showing train and validation performance over sample sizes.",
+      "interpretation": "Gap indicates variance; low curves indicate bias.",
+      "eta_context": "Shows whether more ETA data will improve accuracy.",
+      "when_to_use": "Use to diagnose under/overfitting for ETA regression.",
+      "parameters": "`train_sizes`, `cv`, `scoring`, `shuffle`, `random_state`",
+      "docs_url": "https://scikit-plot.readthedocs.io/en/stable/estimators.html#scikitplot.estimators.plot_learning_curve"
+    },
+    "scikitplot:PCA2DProjection": {
+      "name": "PCA 2D Projection (Scikit-plot)",
+      "category": "Feature Analysis",
+      "description": "2D PCA projection of samples (continuous color scale for ETA).",
+      "interpretation": "Separations indicate structure; heavy overlap suggests complex, high-dimensional behavior.",
+      "eta_context": "Helps visualize whether ETA patterns cluster in low-dimensional space.",
+      "when_to_use": "Use for exploratory analysis and feature engineering.",
+      "parameters": "`biplot`, `cmap`, `title`",
+      "docs_url": "https://scikit-plot.readthedocs.io/en/stable/decomposition.html#scikitplot.decomposition.plot_pca_2d_projection"
+    },
+    "scikitplot:PCAComponentVariance": {
+      "name": "PCA Component Variance (Scikit-plot)",
+      "category": "Feature Analysis",
+      "description": "Explained variance ratio per PCA component.",
+      "interpretation": "A steep drop means a few components explain most variance.",
+      "eta_context": "Shows whether ETA features are compressible without losing signal.",
+      "when_to_use": "Use to assess dimensionality reduction opportunities.",
+      "parameters": "`target_explained_variance`, `title`",
+      "docs_url": "https://scikit-plot.readthedocs.io/en/stable/decomposition.html#scikitplot.decomposition.plot_pca_component_variance"
+    },
+    "sklearn:LearningCurveDisplay": {
+      "name": "Learning Curve (Scikit-Learn)",
+      "category": "Model Selection",
+      "description": "Learning curves plotting training and validation scores vs sample size.",
+      "interpretation": "Large gaps suggest overfitting; low scores suggest underfitting.",
+      "eta_context": "Indicates whether more ETA training data would materially improve accuracy.",
+      "when_to_use": "Use to diagnose data sufficiency and model capacity.",
+      "parameters": "`train_sizes`, `cv`, `scoring`, `score_type`, `std_display_style`",
+      "docs_url": "https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.LearningCurveDisplay.html"
+    },
+    "sklearn:PartialDependenceDisplay": {
+      "name": "Partial Dependence (Scikit-Learn)",
+      "category": "Feature Analysis",
+      "description": "Partial dependence plots showing how features influence ETA predictions on average.",
+      "interpretation": "Non-linear shapes indicate complex effects; flat lines imply minimal impact.",
+      "eta_context": "Shows how distance, weather, or driver rating shift ETA estimates.",
+      "when_to_use": "Use to interpret global feature effects and validate domain assumptions.",
+      "parameters": "`features`, `kind`, `grid_resolution`, `percentiles`, `subsample`, `categorical_features`",
+      "docs_url": "https://scikit-learn.org/stable/modules/generated/sklearn.inspection.PartialDependenceDisplay.html"
+    },
+    "sklearn:PredictionErrorDisplayActual": {
+      "name": "Prediction Error (Actual vs Predicted) \u2014 Scikit-Learn",
+      "category": "Regression",
+      "description": "Plots predicted values against true targets to assess overall fit.",
+      "interpretation": "Points should align with the diagonal; systematic offsets indicate bias.",
+      "eta_context": "Shows whether ETA predictions track real trip times across the full range.",
+      "when_to_use": "Use to validate overall accuracy and detect under/overestimation.",
+      "parameters": "`kind`, `subsample`, `scatter_kwargs`, `line_kwargs`",
+      "docs_url": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.PredictionErrorDisplay.html"
+    },
+    "sklearn:PredictionErrorDisplayResidual": {
+      "name": "Prediction Error (Residuals) \u2014 Scikit-Learn",
+      "category": "Regression",
+      "description": "Plots residuals (y_true - y_pred) versus predicted values for diagnostics.",
+      "interpretation": "Residuals should be centered around zero with no pattern; funnels indicate heteroscedasticity.",
+      "eta_context": "Highlights whether ETA error grows for long or complex trips.",
+      "when_to_use": "Use to diagnose bias, variance, and non-linear error patterns.",
+      "parameters": "`kind`, `subsample`, `scatter_kwargs`, `line_kwargs`",
+      "docs_url": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.PredictionErrorDisplay.html"
+    },
+    "sklearn:ValidationCurveDisplay": {
+      "name": "Validation Curve (Scikit-Learn)",
+      "category": "Model Selection",
+      "description": "Validation curve plotting model score vs hyperparameter values.",
+      "interpretation": "Best region is where validation score peaks without large train/val divergence.",
+      "eta_context": "Helps select model complexity that balances bias and variance for ETA.",
+      "when_to_use": "Use during hyperparameter tuning or model selection.",
+      "parameters": "`param_name`, `param_range`, `cv`, `scoring`, `score_type`",
+      "docs_url": "https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.ValidationCurveDisplay.html"
+    },
+    "yellowbrick:BalancedBinningReference": {
+      "name": "Balanced Binning Reference",
+      "category": "Target",
+      "description": "Shows the distribution of target values binned into equal-frequency bins. Visualizes the target distribution shape.",
+      "interpretation": "Each bin contains equal number of samples. The y-axis shows the bin ranges. Helps understand if target is skewed and might need transformation.",
+      "eta_context": "Travel times are often right-skewed (many short trips, few very long ones). Log transformation might help model short AND long trips better. Also reveals if training data has balanced trip lengths.",
+      "when_to_use": "Use to understand target distribution before training. Helps decide if target transformation (log, sqrt) is needed.",
+      "parameters": "`bins`: Number of bins to create",
+      "docs_url": "https://www.scikit-yb.org/en/latest/api/target/binning.html"
+    },
+    "yellowbrick:CVScores": {
+      "name": "Cross-Validation Scores",
+      "category": "Model Selection",
+      "description": "Box plot showing the distribution of scores across cross-validation folds. Visualizes model stability and expected variance.",
+      "interpretation": "Tight box = stable model across different data splits. Wide box or outliers = model performance varies with data. The median line shows typical performance.",
+      "eta_context": "For ETA, high variance might indicate the model struggles with certain trip types or time periods. If some folds perform much worse, investigate the data in those folds.",
+      "when_to_use": "Use to assess model robustness and reliability. Important for production deployment where consistent performance matters.",
+      "parameters": "`cv`: Number of cross-validation folds, `scoring`: Metric to evaluate (neg_mean_absolute_error, r2)",
+      "docs_url": "https://www.scikit-yb.org/en/latest/api/model_selection/cross_validation.html"
+    },
+    "yellowbrick:DroppingCurve": {
+      "name": "Feature Dropping Curve",
+      "category": "Model Selection",
+      "description": "Shows how model performance degrades as random feature subsets are used. Tests model robustness to missing features.",
+      "interpretation": "Steep drop = model heavily depends on specific features. Gradual drop = model uses features redundantly. Shows feature robustness.",
+      "eta_context": "For ETA, if performance drops sharply with missing features, the model needs all inputs. Gradual drop means robust to partial data (useful when some trip info is missing).",
+      "when_to_use": "Use to test model robustness for production where some features might be unavailable for certain predictions.",
+      "parameters": "`n_trials`: Number of random subsets to test, `feature_sizes`: Fraction of features to use",
+      "docs_url": "https://www.scikit-yb.org/en/latest/api/model_selection/dropping_curve.html"
+    },
+    "yellowbrick:FeatureCorrelation": {
+      "name": "Feature-Target Correlation (Mutual Info)",
+      "category": "Target",
+      "description": "Ranks features by their mutual information with the target variable. Captures both linear and non-linear relationships.",
+      "interpretation": "Higher scores indicate features with stronger predictive power for travel time. Unlike Pearson, mutual information captures any type of relationship.",
+      "eta_context": "For ETA, distance should rank high. Traffic and weather factors should show meaningful correlation. Features with zero MI can potentially be removed.",
+      "when_to_use": "Use for feature selection and understanding which features drive predictions. Complements linear correlation analysis.",
+      "parameters": "`method`: mutual_info_regression for continuous targets",
+      "docs_url": "https://www.scikit-yb.org/en/latest/api/target/feature_correlation.html"
+    },
+    "yellowbrick:FeatureCorrelation_Pearson": {
+      "name": "Feature-Target Correlation (Pearson)",
+      "category": "Target",
+      "description": "Ranks features by their Pearson correlation coefficient with the target. Measures linear relationships only.",
+      "interpretation": "Positive values = feature increases with target, Negative = inverse relationship. Values near 0 indicate no linear relationship (but non-linear might exist).",
+      "eta_context": "For ETA, expect high positive correlation for distance and initial_estimated_travel_time. Traffic/weather factors should show moderate correlation. Compare with Mutual Info to find non-linear relationships.",
+      "when_to_use": "Use as fast linear correlation check. Run alongside Mutual Info to identify features with hidden non-linear patterns.",
+      "parameters": "`method`: pearson for linear correlation",
+      "docs_url": "https://www.scikit-yb.org/en/latest/api/target/feature_correlation.html"
+    },
+    "yellowbrick:FeatureImportances": {
+      "name": "Feature Importances",
+      "category": "Model Selection",
+      "description": "Horizontal bar chart showing relative importance of each feature as determined by the trained model (CatBoost's built-in importance).",
+      "interpretation": "Longer bars = more important features. CatBoost uses prediction value change to measure importance. Top features have the most influence on predictions.",
+      "eta_context": "For ETA, expect distance and initial_estimated_travel_time near the top. If debug_* factors dominate, model might be overfitting to synthetic features. Hour and weather should have moderate importance.",
+      "when_to_use": "Use after training to understand what the model learned. Essential for model interpretation and debugging unexpected predictions.",
+      "parameters": "`relative`: Show relative (percentages) vs absolute importance, `topn`: Show top N features only",
+      "docs_url": "https://www.scikit-yb.org/en/latest/api/model_selection/importances.html"
+    },
+    "yellowbrick:JointPlot": {
+      "name": "Joint Plot",
+      "category": "Feature Analysis",
+      "description": "Shows the relationship between two selected features with marginal distributions. Combines scatter plot with histograms.",
+      "interpretation": "Shows correlation strength and distribution shapes for a specific feature pair. Useful for exploring relationships flagged by Rank2D correlation analysis.",
+      "eta_context": "Explore relationships like distance vs travel_time, hour_of_day vs traffic_factor, or weather vs travel_time. Reveals non-linear patterns that correlation alone might miss.",
+      "when_to_use": "Use for deep-dive into specific feature relationships. Best after identifying interesting correlations in Rank2D.",
+      "parameters": "`columns`: Feature pair to plot, `alpha`: Point transparency",
+      "docs_url": "https://www.scikit-yb.org/en/latest/api/features/jointplot.html"
+    },
+    "yellowbrick:LearningCurve": {
+      "name": "Learning Curve",
+      "category": "Model Selection",
+      "description": "Shows how training and validation scores change as training set size increases. Indicates if more data would help.",
+      "interpretation": "Converging curves = model has learned from available data. Gap that doesn't close = more data would help. Flat validation = model capacity is sufficient.",
+      "eta_context": "For ETA, learning curves help answer: 'Do we need more trip data?'. If validation score plateaus early, focus on feature engineering instead of data collection.",
+      "when_to_use": "Use to decide between collecting more data vs engineering better features. Important for production planning and data strategy.",
+      "parameters": "`train_sizes`: Training set fractions to test, `cv`: Cross-validation folds, `scoring`: Metric",
+      "docs_url": "https://www.scikit-yb.org/en/latest/api/model_selection/learning_curve.html"
+    },
+    "yellowbrick:Manifold": {
+      "name": "Manifold (t-SNE/UMAP)",
+      "category": "Feature Analysis",
+      "description": "Non-linear dimensionality reduction that preserves local structure. t-SNE is effective at revealing clusters that linear methods (PCA) might miss.",
+      "interpretation": "Points close together represent similar trips. Look for distinct clusters representing different trip types or routes. Isolated points are outliers.",
+      "eta_context": "May reveal **trip type clusters**: rush hour commutes, weekend leisure trips, airport transfers. Different patterns might have different ETA prediction challenges. SLOW (30-120 seconds).",
+      "when_to_use": "Use for deep exploration when PCA doesn't show clear patterns. Run on sampled data first due to computational cost.",
+      "parameters": "`manifold`: Algorithm (tsne, umap, isomap), `n_neighbors`: Neighborhood size",
+      "docs_url": "https://www.scikit-yb.org/en/latest/api/features/manifold.html"
+    },
+    "yellowbrick:PCA": {
+      "name": "PCA (Principal Component Analysis)",
+      "category": "Feature Analysis",
+      "description": "Projects high-dimensional data onto 2 principal components for visualization. For regression, shows data structure without class coloring.",
+      "interpretation": "Shows underlying data structure and variance directions. Clusters indicate groups of similar trips. Outliers might be unusual trips (very long, incidents).",
+      "eta_context": "Can reveal trip clusters: short urban trips vs long highway trips vs airport runs. Different trip types might need different prediction approaches.",
+      "when_to_use": "Use for understanding data structure and identifying natural groupings in trip data. Helps with feature engineering decisions.",
+      "parameters": "`scale`: Standardize features before PCA, `projection`: Number of components (2 or 3)",
+      "docs_url": "https://www.scikit-yb.org/en/latest/api/features/pca.html"
+    },
+    "yellowbrick:PredictionError": {
+      "name": "Prediction Error Plot",
+      "category": "Regression",
+      "description": "Scatterplot of actual vs predicted values. The identity line (y=x) represents perfect predictions. Points above the line are under-predictions, below are over-predictions.",
+      "interpretation": "Points should cluster tightly around the identity line. Spread indicates prediction variance. Systematic deviation from the line indicates bias (consistently over/under-predicting).",
+      "eta_context": "For ETA, points above the line mean the model predicted shorter times than actual (late arrival predictions). Below the line means early arrival predictions. Check if bias varies with trip duration.",
+      "when_to_use": "Use to assess overall prediction quality and identify bias patterns. Best for communicating model performance to stakeholders - very intuitive visualization.",
+      "parameters": "`identity`: Show identity line (y=x), `best_fit`: Show linear fit line, `alpha`: Point transparency",
+      "docs_url": "https://www.scikit-yb.org/en/latest/api/regressor/peplot.html"
+    },
+    "yellowbrick:RFECV": {
+      "name": "Recursive Feature Elimination CV",
+      "category": "Model Selection",
+      "description": "Iteratively removes features and plots cross-validation score vs number of features. Identifies optimal feature subset.",
+      "interpretation": "The peak shows optimal number of features. Right of peak = redundant features, Left = useful features removed. Helps simplify model without losing performance.",
+      "eta_context": "For ETA, can identify if all features are needed or if a smaller subset suffices. Removing redundant features improves prediction speed for real-time ETA.",
+      "when_to_use": "Use when model has many features and you want to simplify. Important for production where inference speed matters.",
+      "parameters": "`cv`: Cross-validation folds, `scoring`: Metric to optimize, `step`: Features to remove per iteration",
+      "docs_url": "https://www.scikit-yb.org/en/latest/api/model_selection/rfecv.html"
+    },
+    "yellowbrick:Rank1D": {
+      "name": "Rank 1D (Feature Ranking)",
+      "category": "Feature Analysis",
+      "description": "Ranks individual features using a statistical test. By default uses Shapiro-Wilk test to measure how normally distributed each feature is.",
+      "interpretation": "Higher scores indicate features that deviate more from normal distribution. Features with non-normal distributions might benefit from transformation or may indicate interesting patterns.",
+      "eta_context": "ETA features like distance, traffic factors, and time-based features often have non-normal distributions. Heavy right tails in travel time suggest outliers from traffic incidents or long-haul trips.",
+      "when_to_use": "Use during feature engineering to understand individual feature characteristics. Helps identify features that might need transformation (log, sqrt).",
+      "parameters": "`algorithm`: Ranking algorithm (shapiro, variance), `orient`: Horizontal or vertical bars",
+      "docs_url": "https://www.scikit-yb.org/en/latest/api/features/rankd.html"
+    },
+    "yellowbrick:Rank2D": {
+      "name": "Rank 2D (Feature Correlation)",
+      "category": "Feature Analysis",
+      "description": "A heatmap showing pairwise relationships between features. Supports Pearson correlation, Spearman rank correlation, covariance, and Kendall tau.",
+      "interpretation": "Red = positive correlation, Blue = negative correlation, White = no correlation. Look for highly correlated feature pairs (redundancy) and unexpected correlations.",
+      "eta_context": "For ETA, distance should correlate strongly with travel time. Check correlations between weather factors, traffic factors, and hour of day. Multicollinearity can affect model interpretability.",
+      "when_to_use": "Use for multicollinearity detection before model training. Helps select features and understand feature relationships.",
+      "parameters": "`algorithm`: Correlation method (pearson, spearman, covariance), `colormap`: Color scheme",
+      "docs_url": "https://www.scikit-yb.org/en/latest/api/features/rankd.html"
+    },
+    "yellowbrick:ResidualsPlot": {
+      "name": "Residuals Plot",
+      "category": "Regression",
+      "description": "Shows the distribution of residuals (actual - predicted) against predicted values. Includes a histogram of residual distribution and train/test split visualization.",
+      "interpretation": "Residuals should be randomly scattered around zero with no pattern. A funnel shape indicates heteroscedasticity (variance changes with prediction magnitude). Curved patterns suggest missing non-linear relationships.",
+      "eta_context": "For ETA prediction, check if residuals increase for longer trips (model struggles with long hauls) or at certain predicted times. Patterns might reveal issues with rush hour or specific routes.",
+      "when_to_use": "Essential for regression diagnostics. Always check residuals to validate model assumptions and identify systematic prediction errors.",
+      "parameters": "`hist`: Show histogram of residuals, `qqplot`: Show Q-Q plot for normality check",
+      "docs_url": "https://www.scikit-yb.org/en/latest/api/regressor/residuals.html"
+    },
+    "yellowbrick:ValidationCurve": {
+      "name": "Validation Curve",
+      "category": "Model Selection",
+      "description": "Shows how training and validation scores change as a hyperparameter varies. Helps identify optimal hyperparameter values.",
+      "interpretation": "The gap between train and validation curves indicates overfitting. Optimal parameter is where validation score peaks. Large gaps = overfitting, small gaps = good generalization.",
+      "eta_context": "For CatBoost ETA model, tune iterations or depth. Too many iterations may overfit to training routes. Find the sweet spot where validation MAE is minimized.",
+      "when_to_use": "Use for hyperparameter tuning. Run after initial training to optimize key parameters (learning_rate, depth, iterations).",
+      "parameters": "`param_name`: Parameter to vary, `param_range`: Values to test, `cv`: Cross-validation folds",
+      "docs_url": "https://www.scikit-yb.org/en/latest/api/model_selection/validation_curve.html"
+    }
+  }
+}

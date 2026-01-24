@@ -12,6 +12,7 @@ import pickle
 import os
 import io
 import base64
+import re
 from typing import Optional, Dict, Any
 import pandas as pd
 import numpy as np
@@ -1496,7 +1497,7 @@ except ImportError:
     from sklearn.metrics.classification import _check_targets
 
 
-class CatBoostClassifierWrapper(BaseEstimator, ClassifierMixin):
+class CatBoostClassifierYellowbrickWrapper(BaseEstimator, ClassifierMixin):
     """Wraps pre-fitted CatBoost model for YellowBrick sklearn compatibility.
 
     Exposes feature_importances_ for FeatureImportances visualizer.
@@ -1522,7 +1523,7 @@ class CatBoostClassifierWrapper(BaseEstimator, ClassifierMixin):
         return self.model.predict_proba(X)
 
 
-class CatBoostClassifierWrapperCV(BaseEstimator, ClassifierMixin):
+class CatBoostClassifierYellowbrickWrapperCV(BaseEstimator, ClassifierMixin):
     """CatBoost wrapper for CV-based visualizers (can be cloned and re-fitted).
 
     Exposes feature_importances_ after fitting for RFECV and FeatureImportances.
@@ -1576,6 +1577,160 @@ class CatBoostClassifierWrapperCV(BaseEstimator, ClassifierMixin):
         return None
 
 
+class CatBoostClassifierSklearnWrapper(ClassifierMixin, BaseEstimator):
+    """Wraps a pre-fitted CatBoostClassifier for sklearn Display APIs."""
+    _estimator_type = "classifier"
+
+    def __init__(self, model, feature_names=None, n_features=None):
+        self.model = model
+        self.feature_names = feature_names
+        self.n_features = n_features
+        try:
+            self.classes_ = np.array(model.classes_)
+        except Exception:
+            self.classes_ = None
+
+        if n_features is not None:
+            self.n_features_in_ = n_features
+        if feature_names is not None:
+            self.feature_names_in_ = np.array(feature_names)
+
+        try:
+            fi = model.get_feature_importance()
+            self.feature_importances_ = np.array(fi) if fi is not None else None
+        except Exception:
+            self.feature_importances_ = getattr(model, "feature_importances_", None)
+
+    def fit(self, X, y):
+        # Already fitted; no-op to satisfy sklearn API
+        return self
+
+    def predict(self, X):
+        return self.model.predict(X).flatten()
+
+    def predict_proba(self, X):
+        return self.model.predict_proba(X)
+
+    def __sklearn_tags__(self):
+        return super().__sklearn_tags__()
+
+
+class CatBoostClassifierSklearnWrapperCV(ClassifierMixin, BaseEstimator):
+    """CatBoost wrapper that supports CV-based sklearn Display APIs."""
+    _estimator_type = "classifier"
+
+    def __init__(self, cat_features=None, **params):
+        self.cat_features = cat_features
+        for key, value in params.items():
+            setattr(self, key, value)
+        self._params = params
+
+    def get_params(self, deep=True):
+        return {**self._params, "cat_features": self.cat_features}
+
+    def set_params(self, **params):
+        for key, value in params.items():
+            setattr(self, key, value)
+        if "cat_features" in params:
+            self.cat_features = params["cat_features"]
+        self._params.update({k: v for k, v in params.items() if k != "cat_features"})
+        return self
+
+    def fit(self, X, y):
+        params = {k: getattr(self, k) for k in self._params.keys()}
+        self.model_ = CatBoostClassifier(**params)
+        self.model_.fit(X, y, cat_features=self.cat_features)
+        try:
+            self.classes_ = np.array(self.model_.classes_)
+        except Exception:
+            self.classes_ = None
+        self.n_features_in_ = X.shape[1]
+        if hasattr(X, "columns"):
+            self.feature_names_in_ = np.array(list(X.columns))
+        return self
+
+    def predict(self, X):
+        return self.model_.predict(X).flatten()
+
+    def predict_proba(self, X):
+        return self.model_.predict_proba(X)
+
+    def __sklearn_tags__(self):
+        return super().__sklearn_tags__()
+
+
+class CatBoostRegressorSklearnWrapper(RegressorMixin, BaseEstimator):
+    """Wraps a pre-fitted CatBoostRegressor for sklearn Display APIs."""
+    _estimator_type = "regressor"
+
+    def __init__(self, model, feature_names=None, n_features=None):
+        self.model = model
+        self.feature_names = feature_names
+        self.n_features = n_features
+
+        if n_features is not None:
+            self.n_features_in_ = n_features
+        if feature_names is not None:
+            self.feature_names_in_ = np.array(feature_names)
+
+        try:
+            fi = model.get_feature_importance()
+            self.feature_importances_ = np.array(fi) if fi is not None else None
+        except Exception:
+            self.feature_importances_ = getattr(model, "feature_importances_", None)
+
+    def fit(self, X, y):
+        # Already fitted; no-op to satisfy sklearn API
+        return self
+
+    def predict(self, X):
+        return self.model.predict(X).flatten()
+
+    def score(self, X, y):
+        from sklearn.metrics import r2_score
+        return r2_score(y, self.predict(X))
+
+    def __sklearn_tags__(self):
+        return super().__sklearn_tags__()
+
+
+class CatBoostRegressorSklearnWrapperCV(RegressorMixin, BaseEstimator):
+    """CatBoost regressor wrapper that supports CV-based sklearn Display APIs."""
+    _estimator_type = "regressor"
+
+    def __init__(self, cat_features=None, **params):
+        self.cat_features = cat_features
+        for key, value in params.items():
+            setattr(self, key, value)
+        self._params = params
+
+    def get_params(self, deep=True):
+        return {**self._params, "cat_features": self.cat_features}
+
+    def set_params(self, **params):
+        for key, value in params.items():
+            setattr(self, key, value)
+        if "cat_features" in params:
+            self.cat_features = params["cat_features"]
+        self._params.update({k: v for k, v in params.items() if k != "cat_features"})
+        return self
+
+    def fit(self, X, y):
+        params = {k: getattr(self, k) for k in self._params.keys()}
+        self.model_ = CatBoostRegressor(**params)
+        self.model_.fit(X, y, cat_features=self.cat_features)
+        self.n_features_in_ = X.shape[1]
+        if hasattr(X, "columns"):
+            self.feature_names_in_ = np.array(list(X.columns))
+        return self
+
+    def predict(self, X):
+        return self.model_.predict(X).flatten()
+
+    def __sklearn_tags__(self):
+        return super().__sklearn_tags__()
+
+
 class ClassPredictionErrorFixed(_ClassPredictionErrorBase):
     """ClassPredictionError with sklearn 1.8+ compatibility fix.
 
@@ -1615,7 +1770,7 @@ class ClassPredictionErrorFixed(_ClassPredictionErrorBase):
 # From notebook 017_sklearn_duckdb_sql_regression.ipynb
 # =============================================================================
 
-class CatBoostRegressorWrapper(BaseEstimator, RegressorMixin):
+class CatBoostRegressorYellowbrickWrapper(BaseEstimator, RegressorMixin):
     """Wraps CatBoost regressor to make it sklearn-compatible for YellowBrick.
 
     Use for visualizers that need a pre-fitted model:
@@ -1648,7 +1803,7 @@ class CatBoostRegressorWrapper(BaseEstimator, RegressorMixin):
         return r2_score(y, self.predict(X))
 
 
-class CatBoostRegressorWrapperCV(BaseEstimator, RegressorMixin):
+class CatBoostRegressorYellowbrickWrapperCV(BaseEstimator, RegressorMixin):
     """CatBoost regressor wrapper that supports cross-validation.
 
     Use for CV-based visualizers that need to re-fit the model:
@@ -1717,9 +1872,9 @@ def yellowbrick_classification_kwargs(
 
     Reference: https://www.scikit-yb.org/en/latest/api/classifier/index.html
 
-    All visualizers use CatBoostClassifierWrapper with is_fitted=True and force_model=True
+    All visualizers use CatBoostClassifierYellowbrickWrapper with is_fitted=True and force_model=True
     for CatBoost compatibility, except DiscriminationThreshold which uses
-    CatBoostClassifierWrapperCV for CV-based training.
+    CatBoostClassifierYellowbrickWrapperCV for CV-based training.
     """
     # Human-readable class names for fraud detection
     class_names = ["Non-Fraud", "Fraud"] if "Fraud" in project_name else binary_classes
@@ -1764,7 +1919,7 @@ def yellowbrick_classification_kwargs(
             "force_model": True,
         },
         # DiscriminationThreshold: Shows optimal threshold for binary classification
-    # NOTE: Uses CatBoostClassifierWrapperCV (unfitted) for internal CV
+    # NOTE: Uses CatBoostClassifierYellowbrickWrapperCV (unfitted) for internal CV
         "DiscriminationThreshold": {
             "n_trials": 10,
             "cv": 0.2,
@@ -1788,8 +1943,8 @@ def yellowbrick_classification_visualizers(
 
     Reference: https://www.scikit-yb.org/en/latest/api/classifier/index.html
 
-    Uses CatBoostClassifierWrapper for pre-fitted model visualizers, and
-    CatBoostClassifierWrapperCV for CV-based visualizers (DiscriminationThreshold).
+    Uses CatBoostClassifierYellowbrickWrapper for pre-fitted model visualizers, and
+    CatBoostClassifierYellowbrickWrapperCV for CV-based visualizers (DiscriminationThreshold).
     """
     from yellowbrick.classifier import (
         ConfusionMatrix,
@@ -1813,7 +1968,7 @@ def yellowbrick_classification_visualizers(
             raise ValueError(f"Unknown visualizer: {visualizer_name}")
         if visualizer_name == "DiscriminationThreshold":
             # DiscriminationThreshold needs CV-compatible unfitted wrapper
-            cv_estimator = CatBoostClassifierWrapperCV(iterations=100, depth=6, learning_rate=0.1)
+            cv_estimator = CatBoostClassifierYellowbrickWrapperCV(iterations=100, depth=6, learning_rate=0.1)
             visualizer = vis_class(cv_estimator, **params)
             # Fit on full data (CV happens internally)
             X_full = pd.concat([X_train, X_test], ignore_index=True)
@@ -1823,7 +1978,7 @@ def yellowbrick_classification_visualizers(
             # Other visualizers use pre-fitted wrapped model
             if model is None:
                 raise ValueError("Model required for classification visualizers")
-            wrapped_model = CatBoostClassifierWrapper(model) if 'CatBoost' in type(model).__name__ else model
+            wrapped_model = CatBoostClassifierYellowbrickWrapper(model) if 'CatBoost' in type(model).__name__ else model
             visualizer = vis_class(wrapped_model, **params)
             visualizer.fit(X_train, y_train)
             visualizer.score(X_test, y_test)
@@ -1879,7 +2034,7 @@ def sklearn_classification_viz_config(
                 "strategy": "quantile",
                 "pos_label": pos_label,
                 "ref_line": True,
-                "name": "LogReg (balanced)",
+                "name": "CatBoost",
             },
             "ConfusionMatrixDisplay": {
                 "normalize": "true",
@@ -1894,13 +2049,13 @@ def sklearn_classification_viz_config(
                 "drop_intermediate": False,
                 "response_method": "predict_proba",
                 "pos_label": pos_label,
-                "name": "LogReg (balanced)",
+                "name": "CatBoost",
             },
             "PrecisionRecallDisplay": {
                 "drop_intermediate": False,
                 "response_method": "predict_proba",
                 "pos_label": pos_label,
-                "name": "LogReg (balanced)",
+                "name": "CatBoost",
                 "plot_chance_level": True,
                 "chance_level_kw": {
                     "linestyle": "--",
@@ -1912,7 +2067,7 @@ def sklearn_classification_viz_config(
                 "drop_intermediate": False,
                 "response_method": "predict_proba",
                 "pos_label": pos_label,
-                "name": "LogReg (balanced)",
+                "name": "CatBoost",
                 "plot_chance_level": True,
                 "curve_kwargs": {
                     "linewidth": 2,
@@ -1965,8 +2120,8 @@ def sklearn_classification_viz_config(
                 },
             },
             "ValidationCurveDisplay": {
-                "param_name": "logisticregression__C",
-                "param_range": np.logspace(-2, 1, 4),
+                "param_name": "depth",
+                "param_range": [4, 6, 8, 10],
                 "cv": StratifiedKFold(n_splits=3, shuffle=True, random_state=42),
                 "scoring": "f1",
                 "score_type": "both",
@@ -1990,6 +2145,7 @@ def sklearn_classification_visualizers(
     y_test: pd.Series,
     feature_names: list,
     project_name: str,
+    model=None,
 ):
     """Create sklearn classification display object for a metric."""
     viz_config = sklearn_classification_viz_config(project_name, feature_names)
@@ -1997,16 +2153,74 @@ def sklearn_classification_visualizers(
     if kwargs is None:
         raise ValueError(f"Unknown sklearn visualizer: {metric_name}")
 
-    base_estimator = make_pipeline(
-        StandardScaler(),
-        LogisticRegression(
-            max_iter=2000,
-            class_weight="balanced",
-            solver="liblinear",
-            random_state=42,
-        ),
-    )
-    base_estimator.fit(X_train, y_train)
+    categorical_indices = viz_config["categorical_indices"]
+    boundary_features = viz_config["boundary_features"]
+    X_train_boundary = X_train[boundary_features]
+    X_test_boundary = X_test[boundary_features]
+
+    if model is not None and "CatBoost" in type(model).__name__:
+        sklearn_estimator = CatBoostClassifierSklearnWrapper(
+            model,
+            feature_names=feature_names,
+            n_features=X_train.shape[1],
+        )
+        try:
+            model_params = model.get_params()
+        except Exception:
+            model_params = {}
+        model_params.pop("callbacks", None)
+        model_params.pop("callback", None)
+        if model_params.get("use_best_model") is True:
+            model_params.pop("use_best_model", None)
+        model_params = {
+            **model_params,
+            "verbose": 0,
+            "allow_writing_files": False,
+            "random_seed": model_params.get("random_seed", 42),
+        }
+        boundary_cat_indices = [
+            idx for idx, name in enumerate(boundary_features)
+            if name in PROJECT_CATEGORICAL_FEATURES.get(project_name, [])
+        ]
+        boundary_estimator = CatBoostClassifier(**model_params)
+        boundary_estimator.fit(
+            X_train_boundary,
+            y_train,
+            cat_features=boundary_cat_indices,
+        )
+        boundary_wrapper = CatBoostClassifierSklearnWrapper(
+            boundary_estimator,
+            feature_names=boundary_features,
+            n_features=len(boundary_features),
+        )
+        validation_estimator = CatBoostClassifierSklearnWrapperCV(
+            cat_features=categorical_indices,
+            **model_params,
+        )
+    else:
+        base_estimator = make_pipeline(
+            StandardScaler(),
+            LogisticRegression(
+                max_iter=2000,
+                class_weight="balanced",
+                solver="liblinear",
+                random_state=42,
+            ),
+        )
+        base_estimator.fit(X_train, y_train)
+        sklearn_estimator = base_estimator
+        boundary_estimator = make_pipeline(
+            StandardScaler(),
+            LogisticRegression(
+                max_iter=2000,
+                class_weight="balanced",
+                solver="liblinear",
+                random_state=42,
+            ),
+        )
+        boundary_estimator.fit(X_train_boundary, y_train)
+        boundary_wrapper = boundary_estimator
+        validation_estimator = base_estimator
 
     if metric_name in {
         "CalibrationDisplay",
@@ -2023,25 +2237,12 @@ def sklearn_classification_visualizers(
             "RocCurveDisplay": RocCurveDisplay,
         }
         display_class = display_map[metric_name]
-        return display_class.from_estimator(base_estimator, X_test, y_test, **kwargs)
+        return display_class.from_estimator(sklearn_estimator, X_test, y_test, **kwargs)
 
     if metric_name == "DecisionBoundaryDisplay":
-        boundary_features = viz_config["boundary_features"]
-        X_train_boundary = X_train[boundary_features]
-        X_test_boundary = X_test[boundary_features]
-        boundary_estimator = make_pipeline(
-            StandardScaler(),
-            LogisticRegression(
-                max_iter=2000,
-                class_weight="balanced",
-                solver="liblinear",
-                random_state=42,
-            ),
-        )
-        boundary_estimator.fit(X_train_boundary, y_train)
         fig, ax = plt.subplots(figsize=(6, 5))
         display = DecisionBoundaryDisplay.from_estimator(
-            boundary_estimator,
+            boundary_wrapper,
             X_train_boundary,
             ax=ax,
             **kwargs,
@@ -2055,17 +2256,17 @@ def sklearn_classification_visualizers(
             s=12,
             edgecolor="k",
         )
-        ax.set_title("Decision Boundary (LogReg)")
+        ax.set_title("Decision Boundary (CatBoost)" if model is not None else "Decision Boundary (LogReg)")
         return display
 
     if metric_name == "PartialDependenceDisplay":
-        return PartialDependenceDisplay.from_estimator(base_estimator, X_train, **kwargs)
+        return PartialDependenceDisplay.from_estimator(sklearn_estimator, X_train, **kwargs)
 
     if metric_name == "LearningCurveDisplay":
-        return LearningCurveDisplay.from_estimator(base_estimator, X_train, y_train, **kwargs)
+        return LearningCurveDisplay.from_estimator(validation_estimator, X_train, y_train, **kwargs)
 
     if metric_name == "ValidationCurveDisplay":
-        return ValidationCurveDisplay.from_estimator(base_estimator, X_train, y_train, **kwargs)
+        return ValidationCurveDisplay.from_estimator(validation_estimator, X_train, y_train, **kwargs)
 
     raise ValueError(f"Unsupported sklearn visualizer: {metric_name}")
 
@@ -2104,7 +2305,21 @@ def sklearn_regression_viz_config(
         "categorical_indices": categorical_indices,
         "cv": cv,
         "kwargs": {
-            "PredictionErrorDisplay": {
+            "PredictionErrorDisplayActual": {
+                "kind": "actual_vs_predicted",
+                "subsample": 2000,
+                "random_state": 42,
+                "scatter_kwargs": {
+                    "alpha": 0.6,
+                    "s": 12,
+                    "edgecolor": "k",
+                },
+                "line_kwargs": {
+                    "color": "#1f77b4",
+                    "linewidth": 2,
+                },
+            },
+            "PredictionErrorDisplayResidual": {
                 "kind": "residual_vs_predicted",
                 "subsample": 2000,
                 "random_state": 42,
@@ -2136,7 +2351,7 @@ def sklearn_regression_viz_config(
             "LearningCurveDisplay": {
                 "train_sizes": np.linspace(0.1, 1.0, 5),
                 "cv": KFold(n_splits=3, shuffle=True, random_state=42),
-                "scoring": "r2",
+                "scoring": "neg_root_mean_squared_error",
                 "shuffle": True,
                 "random_state": 42,
                 "score_type": "both",
@@ -2149,10 +2364,10 @@ def sklearn_regression_viz_config(
                 },
             },
             "ValidationCurveDisplay": {
-                "param_name": "max_depth",
-                "param_range": [4, 8, 12, 16],
+                "param_name": "depth",
+                "param_range": [4, 6, 8, 10],
                 "cv": KFold(n_splits=3, shuffle=True, random_state=42),
-                "scoring": "r2",
+                "scoring": "neg_root_mean_squared_error",
                 "score_type": "both",
                 "std_display_style": "fill_between",
                 "line_kw": {
@@ -2174,41 +2389,88 @@ def sklearn_regression_visualizers(
     y_test: pd.Series,
     feature_names: list,
     project_name: str,
+    model=None,
 ):
     """Create sklearn regression display object for a metric."""
     viz_config = sklearn_regression_viz_config(project_name, feature_names)
-    kwargs = viz_config["kwargs"].get(metric_name)
+    metric_key = metric_name.replace("sklearn:", "").strip().replace(" ", "")
+
+    if metric_key == "PredictionErrorDisplay":
+        metric_key = "PredictionErrorDisplayResidual"
+
+    kwargs = viz_config["kwargs"].get(metric_key)
     if kwargs is None:
         raise ValueError(f"Unknown sklearn visualizer: {metric_name}")
 
-    base_estimator = RandomForestRegressor(
-        n_estimators=200,
-        max_depth=12,
-        min_samples_split=4,
-        min_samples_leaf=2,
-        random_state=42,
-        n_jobs=-1,
-    )
-    base_estimator.fit(X_train, y_train)
+    cat_indices = viz_config["categorical_indices"]
 
-    if metric_name == "PredictionErrorDisplay":
+    if model is None:
+        base_estimator = RandomForestRegressor(
+            n_estimators=200,
+            max_depth=12,
+            min_samples_split=4,
+            min_samples_leaf=2,
+            random_state=42,
+            n_jobs=-1,
+        )
+        base_estimator.fit(X_train, y_train)
+        sklearn_estimator = base_estimator
+        validation_estimator = base_estimator
+    elif "CatBoost" in type(model).__name__:
+        try:
+            model_params = model.get_params()
+        except Exception:
+            model_params = {}
+        model_params.pop("callbacks", None)
+        model_params.pop("callback", None)
+        if model_params.get("use_best_model") is True:
+            model_params.pop("use_best_model", None)
+        model_params = {
+            **model_params,
+            "verbose": 0,
+            "allow_writing_files": False,
+            "random_seed": model_params.get("random_seed", 42),
+        }
+        sklearn_estimator = CatBoostRegressorSklearnWrapper(
+            model,
+            feature_names=feature_names,
+            n_features=len(feature_names) if feature_names else None,
+        )
+        validation_estimator = CatBoostRegressorSklearnWrapperCV(
+            cat_features=cat_indices,
+            **model_params,
+        )
+    else:
+        sklearn_estimator = model
+        validation_estimator = model
+
+    if metric_key == "PredictionErrorDisplayActual":
         return PredictionErrorDisplay.from_estimator(
-            base_estimator, X_test, y_test, **kwargs
+            sklearn_estimator, X_test, y_test, **kwargs
         )
 
-    if metric_name == "PartialDependenceDisplay":
+    if metric_key == "PredictionErrorDisplayResidual":
+        return PredictionErrorDisplay.from_estimator(
+            sklearn_estimator, X_test, y_test, **kwargs
+        )
+
+    if metric_key == "PartialDependenceDisplay":
         return PartialDependenceDisplay.from_estimator(
-            base_estimator, X_train, **kwargs
+            sklearn_estimator, X_train, **kwargs
         )
 
-    if metric_name == "LearningCurveDisplay":
+    if metric_key == "LearningCurveDisplay":
         return LearningCurveDisplay.from_estimator(
-            base_estimator, X_train, y_train, **kwargs
+            validation_estimator, X_train, y_train, **kwargs
         )
 
-    if metric_name == "ValidationCurveDisplay":
+    if metric_key == "ValidationCurveDisplay":
+        if isinstance(validation_estimator, CatBoostRegressorSklearnWrapperCV):
+            kwargs = {**kwargs, "param_name": "depth", "param_range": [4, 6, 8, 10]}
+        else:
+            kwargs = {**kwargs, "param_name": "max_depth", "param_range": [4, 8, 12, 16]}
         return ValidationCurveDisplay.from_estimator(
-            base_estimator, X_train, y_train, **kwargs
+            validation_estimator, X_train, y_train, **kwargs
         )
 
     raise ValueError(f"Unsupported sklearn visualizer: {metric_name}")
@@ -2240,13 +2502,35 @@ def sklearn_clustering_viz_config(
     if not partial_features:
         partial_features = feature_names[:4]
 
+    boundary_candidates = [
+        "price",
+        "time_on_page_seconds",
+        "quantity",
+        "session_event_sequence",
+    ]
+    boundary_features = [name for name in boundary_candidates if name in feature_names]
+    if len(boundary_features) < 2:
+        boundary_features = feature_names[:2]
+    else:
+        boundary_features = boundary_features[:2]
+
     cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
 
     return {
         "partial_features": partial_features,
+        "boundary_features": boundary_features,
         "categorical_indices": categorical_indices,
         "cv": cv,
         "kwargs": {
+            "DecisionBoundaryDisplay": {
+                "grid_resolution": 200,
+                "eps": 0.5,
+                "plot_method": "contourf",
+                "response_method": "predict_proba",
+                "class_of_interest": 0,
+                "xlabel": boundary_features[0] if boundary_features else None,
+                "ylabel": boundary_features[1] if len(boundary_features) > 1 else None,
+            },
             "PartialDependenceDisplay": {
                 "features": partial_features,
                 "categorical_features": categorical_indices,
@@ -2324,6 +2608,26 @@ def sklearn_clustering_visualizers(
         n_jobs=-1,
     )
     rf_estimator.fit(X_full, y_full)
+
+    if metric_name == "DecisionBoundaryDisplay":
+        if hasattr(X_full, "columns"):
+            boundary_features = viz_config.get("boundary_features") or list(X_full.columns[:2])
+            X_boundary = X_full[boundary_features]
+        else:
+            boundary_features = viz_config.get("boundary_features") or [0, 1]
+            X_boundary = X_full[:, :2]
+        boundary_estimator = RandomForestClassifier(
+            n_estimators=200,
+            max_depth=10,
+            min_samples_split=4,
+            min_samples_leaf=2,
+            random_state=42,
+            n_jobs=-1,
+        )
+        boundary_estimator.fit(X_boundary, y_full)
+        return DecisionBoundaryDisplay.from_estimator(
+            boundary_estimator, X_boundary, **kwargs
+        )
 
     if metric_name == "PartialDependenceDisplay":
         return PartialDependenceDisplay.from_estimator(
@@ -2405,7 +2709,7 @@ def yellowbrick_regression_visualizers(
             raise ValueError(f"Unknown visualizer: {visualizer_name}")
         if model is None:
             raise ValueError("Model required for regression visualizers")
-        wrapped_model = CatBoostRegressorWrapper(model) if 'CatBoost' in type(model).__name__ else model
+        wrapped_model = CatBoostRegressorYellowbrickWrapper(model) if 'CatBoost' in type(model).__name__ else model
         clean_params = {k: v for k, v in params.items() if k != "is_fitted"}
         visualizer = vis_class(wrapped_model, **clean_params)
         visualizer.fit(X_train, y_train)
@@ -2777,8 +3081,8 @@ def yellowbrick_model_selection_visualizers(
     Reference: https://www.scikit-yb.org/en/latest/api/model_selection/index.html
 
     CatBoost Handling (selects wrapper based on task type):
-    - Classification: CatBoostClassifierWrapper/CatBoostClassifierWrapperCV
-    - Regression: CatBoostRegressorWrapper/CatBoostRegressorWrapperCV
+    - Classification: CatBoostClassifierYellowbrickWrapper/CatBoostClassifierYellowbrickWrapperCV
+    - Regression: CatBoostRegressorYellowbrickWrapper/CatBoostRegressorYellowbrickWrapperCV
 
     Clustering Handling (ECCI):
     - Uses RandomForestClassifier trained on cluster labels as pseudo-targets
@@ -2856,7 +3160,7 @@ def yellowbrick_model_selection_visualizers(
                 raise ValueError("Model required for FeatureImportances")
             # Select wrapper based on task type
             if 'CatBoost' in type(model).__name__:
-                wrapped_estimator = CatBoostRegressorWrapper(model) if is_regression else CatBoostClassifierWrapper(model)
+                wrapped_estimator = CatBoostRegressorYellowbrickWrapper(model) if is_regression else CatBoostClassifierYellowbrickWrapper(model)
             else:
                 wrapped_estimator = model
             visualizer = vis_class(wrapped_estimator, **params)
@@ -2864,9 +3168,9 @@ def yellowbrick_model_selection_visualizers(
         else:
             # CV-based visualizers need unfitted wrapper
             if is_regression:
-                cv_wrapper = CatBoostRegressorWrapperCV(iterations=100, depth=6, learning_rate=0.1)
+                cv_wrapper = CatBoostRegressorYellowbrickWrapperCV(iterations=100, depth=6, learning_rate=0.1)
             else:
-                cv_wrapper = CatBoostClassifierWrapperCV(iterations=100, depth=6, learning_rate=0.1)
+                cv_wrapper = CatBoostClassifierYellowbrickWrapperCV(iterations=100, depth=6, learning_rate=0.1)
             visualizer = vis_class(cv_wrapper, **params)
             visualizer.fit(X_full, y_full)
         return visualizer
@@ -3263,3 +3567,502 @@ def generate_yellowbrick_image(visualizer) -> str:
     plt.close(visualizer.fig)  # Close specific figure
     plt.clf()                   # Clear current figure state
     return image_base64
+import numpy as np
+import scipy
+if not hasattr(scipy, "interp"):
+    scipy.interp = np.interp
+import scikitplot as skplt
+
+import pandas as pd
+
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+
+
+def scikitplot_classification_visualizer(
+    metric_name: str,
+    X_train: pd.DataFrame,
+    X_test: pd.DataFrame,
+    y_train: pd.Series,
+    y_test: pd.Series,
+    project_name: str,
+    model=None,
+    feature_names: list | None = None,
+) -> object:
+    metric_key = metric_name.replace("scikitplot:", "").strip()
+    compact_key = re.sub(r"[^A-Za-z0-9]", "", metric_key)
+    if compact_key.lower() in {
+        "precisionrecallcurvedetailed",
+        "precisionrecalldetailed",
+    }:
+        metric_key = "PrecisionRecallCurveDetailed"
+    elif compact_key.lower() in {"roccurvedetailed", "rocdetailed"}:
+        metric_key = "RocCurveDetailed"
+    metric_key = metric_key.replace(" ", "")
+
+    if feature_names is None:
+        feature_names = list(X_train.columns) if hasattr(X_train, "columns") else None
+
+    if model is None:
+        fallback_model = RandomForestClassifier(
+            n_estimators=300,
+            max_depth=10,
+            min_samples_split=4,
+            min_samples_leaf=2,
+            class_weight="balanced",
+            random_state=42,
+        )
+        fallback_model.fit(X_train, y_train)
+        model = fallback_model
+
+    y_pred = model.predict(X_test)
+    y_probas = model.predict_proba(X_test)
+
+    pca_model = PCA(random_state=42).fit(X_train)
+
+    cat_indices = []
+    if feature_names is not None:
+        cat_features = PROJECT_CATEGORICAL_FEATURES.get(project_name, [])
+        cat_indices = [feature_names.index(name) for name in cat_features if name in feature_names]
+
+    if model is not None and "CatBoost" in type(model).__name__:
+        try:
+            model_params = model.get_params()
+        except Exception:
+            model_params = {}
+        model_params.pop("callbacks", None)
+        model_params.pop("callback", None)
+        if model_params.get("use_best_model") is True:
+            model_params.pop("use_best_model", None)
+        model_params = {
+            **model_params,
+            "verbose": 0,
+            "allow_writing_files": False,
+            "random_seed": model_params.get("random_seed", 42),
+        }
+        learning_estimator = CatBoostClassifierSklearnWrapperCV(
+            cat_features=cat_indices,
+            **model_params,
+        )
+        fi_model = CatBoostClassifierSklearnWrapper(
+            model,
+            feature_names=feature_names,
+            n_features=len(feature_names) if feature_names else None,
+        )
+    else:
+        learning_estimator = model
+        fi_model = model
+
+    config = {
+        "ConfusionMatrix": lambda: skplt.metrics.plot_confusion_matrix(
+            y_test,
+            y_pred,
+            normalize=True,
+            cmap="Blues",
+            x_tick_rotation=0,
+            title="Confusion Matrix (Normalized)",
+            figsize=(7, 5),
+            title_fontsize="large",
+            text_fontsize="medium",
+        ),
+        "RocCurve": lambda: skplt.metrics.plot_roc(
+            y_test,
+            y_probas,
+            plot_micro=True,
+            plot_macro=True,
+            cmap="nipy_spectral",
+            title="ROC Curves",
+            figsize=(7, 5),
+            title_fontsize="large",
+            text_fontsize="medium",
+        ),
+        "RocCurveDetailed": lambda: skplt.metrics.plot_roc_curve(
+            y_test,
+            y_probas,
+            curves=("micro", "macro", "each_class"),
+            cmap="nipy_spectral",
+            title="ROC Curve (Micro/Macro/Per-Class)",
+            figsize=(7, 5),
+            title_fontsize="large",
+            text_fontsize="medium",
+        ),
+        "PrecisionRecallCurve": lambda: skplt.metrics.plot_precision_recall(
+            y_test,
+            y_probas,
+            plot_micro=True,
+            cmap="nipy_spectral",
+            title="Precision-Recall Curve",
+            figsize=(7, 5),
+            title_fontsize="large",
+            text_fontsize="medium",
+        ),
+        "PrecisionRecallCurveDetailed": lambda: skplt.metrics.plot_precision_recall_curve(
+            y_test,
+            y_probas,
+            curves=("micro", "each_class"),
+            cmap="nipy_spectral",
+            title="Precision-Recall (Micro/Per-Class)",
+            figsize=(7, 5),
+            title_fontsize="large",
+            text_fontsize="medium",
+        ),
+        "KSStatistic": lambda: skplt.metrics.plot_ks_statistic(
+            y_test,
+            y_probas,
+            title="KS Statistic Plot",
+            figsize=(7, 5),
+            title_fontsize="large",
+            text_fontsize="medium",
+        ),
+        "CalibrationCurve": lambda: skplt.metrics.plot_calibration_curve(
+            y_test,
+            [y_probas[:, 1]],
+            n_bins=10,
+            title="Calibration (Reliability Curves)",
+            cmap="nipy_spectral",
+            clf_names=["CatBoostClassifier"],
+            figsize=(7, 5),
+            title_fontsize="large",
+            text_fontsize="medium",
+        ),
+        "CumulativeGain": lambda: skplt.metrics.plot_cumulative_gain(
+            y_test,
+            y_probas,
+            title="Cumulative Gains Curve",
+            figsize=(7, 5),
+            title_fontsize="large",
+            text_fontsize="medium",
+        ),
+        "LiftCurve": lambda: skplt.metrics.plot_lift_curve(
+            y_test,
+            y_probas,
+            title="Lift Curve",
+            figsize=(7, 5),
+            title_fontsize="large",
+            text_fontsize="medium",
+        ),
+        "LearningCurve": lambda: skplt.estimators.plot_learning_curve(
+            learning_estimator,
+            X_train,
+            y_train,
+            cv=3,
+            train_sizes=np.linspace(0.1, 1.0, 6),
+            scoring="f1",
+            shuffle=True,
+            random_state=42,
+            title="Learning Curve",
+            figsize=(7, 5),
+            title_fontsize="large",
+            text_fontsize="medium",
+        ),
+        "PCA2DProjection": lambda: skplt.decomposition.plot_pca_2d_projection(
+            pca_model,
+            X_test,
+            y_test,
+            title="PCA 2-D Projection",
+            biplot=False,
+            feature_labels=feature_names,
+            cmap="Spectral",
+            figsize=(7, 5),
+            title_fontsize="large",
+            text_fontsize="medium",
+        ),
+        "PCAComponentVariance": lambda: skplt.decomposition.plot_pca_component_variance(
+            pca_model,
+            title="PCA Component Explained Variance",
+            target_explained_variance=0.9,
+            figsize=(7, 5),
+            title_fontsize="large",
+            text_fontsize="medium",
+        ),
+        "FeatureImportances": lambda: skplt.estimators.plot_feature_importances(
+            fi_model,
+            title="Feature Importances",
+            feature_names=feature_names,
+            max_num_features=20,
+            order="descending",
+            x_tick_rotation=45,
+            figsize=(8, 5),
+            title_fontsize="large",
+            text_fontsize="medium",
+        ),
+    }
+
+    if metric_key not in config:
+        alias_map = {
+            "RocCurveDetailed": "RocCurve",
+            "PrecisionRecallCurveDetailed": "PrecisionRecallCurve",
+        }
+        fallback_key = alias_map.get(metric_key)
+        if fallback_key in config:
+            return config[fallback_key]()
+        if metric_key.endswith("Detailed"):
+            trimmed_key = metric_key.replace("Detailed", "")
+            if trimmed_key in config:
+                return config[trimmed_key]()
+        raise ValueError(f"Unknown scikit-plot visualizer: {metric_name}")
+    return config[metric_key]()
+
+
+def scikitplot_regression_visualizer(
+    metric_name: str,
+    X_train: pd.DataFrame,
+    X_test: pd.DataFrame,
+    y_train: pd.Series,
+    y_test: pd.Series,
+    project_name: str,
+    model=None,
+    feature_names: list | None = None,
+) -> object:
+    metric_key = metric_name.replace("scikitplot:", "").strip().replace(" ", "")
+
+    if feature_names is None:
+        feature_names = list(X_train.columns) if hasattr(X_train, "columns") else None
+
+    if model is None:
+        fallback_model = RandomForestRegressor(
+            n_estimators=200,
+            max_depth=12,
+            min_samples_split=4,
+            min_samples_leaf=2,
+            random_state=42,
+            n_jobs=-1,
+        )
+        fallback_model.fit(X_train, y_train)
+        model = fallback_model
+
+    cat_indices = []
+    if feature_names is not None:
+        cat_features = PROJECT_CATEGORICAL_FEATURES.get(project_name, [])
+        cat_indices = [feature_names.index(name) for name in cat_features if name in feature_names]
+
+    if model is not None and "CatBoost" in type(model).__name__:
+        try:
+            model_params = model.get_params()
+        except Exception:
+            model_params = {}
+        model_params.pop("callbacks", None)
+        model_params.pop("callback", None)
+        if model_params.get("use_best_model") is True:
+            model_params.pop("use_best_model", None)
+        model_params = {
+            **model_params,
+            "verbose": 0,
+            "allow_writing_files": False,
+            "random_seed": model_params.get("random_seed", 42),
+        }
+        learning_estimator = CatBoostRegressorSklearnWrapperCV(
+            cat_features=cat_indices,
+            **model_params,
+        )
+        fi_model = CatBoostRegressorSklearnWrapper(
+            model,
+            feature_names=feature_names,
+            n_features=len(feature_names) if feature_names else None,
+        )
+    else:
+        learning_estimator = model
+        fi_model = model
+
+    pca_model = PCA(random_state=42).fit(X_train)
+
+    config = {
+        "LearningCurve": lambda: skplt.estimators.plot_learning_curve(
+            learning_estimator,
+            X_train,
+            y_train,
+            cv=3,
+            train_sizes=np.linspace(0.1, 1.0, 5),
+            scoring="neg_root_mean_squared_error",
+            shuffle=True,
+            random_state=42,
+            title="Regression Learning Curve",
+            figsize=(8, 6),
+            title_fontsize="large",
+            text_fontsize="medium",
+        ),
+        "FeatureImportances": lambda: skplt.estimators.plot_feature_importances(
+            fi_model,
+            feature_names=feature_names,
+            max_num_features=20,
+            order="descending",
+            x_tick_rotation=45,
+            figsize=(8, 5),
+            title="Feature Importances",
+            title_fontsize="large",
+            text_fontsize="medium",
+        ),
+        "PCA2DProjection": lambda: skplt.decomposition.plot_pca_2d_projection(
+            pca_model,
+            X_train,
+            y_train,
+            biplot=False,
+            cmap="Spectral",
+            title="PCA 2D Projection (Regression)",
+            figsize=(8, 6),
+            title_fontsize="large",
+            text_fontsize="medium",
+        ),
+        "PCAComponentVariance": lambda: skplt.decomposition.plot_pca_component_variance(
+            pca_model,
+            target_explained_variance=0.85,
+            title="PCA Component Explained Variance",
+            figsize=(8, 6),
+            title_fontsize="large",
+            text_fontsize="medium",
+        ),
+    }
+
+    if metric_key not in config:
+        raise ValueError(f"Unknown scikit-plot visualizer: {metric_name}")
+    if metric_key == "PCA2DProjection":
+        ax = config[metric_key]()
+        legend = ax.get_legend()
+        if legend is not None:
+            legend.remove()
+        return ax
+    return config[metric_key]()
+
+
+def scikitplot_clustering_visualizer(
+    metric_name: str,
+    X_train: pd.DataFrame,
+    X_test: pd.DataFrame,
+    y_train: pd.Series,
+    y_test: pd.Series,
+) -> object:
+    X_full = pd.concat([X_train, X_test], ignore_index=True)
+    y_full = pd.concat([y_train, y_test], ignore_index=True)
+    feature_names = list(X_full.columns) if hasattr(X_full, "columns") else None
+
+    config = {
+        "ElbowCurve": lambda: skplt.cluster.plot_elbow_curve(
+            KMeans(n_clusters=6, random_state=42),
+            X_full,
+            cluster_ranges=range(2, 11),
+            show_cluster_time=True,
+            n_jobs=1,
+            title="Elbow Plot (KMeans)",
+            figsize=(7, 5),
+            title_fontsize="large",
+            text_fontsize="medium",
+        ),
+        "Silhouette": lambda: skplt.metrics.plot_silhouette(
+            X_full,
+            y_full,
+            metric="euclidean",
+            cmap="nipy_spectral",
+            title="Silhouette Analysis",
+            figsize=(7, 5),
+            title_fontsize="large",
+            text_fontsize="medium",
+        ),
+        "PCA2DProjection": lambda: skplt.decomposition.plot_pca_2d_projection(
+            PCA(random_state=42).fit(X_full),
+            X_full,
+            y_full,
+            biplot=False,
+            cmap="Spectral",
+            title="PCA 2-D Projection",
+            figsize=(7, 5),
+            title_fontsize="large",
+            text_fontsize="medium",
+        ),
+        "PCAComponentVariance": lambda: skplt.decomposition.plot_pca_component_variance(
+            PCA(random_state=42).fit(X_full),
+            target_explained_variance=0.8,
+            title="PCA Component Explained Variance",
+            figsize=(7, 5),
+            title_fontsize="large",
+            text_fontsize="medium",
+        ),
+        "LearningCurve": lambda: skplt.estimators.plot_learning_curve(
+            RandomForestClassifier(
+                n_estimators=200,
+                max_depth=12,
+                min_samples_split=4,
+                min_samples_leaf=2,
+                random_state=42,
+                n_jobs=-1,
+            ),
+            X_full,
+            y_full,
+            cv=3,
+            train_sizes=np.linspace(0.1, 1.0, 5),
+            scoring="accuracy",
+            n_jobs=1,
+            title="Learning Curve",
+            figsize=(7, 5),
+            title_fontsize="large",
+            text_fontsize="medium",
+        ),
+        "FeatureImportances": lambda: skplt.estimators.plot_feature_importances(
+            RandomForestClassifier(
+                n_estimators=200,
+                max_depth=12,
+                min_samples_split=4,
+                min_samples_leaf=2,
+                random_state=42,
+                n_jobs=-1,
+            ).fit(X_full, y_full),
+            feature_names=feature_names,
+            max_num_features=20,
+            order="descending",
+            x_tick_rotation=45,
+            title="Cluster Feature Importances",
+            figsize=(8, 5),
+            title_fontsize="large",
+            text_fontsize="medium",
+        ),
+    }
+
+    if metric_name not in config:
+        raise ValueError(f"Unknown scikit-plot visualizer: {metric_name}")
+    return config[metric_name]()
+
+
+def scikitplot_visualizer(
+    project_name: str,
+    metric_name: str,
+    X_train: pd.DataFrame,
+    X_test: pd.DataFrame,
+    y_train: pd.Series,
+    y_test: pd.Series,
+    model=None,
+    feature_names: list | None = None,
+) -> object:
+    normalized_metric = metric_name.replace("scikitplot:", "").strip()
+
+    task_type = PROJECT_TASK_TYPES.get(project_name)
+    if task_type == "classification":
+        return scikitplot_classification_visualizer(
+            normalized_metric,
+            X_train,
+            X_test,
+            y_train,
+            y_test,
+            project_name,
+            model=model,
+            feature_names=feature_names,
+        )
+    if task_type == "regression":
+        return scikitplot_regression_visualizer(
+            normalized_metric,
+            X_train,
+            X_test,
+            y_train,
+            y_test,
+            project_name,
+            model=model,
+            feature_names=feature_names,
+        )
+    if task_type == "clustering":
+        return scikitplot_clustering_visualizer(
+            normalized_metric,
+            X_train,
+            X_test,
+            y_train,
+            y_test,
+        )
+    raise ValueError(f"Scikit-plot visualizations not supported for project: {project_name}")

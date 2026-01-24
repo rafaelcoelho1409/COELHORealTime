@@ -31,7 +31,7 @@ from config import (
     BEST_METRIC_CRITERIA,
     MLFLOW_METRICS_CACHE_TTL,
 )
-from utils.river import (
+from utils.incremental import (
     is_training_active,
     load_live_model_from_redis,
     load_or_create_model,

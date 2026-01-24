@@ -303,7 +303,7 @@
 	}
 
 	function openMetricInfo(metricKey: string) {
-		fetch('/data/metric_info_ecci.json')
+		fetch('/data/incremental_metric_info_ecci.json')
 			.then((r) => r.json())
 			.then((data) => {
 				const info = data.metrics[metricKey];

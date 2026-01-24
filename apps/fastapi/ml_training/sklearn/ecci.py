@@ -33,7 +33,7 @@ from sklearn import metrics
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 import duckdb
-from utils.sklearn import (
+from utils.batch import (
     load_ecci_event_data_duckdb,
     get_ecci_label_encodings,
     ECCI_ALL_FEATURES,

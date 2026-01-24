@@ -41,6 +41,8 @@ dependencies = [
     "llvmlite>=0.43.0",
     # Text analysis (NLTK for PosTagVisualizer)
     "nltk>=3.9.2",
+    "scikit-plot",
+    "scipy",
 ]
 
 [build-system]

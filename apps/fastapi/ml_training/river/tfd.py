@@ -8,7 +8,7 @@ import signal
 import sys
 import tempfile
 import mlflow
-from utils.river import (
+from utils.incremental import (
     process_sample,
     load_or_create_model,
     create_consumer,

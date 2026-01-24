@@ -29,7 +29,7 @@ import requests
 import numpy as np
 from sklearn import metrics
 from catboost import CatBoostRegressor
-from utils.sklearn import (
+from utils.batch import (
     process_batch_data_duckdb,
     create_batch_model,
     ETA_CAT_FEATURE_INDICES,

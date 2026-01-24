@@ -120,7 +120,16 @@
 	// YellowBrick visualizer options organized by category (matching Reflex exactly)
 	const YELLOWBRICK_LABEL_SUFFIX = ' — YellowBrick';
 	const SKLEARN_LABEL_SUFFIX = ' — Scikit-Learn';
+	const YELLOWBRICK_PREFIX = 'yellowbrick:';
 	const SKLEARN_PREFIX = 'sklearn:';
+	const SCIKITPLOT_LABEL_SUFFIX = ' — Scikit-plot';
+	const SCIKITPLOT_PREFIX = 'scikitplot:';
+	const SKLEARN_DOCS_URL = 'https://scikit-learn.org/stable/visualizations.html';
+	const SCIKITPLOT_DOCS_URL = 'https://scikit-plot.readthedocs.io/en/stable/index.html';
+	const withYellowBrickPrefix = (options: Array<{ value: string; label: string }>) =>
+		options.map((option) =>
+			option.value ? { ...option, value: `${YELLOWBRICK_PREFIX}${option.value}` } : option
+		);
 	const withYellowBrickSuffix = (options: Array<{ value: string; label: string }>) =>
 		options.map((option) =>
 			option.value
@@ -128,7 +137,7 @@
 				: option
 		);
 	const YELLOWBRICK_CATEGORIES = {
-		Classification: withYellowBrickSuffix([
+		Classification: withYellowBrickSuffix(withYellowBrickPrefix([
 			{ value: '', label: 'Select visualization...' },
 			{ value: 'ConfusionMatrix', label: 'Confusion Matrix' },
 			{ value: 'ClassificationReport', label: 'Classification Report' },
@@ -136,14 +145,24 @@
 			{ value: 'PrecisionRecallCurve', label: 'Precision-Recall Curve' },
 			{ value: 'ClassPredictionError', label: 'Class Prediction Error' },
 			{ value: 'DiscriminationThreshold', label: 'Discrimination Threshold' }
-		]).concat([
+		])).concat([
 			{ value: `${SKLEARN_PREFIX}ConfusionMatrixDisplay`, label: `Confusion Matrix${SKLEARN_LABEL_SUFFIX}` },
 			{ value: `${SKLEARN_PREFIX}CalibrationDisplay`, label: `Calibration Curve${SKLEARN_LABEL_SUFFIX}` },
 			{ value: `${SKLEARN_PREFIX}PrecisionRecallDisplay`, label: `Precision-Recall Curve${SKLEARN_LABEL_SUFFIX}` },
 			{ value: `${SKLEARN_PREFIX}RocCurveDisplay`, label: `ROC Curve${SKLEARN_LABEL_SUFFIX}` },
 			{ value: `${SKLEARN_PREFIX}DetCurveDisplay`, label: `DET Curve${SKLEARN_LABEL_SUFFIX}` }
+		]).concat([
+			{ value: `${SCIKITPLOT_PREFIX}ConfusionMatrix`, label: `Confusion Matrix${SCIKITPLOT_LABEL_SUFFIX}` },
+			{ value: `${SCIKITPLOT_PREFIX}RocCurve`, label: `ROC Curve${SCIKITPLOT_LABEL_SUFFIX}` },
+			{ value: `${SCIKITPLOT_PREFIX}RocCurveDetailed`, label: `ROC Curve (Detailed)${SCIKITPLOT_LABEL_SUFFIX}` },
+			{ value: `${SCIKITPLOT_PREFIX}PrecisionRecallCurve`, label: `Precision-Recall Curve${SCIKITPLOT_LABEL_SUFFIX}` },
+			{ value: `${SCIKITPLOT_PREFIX}PrecisionRecallCurveDetailed`, label: `Precision-Recall (Detailed)${SCIKITPLOT_LABEL_SUFFIX}` },
+			{ value: `${SCIKITPLOT_PREFIX}KSStatistic`, label: `KS Statistic${SCIKITPLOT_LABEL_SUFFIX}` },
+			{ value: `${SCIKITPLOT_PREFIX}CalibrationCurve`, label: `Calibration Curve${SCIKITPLOT_LABEL_SUFFIX}` },
+			{ value: `${SCIKITPLOT_PREFIX}CumulativeGain`, label: `Cumulative Gain${SCIKITPLOT_LABEL_SUFFIX}` },
+			{ value: `${SCIKITPLOT_PREFIX}LiftCurve`, label: `Lift Curve${SCIKITPLOT_LABEL_SUFFIX}` }
 		]),
-		'Feature Analysis': withYellowBrickSuffix([
+		'Feature Analysis': withYellowBrickSuffix(withYellowBrickPrefix([
 			{ value: '', label: 'Select visualization...' },
 			{ value: 'Rank1D', label: 'Rank 1D' },
 			{ value: 'Rank2D', label: 'Rank 2D' },
@@ -152,18 +171,22 @@
 			{ value: 'ParallelCoordinates', label: 'Parallel Coordinates' },
 			{ value: 'RadViz', label: 'RadViz' },
 			{ value: 'JointPlot', label: 'Joint Plot' }
-		]).concat([
+		])).concat([
 			{ value: `${SKLEARN_PREFIX}PartialDependenceDisplay`, label: `Partial Dependence${SKLEARN_LABEL_SUFFIX}` },
 			{ value: `${SKLEARN_PREFIX}DecisionBoundaryDisplay`, label: `Decision Boundary${SKLEARN_LABEL_SUFFIX}` }
+		]).concat([
+			{ value: `${SCIKITPLOT_PREFIX}PCA2DProjection`, label: `PCA 2D Projection${SCIKITPLOT_LABEL_SUFFIX}` },
+			{ value: `${SCIKITPLOT_PREFIX}PCAComponentVariance`, label: `PCA Component Variance${SCIKITPLOT_LABEL_SUFFIX}` },
+			{ value: `${SCIKITPLOT_PREFIX}FeatureImportances`, label: `Feature Importances${SCIKITPLOT_LABEL_SUFFIX}` }
 		]),
-		Target: withYellowBrickSuffix([
+		Target: withYellowBrickSuffix(withYellowBrickPrefix([
 			{ value: '', label: 'Select visualization...' },
 			{ value: 'ClassBalance', label: 'Class Balance' },
 			{ value: 'FeatureCorrelation', label: 'Feature Correlation (Mutual Info)' },
 			{ value: 'FeatureCorrelation_Pearson', label: 'Feature Correlation (Pearson)' },
 			{ value: 'BalancedBinningReference', label: 'Balanced Binning Reference' }
-		]),
-		'Model Selection': withYellowBrickSuffix([
+		])),
+		'Model Selection': withYellowBrickSuffix(withYellowBrickPrefix([
 			{ value: '', label: 'Select visualization...' },
 			{ value: 'FeatureImportances', label: 'Feature Importances' },
 			{ value: 'CVScores', label: 'Cross-Validation Scores' },
@@ -171,10 +194,22 @@
 			{ value: 'LearningCurve', label: 'Learning Curve' },
 			{ value: 'RFECV', label: 'Recursive Feature Elimination' },
 			{ value: 'DroppingCurve', label: 'Dropping Curve' }
-		]).concat([
+		])).concat([
 			{ value: `${SKLEARN_PREFIX}LearningCurveDisplay`, label: `Learning Curve${SKLEARN_LABEL_SUFFIX}` },
 			{ value: `${SKLEARN_PREFIX}ValidationCurveDisplay`, label: `Validation Curve${SKLEARN_LABEL_SUFFIX}` }
+		]).concat([
+			{ value: `${SCIKITPLOT_PREFIX}LearningCurve`, label: `Learning Curve${SCIKITPLOT_LABEL_SUFFIX}` }
 		])
+	};
+	const getVisualizerLabel = (value: string): string => {
+		const categories = Object.values(YELLOWBRICK_CATEGORIES) as Array<
+			Array<{ value: string; label: string }>
+		>;
+		for (const options of categories) {
+			const match = options.find((option) => option.value === value);
+			if (match) return match.label;
+		}
+		return value;
 	};
 
 	let activeTab = $state('prediction');
@@ -205,7 +240,7 @@
 
 		// Load YellowBrick info
 		try {
-			const response = await fetch('/data/yellowbrick_info_tfd.json');
+			const response = await fetch('/data/batch_metric_info_tfd.json');
 			visualizerInfo = await response.json();
 		} catch (e) {
 			console.error('Failed to load visualizer info:', e);
@@ -425,9 +460,11 @@
 		}
 
 		const isSklearnVisualizer = visualizerName.startsWith(SKLEARN_PREFIX);
-		const metricName = isSklearnVisualizer
-			? visualizerName.replace(SKLEARN_PREFIX, '')
-			: visualizerName;
+		const isScikitplotVisualizer = visualizerName.startsWith(SCIKITPLOT_PREFIX);
+		const metricName = visualizerName
+			.replace(SKLEARN_PREFIX, '')
+			.replace(SCIKITPLOT_PREFIX, '')
+			.replace(YELLOWBRICK_PREFIX, '');
 		const visualizerKey = visualizerName;
 
 		// Reset cancel flag before starting new load
@@ -442,7 +479,9 @@
 		// API expects: metric_type (category), metric_name (visualizerName)
 		const result = isSklearnVisualizer
 			? await batchApi.getSklearnImage(PROJECT, category, metricName, runId)
-			: await batchApi.getYellowBrickImage(PROJECT, category, metricName, runId);
+			: isScikitplotVisualizer
+				? await batchApi.getScikitplotImage(PROJECT, category, metricName, runId)
+				: await batchApi.getYellowBrickImage(PROJECT, category, metricName, runId);
 
 		// Check if cancelled before updating UI (matching Reflex pattern)
 		if (yellowBrickCancelRequested) {
@@ -465,7 +504,7 @@
 	}
 
 	function openMetricInfo(metricKey: string) {
-		fetch('/data/metric_info_tfd.json')
+		fetch('/data/incremental_metric_info_tfd.json')
 			.then((r) => r.json())
 			.then((data) => {
 				const info = data.metrics[metricKey];
@@ -497,23 +536,55 @@
 	}>({ name: '', category: '', description: '', interpretation: '', context: '', whenToUse: '', docsUrl: '' });
 
 	function openYellowBrickInfo(visualizerKey: string) {
-		fetch('/data/yellowbrick_info_tfd.json')
-			.then((r) => r.json())
-			.then((data) => {
-				const info = data.visualizers[visualizerKey];
-				if (info) {
-					yellowBrickInfoContent = {
-						name: info.name,
-						category: info.category,
-						description: info.description,
-						interpretation: info.interpretation,
-						context: info.fraud_context || '',
-						whenToUse: info.when_to_use || '',
-						docsUrl: info.docs_url || ''
-					};
-					yellowBrickInfoOpen = true;
-				}
-			});
+		if (!visualizerKey) return;
+		if (visualizerKey.startsWith(YELLOWBRICK_PREFIX)) {
+			const normalizedKey = visualizerKey.replace(YELLOWBRICK_PREFIX, '');
+			fetch('/data/batch_metric_info_tfd.json')
+				.then((r) => r.json())
+				.then((data) => {
+					const info =
+						data.visualizers?.[visualizerKey] ??
+						data.visualizers?.[normalizedKey];
+					if (info) {
+						yellowBrickInfoContent = {
+							name: info.name,
+							category: info.category,
+							description: info.description,
+							interpretation: info.interpretation,
+							context: info.fraud_context || '',
+							whenToUse: info.when_to_use || '',
+							docsUrl: info.docs_url || ''
+						};
+						yellowBrickInfoOpen = true;
+					}
+				});
+			return;
+		}
+		if (visualizerKey.startsWith(SKLEARN_PREFIX)) {
+			yellowBrickInfoContent = {
+				name: getVisualizerLabel(visualizerKey),
+				category: 'Scikit-Learn',
+				description: 'Scikit-learn visualization. See the documentation for details and parameters.',
+				interpretation: '',
+				context: '',
+				whenToUse: '',
+				docsUrl: SKLEARN_DOCS_URL
+			};
+			yellowBrickInfoOpen = true;
+			return;
+		}
+		if (visualizerKey.startsWith(SCIKITPLOT_PREFIX)) {
+			yellowBrickInfoContent = {
+				name: getVisualizerLabel(visualizerKey),
+				category: 'Scikit-plot',
+				description: 'Scikit-plot visualization. See the documentation for details and parameters.',
+				interpretation: '',
+				context: '',
+				whenToUse: '',
+				docsUrl: SCIKITPLOT_DOCS_URL
+			};
+			yellowBrickInfoOpen = true;
+		}
 	}
 
 	async function onRunChange(runId: string) {
@@ -715,6 +786,7 @@
 	const currentVisualizer = $derived($selectedYellowBrickVisualizer[PROJECT] || '');
 	const currentImage = $derived($yellowBrickImages[PROJECT]?.[currentVisualizer] || '');
 	const isImageLoading = $derived($yellowBrickLoading[PROJECT]?.[currentVisualizer] || false);
+	const canShowVisualizerInfo = $derived(Boolean(currentVisualizer));
 	const isTraining = $derived($batchTrainingLoading[PROJECT]);
 	const modelAvailable = $derived($batchModelAvailable[PROJECT]);
 	const currentForm = $derived($formData[PROJECT] || {});
@@ -1543,7 +1615,7 @@
 											class="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
 											onclick={() => openYellowBrickInfo(currentVisualizer)}
 											title="Learn about this visualization"
-											disabled={!currentVisualizer}
+											disabled={!canShowVisualizerInfo}
 										>
 											<Info class="h-4 w-4" />
 										</button>
@@ -1575,7 +1647,7 @@
 											class="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
 											onclick={() => openYellowBrickInfo(currentVisualizer)}
 											title="Learn about this visualization"
-											disabled={!currentVisualizer}
+											disabled={!canShowVisualizerInfo}
 										>
 											<Info class="h-4 w-4" />
 										</button>
@@ -1607,7 +1679,7 @@
 											class="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
 											onclick={() => openYellowBrickInfo(currentVisualizer)}
 											title="Learn about this visualization"
-											disabled={!currentVisualizer}
+											disabled={!canShowVisualizerInfo}
 										>
 											<Info class="h-4 w-4" />
 										</button>
@@ -1639,7 +1711,7 @@
 											class="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
 											onclick={() => openYellowBrickInfo(currentVisualizer)}
 											title="Learn about this visualization"
-											disabled={!currentVisualizer}
+											disabled={!canShowVisualizerInfo}
 										>
 											<Info class="h-4 w-4" />
 										</button>

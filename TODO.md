@@ -12,6 +12,20 @@ Real-time ML platform with incremental learning, featuring:
 
 ## Completed Milestones
 
+### Recent Updates (January 2026)
+- [x] Notebook 020 regression visuals: added sklearn + scikit-plot visualizers with CatBoostRegressor wrappers and tuned kwargs
+- [x] FastAPI batch utils: CatBoost sklearn wrappers for regression + scikit-plot regression now uses trained model and improved kwargs
+- [x] FastAPI batch utils: scikit-plot detailed ROC/PR name normalization and sklearn/scikit-plot compatibility fixes
+- [x] FastAPI batch utils: strip CatBoost params that break CV wrappers (`callbacks`, `callback`, `use_best_model`)
+- [x] SvelteKit ETA Batch ML: split sklearn PredictionError into Actual vs Predicted + Residuals options
+- [x] Batch ML info JSONs (TFD/ETA/ECCI): aligned sklearn/scikit-plot info windows with Yellowbrick structure + official docs URLs
+- [x] ECCI Batch ML Overview: added training split hint to match TFD/ETA
+
+### Immediate Follow-ups (January 2026)
+- [ ] Restart FastAPI pod and re-test sklearn PartialDependence + DecisionBoundary (TFD)
+- [ ] Restart FastAPI pod and re-test scikit-plot RocCurveDetailed + PrecisionRecallCurveDetailed
+- [ ] Verify updated SvelteKit Batch ML options/info windows on TFD/ETA/ECCI after deploy
+
 ### Phase 1: Core Infrastructure
 - [x] k3d Kubernetes cluster setup
 - [x] Helm chart for deployment

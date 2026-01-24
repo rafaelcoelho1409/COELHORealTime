@@ -30,7 +30,7 @@ import pandas as pd
 from sklearn import metrics
 from imblearn.metrics import geometric_mean_score
 from catboost import CatBoostClassifier
-from utils.sklearn import (
+from utils.batch import (
     process_batch_data_duckdb,
     create_batch_model,
     TFD_CAT_FEATURE_INDICES,

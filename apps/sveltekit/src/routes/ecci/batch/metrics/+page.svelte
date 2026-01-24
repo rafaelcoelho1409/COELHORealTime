@@ -126,7 +126,16 @@
 	// YellowBrick visualizer options organized by category (clustering)
 	const YELLOWBRICK_LABEL_SUFFIX = ' — YellowBrick';
 	const SKLEARN_LABEL_SUFFIX = ' — Scikit-Learn';
+	const YELLOWBRICK_PREFIX = 'yellowbrick:';
 	const SKLEARN_PREFIX = 'sklearn:';
+	const SCIKITPLOT_LABEL_SUFFIX = ' — Scikit-plot';
+	const SCIKITPLOT_PREFIX = 'scikitplot:';
+	const SKLEARN_DOCS_URL = 'https://scikit-learn.org/stable/visualizations.html';
+	const SCIKITPLOT_DOCS_URL = 'https://scikit-plot.readthedocs.io/en/stable/index.html';
+	const withYellowBrickPrefix = (options: Array<{ value: string; label: string }>) =>
+		options.map((option) =>
+			option.value ? { ...option, value: `${YELLOWBRICK_PREFIX}${option.value}` } : option
+		);
 	const withYellowBrickSuffix = (options: Array<{ value: string; label: string }>) =>
 		options.map((option) =>
 			option.value
@@ -134,13 +143,16 @@
 				: option
 		);
 	const YELLOWBRICK_CATEGORIES = {
-		Clustering: withYellowBrickSuffix([
+		Clustering: withYellowBrickSuffix(withYellowBrickPrefix([
 			{ value: '', label: 'Select visualization...' },
 			{ value: 'KElbowVisualizer', label: 'K-Elbow' },
 			{ value: 'SilhouetteVisualizer', label: 'Silhouette' },
 			{ value: 'InterclusterDistance', label: 'Intercluster Distance' }
+		])).concat([
+			{ value: `${SCIKITPLOT_PREFIX}ElbowCurve`, label: `Elbow Curve${SCIKITPLOT_LABEL_SUFFIX}` },
+			{ value: `${SCIKITPLOT_PREFIX}Silhouette`, label: `Silhouette${SCIKITPLOT_LABEL_SUFFIX}` }
 		]),
-		'Feature Analysis': withYellowBrickSuffix([
+		'Feature Analysis': withYellowBrickSuffix(withYellowBrickPrefix([
 			{ value: '', label: 'Select visualization...' },
 			{ value: 'Rank1D', label: 'Rank 1D' },
 			{ value: 'Rank2D', label: 'Rank 2D' },
@@ -149,17 +161,22 @@
 			{ value: 'ParallelCoordinates', label: 'Parallel Coordinates' },
 			{ value: 'RadViz', label: 'RadViz' },
 			{ value: 'JointPlot', label: 'Joint Plot' }
+		])).concat([
+			{ value: `${SKLEARN_PREFIX}PartialDependenceDisplay`, label: `Partial Dependence${SKLEARN_LABEL_SUFFIX}` },
+			{ value: `${SKLEARN_PREFIX}DecisionBoundaryDisplay`, label: `Decision Boundary${SKLEARN_LABEL_SUFFIX}` }
 		]).concat([
-			{ value: `${SKLEARN_PREFIX}PartialDependenceDisplay`, label: `Partial Dependence${SKLEARN_LABEL_SUFFIX}` }
+			{ value: `${SCIKITPLOT_PREFIX}PCA2DProjection`, label: `PCA 2D Projection${SCIKITPLOT_LABEL_SUFFIX}` },
+			{ value: `${SCIKITPLOT_PREFIX}PCAComponentVariance`, label: `PCA Component Variance${SCIKITPLOT_LABEL_SUFFIX}` },
+			{ value: `${SCIKITPLOT_PREFIX}FeatureImportances`, label: `Feature Importances${SCIKITPLOT_LABEL_SUFFIX}` }
 		]),
-		Target: withYellowBrickSuffix([
+		Target: withYellowBrickSuffix(withYellowBrickPrefix([
 			{ value: '', label: 'Select visualization...' },
 			{ value: 'ClassBalance', label: 'Cluster Distribution' },
 			{ value: 'FeatureCorrelation', label: 'Feature Correlation (Mutual Info)' },
 			{ value: 'FeatureCorrelation_Pearson', label: 'Feature Correlation (Pearson)' },
 			{ value: 'BalancedBinningReference', label: 'Balanced Binning Reference' }
-		]),
-		'Model Selection': withYellowBrickSuffix([
+		])),
+		'Model Selection': withYellowBrickSuffix(withYellowBrickPrefix([
 			{ value: '', label: 'Select visualization...' },
 			{ value: 'FeatureImportances', label: 'Feature Importances' },
 			{ value: 'CVScores', label: 'Cross-Validation Scores' },
@@ -167,11 +184,13 @@
 			{ value: 'LearningCurve', label: 'Learning Curve' },
 			{ value: 'RFECV', label: 'Recursive Feature Elimination' },
 			{ value: 'DroppingCurve', label: 'Dropping Curve' }
-		]).concat([
+		])).concat([
 			{ value: `${SKLEARN_PREFIX}LearningCurveDisplay`, label: `Learning Curve${SKLEARN_LABEL_SUFFIX}` },
 			{ value: `${SKLEARN_PREFIX}ValidationCurveDisplay`, label: `Validation Curve${SKLEARN_LABEL_SUFFIX}` }
+		]).concat([
+			{ value: `${SCIKITPLOT_PREFIX}LearningCurve`, label: `Learning Curve${SCIKITPLOT_LABEL_SUFFIX}` }
 		]),
-		'Text Analysis': withYellowBrickSuffix([
+		'Text Analysis': withYellowBrickSuffix(withYellowBrickPrefix([
 			{ value: '', label: 'Select visualization...' },
 			{ value: 'FreqDistVisualizer', label: 'Frequency Distribution' },
 			{ value: 'TSNEVisualizer', label: 't-SNE Visualization' },
@@ -179,7 +198,17 @@
 			{ value: 'DispersionPlot', label: 'Dispersion Plot' },
 			{ value: 'WordCorrelationPlot', label: 'Word Correlation' },
 			{ value: 'PosTagVisualizer', label: 'POS Tag Distribution' }
-		])
+		]))
+	};
+	const getVisualizerLabel = (value: string): string => {
+		const categories = Object.values(YELLOWBRICK_CATEGORIES) as Array<
+			Array<{ value: string; label: string }>
+		>;
+		for (const options of categories) {
+			const match = options.find((option) => option.value === value);
+			if (match) return match.label;
+		}
+		return value;
 	};
 
 	let activeTab = $state('prediction');
@@ -338,9 +367,11 @@
 		}
 
 		const isSklearnVisualizer = visualizerName.startsWith(SKLEARN_PREFIX);
-		const metricName = isSklearnVisualizer
-			? visualizerName.replace(SKLEARN_PREFIX, '')
-			: visualizerName;
+		const isScikitplotVisualizer = visualizerName.startsWith(SCIKITPLOT_PREFIX);
+		const metricName = visualizerName
+			.replace(SKLEARN_PREFIX, '')
+			.replace(SCIKITPLOT_PREFIX, '')
+			.replace(YELLOWBRICK_PREFIX, '');
 		const visualizerKey = visualizerName;
 
 		yellowBrickCancelRequested = false;
@@ -352,7 +383,9 @@
 		const runId = $selectedBatchRun[PROJECT] || undefined;
 		const result = isSklearnVisualizer
 			? await batchApi.getSklearnImage(PROJECT, category, metricName, runId)
-			: await batchApi.getYellowBrickImage(PROJECT, category, metricName, runId);
+			: isScikitplotVisualizer
+				? await batchApi.getScikitplotImage(PROJECT, category, metricName, runId)
+				: await batchApi.getYellowBrickImage(PROJECT, category, metricName, runId);
 
 		if (yellowBrickCancelRequested) return;
 
@@ -382,7 +415,7 @@
 	}
 
 	function openMetricInfo(metricKey: string) {
-		fetch('/data/metric_info_ecci.json')
+		fetch('/data/incremental_metric_info_ecci.json')
 			.then((r) => r.json())
 			.then((data) => {
 				const info = data.metrics[metricKey];
@@ -403,24 +436,57 @@
 
 	function openYellowBrickInfo(visualizerName: string) {
 		if (!visualizerName) return;
-		fetch('/data/yellowbrick_info_ecci.json')
-			.then((r) => r.json())
-			.then((data) => {
-				const info = data.visualizers?.[visualizerName];
-				if (info) {
-					yellowBrickInfoContent = {
-						name: info.name,
-						category: info.category,
-						description: info.description,
-						interpretation: info.interpretation,
-						context: info.ecci_context || '',
-						whenToUse: info.when_to_use || '',
-						parameters: info.parameters || '',
-						docsUrl: info.docs_url || ''
-					};
-					yellowBrickInfoOpen = true;
-				}
-			});
+		if (visualizerName.startsWith(YELLOWBRICK_PREFIX)) {
+			const normalizedKey = visualizerName.replace(YELLOWBRICK_PREFIX, '');
+			fetch('/data/batch_metric_info_ecci.json')
+				.then((r) => r.json())
+				.then((data) => {
+					const info =
+						data.visualizers?.[visualizerName] ??
+						data.visualizers?.[normalizedKey];
+					if (info) {
+						yellowBrickInfoContent = {
+							name: info.name,
+							category: info.category,
+							description: info.description,
+							interpretation: info.interpretation,
+							context: info.ecci_context || '',
+							whenToUse: info.when_to_use || '',
+							parameters: info.parameters || '',
+							docsUrl: info.docs_url || ''
+						};
+						yellowBrickInfoOpen = true;
+					}
+				});
+			return;
+		}
+		if (visualizerName.startsWith(SKLEARN_PREFIX)) {
+			yellowBrickInfoContent = {
+				name: getVisualizerLabel(visualizerName),
+				category: 'Scikit-Learn',
+				description: 'Scikit-learn visualization. See the documentation for details and parameters.',
+				interpretation: '',
+				context: '',
+				whenToUse: '',
+				parameters: '',
+				docsUrl: SKLEARN_DOCS_URL
+			};
+			yellowBrickInfoOpen = true;
+			return;
+		}
+		if (visualizerName.startsWith(SCIKITPLOT_PREFIX)) {
+			yellowBrickInfoContent = {
+				name: getVisualizerLabel(visualizerName),
+				category: 'Scikit-plot',
+				description: 'Scikit-plot visualization. See the documentation for details and parameters.',
+				interpretation: '',
+				context: '',
+				whenToUse: '',
+				parameters: '',
+				docsUrl: SCIKITPLOT_DOCS_URL
+			};
+			yellowBrickInfoOpen = true;
+		}
 	}
 
 	// Handle outer tab changes (Prediction/Metrics/Analytics)
@@ -704,6 +770,7 @@
 	const currentVisualizer = $derived($selectedYellowBrickVisualizer[PROJECT] || '');
 	const currentImage = $derived($yellowBrickImages[PROJECT]?.[currentVisualizer] || '');
 	const isImageLoading = $derived($yellowBrickLoading[PROJECT]?.[currentVisualizer] || false);
+	const canShowVisualizerInfo = $derived(Boolean(currentVisualizer));
 	const isTraining = $derived($batchTrainingLoading[PROJECT]);
 	const modelAvailable = $derived($batchModelAvailable[PROJECT]);
 	const isLoading = $derived($batchPredictionLoading[PROJECT]);
@@ -1668,6 +1735,7 @@
 											<span class="rounded bg-blue-600 px-2 py-0.5 text-sm font-bold text-white">
 												{(currentMetrics.n_samples as number)?.toLocaleString()} rows
 											</span>
+											<span class="text-xs text-blue-600 dark:text-blue-400">(80% train / 20% test split)</span>
 										</div>
 									{/if}
 
@@ -1810,7 +1878,7 @@
 											class="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
 											onclick={() => openYellowBrickInfo(currentVisualizer)}
 											title="Learn about this visualization"
-											disabled={!currentVisualizer}
+											disabled={!canShowVisualizerInfo}
 										>
 											<Info class="h-4 w-4" />
 										</button>
@@ -1844,7 +1912,7 @@
 											class="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
 											onclick={() => openYellowBrickInfo(currentVisualizer)}
 											title="Learn about this visualization"
-											disabled={!currentVisualizer}
+											disabled={!canShowVisualizerInfo}
 										>
 											<Info class="h-4 w-4" />
 										</button>
@@ -1878,7 +1946,7 @@
 											class="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
 											onclick={() => openYellowBrickInfo(currentVisualizer)}
 											title="Learn about this visualization"
-											disabled={!currentVisualizer}
+											disabled={!canShowVisualizerInfo}
 										>
 											<Info class="h-4 w-4" />
 										</button>
@@ -1912,7 +1980,7 @@
 											class="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
 											onclick={() => openYellowBrickInfo(currentVisualizer)}
 											title="Learn about this visualization"
-											disabled={!currentVisualizer}
+											disabled={!canShowVisualizerInfo}
 										>
 											<Info class="h-4 w-4" />
 										</button>
@@ -1946,7 +2014,7 @@
 											class="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
 											onclick={() => openYellowBrickInfo(currentVisualizer)}
 											title="Learn about this visualization"
-											disabled={!currentVisualizer}
+											disabled={!canShowVisualizerInfo}
 										>
 											<Info class="h-4 w-4" />
 										</button>

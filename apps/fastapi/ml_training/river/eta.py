@@ -9,7 +9,7 @@ import signal
 import tempfile
 import mlflow
 import datetime as dt
-from utils.river import (
+from utils.incremental import (
     process_sample,
     load_or_create_model,
     create_consumer,

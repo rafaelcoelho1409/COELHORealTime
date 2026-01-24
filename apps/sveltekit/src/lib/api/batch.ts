@@ -200,7 +200,7 @@ export async function getYellowBrickImage(
 	runId?: string
 ) {
 	return apiPost<{ image_base64: string; error?: string }>(
-		`${API.BATCH}/yellowbrick-metric`,
+		`${API.BATCH}/visualization/metric/yellowbrick`,
 		{
 			project_name: projectName,
 			metric_type: metricType,
@@ -219,12 +219,35 @@ export async function getSklearnImage(
 	metricName: string,
 	runId?: string
 ) {
-	return apiPost<{ image_base64: string; error?: string }>(`${API.BATCH}/sklearn-metric`, {
-		project_name: projectName,
-		metric_type: metricType,
-		metric_name: metricName,
-		run_id: runId
-	});
+	return apiPost<{ image_base64: string; error?: string }>(
+		`${API.BATCH}/visualization/metric/sklearn`,
+		{
+			project_name: projectName,
+			metric_type: metricType,
+			metric_name: metricName,
+			run_id: runId
+		}
+	);
+}
+
+/**
+ * Get scikit-plot visualization image
+ */
+export async function getScikitplotImage(
+	projectName: ProjectName,
+	metricType: string,
+	metricName: string,
+	runId?: string
+) {
+	return apiPost<{ image_base64: string; error?: string }>(
+		`${API.BATCH}/visualization/metric/scikitplot`,
+		{
+			project_name: projectName,
+			metric_type: metricType,
+			metric_name: metricName,
+			run_id: runId
+		}
+	);
 }
 
 // =============================================================================
