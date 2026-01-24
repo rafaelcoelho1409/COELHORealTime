@@ -9,6 +9,112 @@
 import type { DropdownOptions, FormData } from '$types';
 
 // =============================================================================
+// Field Configuration (numerical fields with min/max from Kafka producers)
+// =============================================================================
+
+export interface FieldConfig {
+	min: number;
+	max: number;
+	step?: number;
+	decimals?: number;
+	prefix?: string; // For ID fields that need prefix construction
+}
+
+export const FIELD_CONFIG: Record<string, FieldConfig> = {
+	// =========================
+	// TFD - Transaction Fraud Detection
+	// =========================
+	merchant_id: { min: 1, max: 200, prefix: 'merchant_' },
+	amount: { min: 1, max: 6000, step: 0.01, decimals: 2 },
+	account_age_days: { min: 0, max: 1825 }, // 0 to 5 years
+	// TFD/ECCI location (Houston metro - shared)
+	lat: { min: 29.5, max: 30.1, step: 0.000001, decimals: 6 },
+	lon: { min: -95.8, max: -95.0, step: 0.000001, decimals: 6 },
+
+	// =========================
+	// ETA - Estimated Time of Arrival
+	// =========================
+	driver_id: { min: 1000, max: 5000, prefix: 'driver_' },
+	vehicle_id: { min: 100, max: 999, prefix: 'vehicle_' },
+	// ETA coordinates (Houston metro)
+	origin_lat: { min: 29.5, max: 30.1, step: 0.000001, decimals: 6 },
+	origin_lon: { min: -95.8, max: -95.0, step: 0.000001, decimals: 6 },
+	destination_lat: { min: 29.5, max: 30.1, step: 0.000001, decimals: 6 },
+	destination_lon: { min: -95.8, max: -95.0, step: 0.000001, decimals: 6 },
+	estimated_distance_km: { min: 0.1, max: 100, step: 0.01, decimals: 2 },
+	temperature_celsius: { min: 15, max: 35, step: 0.1, decimals: 1 },
+	driver_rating: { min: 3.5, max: 5.0, step: 0.1, decimals: 1 },
+	hour_of_day: { min: 0, max: 23 },
+	day_of_week: { min: 0, max: 6 },
+	initial_estimated_travel_time_seconds: { min: 60, max: 36000 }, // 1 min to 10 hours
+	debug_traffic_factor: { min: 0.8, max: 2.0, step: 0.01, decimals: 2 },
+	debug_weather_factor: { min: 0.9, max: 2.0, step: 0.01, decimals: 2 },
+	debug_incident_delay_seconds: { min: 0, max: 1800 }, // 0 to 30 min
+	debug_driver_factor: { min: 0.9, max: 1.1, step: 0.01, decimals: 2 },
+
+	// =========================
+	// ECCI - E-Commerce Customer Interactions
+	// =========================
+	product_id: { min: 1000, max: 1100, prefix: 'prod_' },
+	price: { min: 5, max: 2500, step: 0.01, decimals: 2 },
+	quantity: { min: 1, max: 10 },
+	time_on_page_seconds: { min: 5, max: 300 },
+	session_event_sequence: { min: 1, max: 100 }
+};
+
+// Legacy alias for ID fields (backward compatibility)
+export const ID_FIELD_CONFIG = FIELD_CONFIG;
+
+/**
+ * Build full ID string from numeric value (for prefixed ID fields)
+ */
+export function buildIdString(field: string, numericValue: number): string {
+	const config = FIELD_CONFIG[field];
+	if (!config?.prefix) return String(numericValue);
+	return `${config.prefix}${numericValue}`;
+}
+
+/**
+ * Extract numeric value from full ID string
+ */
+export function extractIdNumber(field: string, fullValue: string): number {
+	const config = FIELD_CONFIG[field];
+	if (!config?.prefix) return parseInt(fullValue) || config?.min || 1;
+	const numStr = fullValue.replace(config.prefix, '');
+	const num = parseInt(numStr);
+	return isNaN(num) ? config.min : num;
+}
+
+/**
+ * Generate random number within field's valid range
+ */
+export function randomIdNumber(field: string): number {
+	const config = FIELD_CONFIG[field];
+	if (!config) return 1;
+	return randomInt(config.min, config.max);
+}
+
+/**
+ * Clamp a value to the field's valid range
+ */
+export function clampFieldValue(field: string, value: number): number {
+	const config = FIELD_CONFIG[field];
+	if (!config) return value;
+	const clamped = Math.max(config.min, Math.min(config.max, value));
+	if (config.decimals !== undefined) {
+		return Number(clamped.toFixed(config.decimals));
+	}
+	return clamped;
+}
+
+/**
+ * Get field config or return default config
+ */
+export function getFieldConfig(field: string): FieldConfig {
+	return FIELD_CONFIG[field] || { min: 0, max: 999999 };
+}
+
+// =============================================================================
 // Utility Functions
 // =============================================================================
 
@@ -67,7 +173,7 @@ export function randomizeTFDForm(opts: DropdownOptions): FormData {
 	return {
 		// Categorical fields from dropdown options
 		currency: pickOption(opts.currency, ['USD']),
-		merchant_id: pickOption(opts.merchant_id, ['merchant_1']),
+		merchant_id: randomIdNumber('merchant_id'), // Numeric ID (1-200)
 		product_category: pickOption(opts.product_category, ['electronics']),
 		transaction_type: pickOption(opts.transaction_type, ['purchase']),
 		payment_method: pickOption(opts.payment_method, ['credit_card']),
@@ -128,8 +234,8 @@ export function randomizeETAForm(opts: DropdownOptions): FormData {
 
 	return {
 		// Categorical fields from dropdown options
-		driver_id: pickOption(opts.driver_id, ['driver_1000']),
-		vehicle_id: pickOption(opts.vehicle_id, ['vehicle_1000']),
+		driver_id: randomIdNumber('driver_id'), // Numeric ID (1000-5000)
+		vehicle_id: randomIdNumber('vehicle_id'), // Numeric ID (100-999)
 		weather: pickOption(opts.weather, ['Clear']),
 		vehicle_type: pickOption(opts.vehicle_type, ['Sedan']),
 
@@ -182,7 +288,7 @@ export function randomizeECCIForm(opts: DropdownOptions): FormData {
 		os: pickOption(opts.os, ['Windows']),
 		event_type: pickOption(opts.event_type, ['page_view']),
 		product_category: pickOption(opts.product_category, ['Electronics']),
-		product_id: pickOption(opts.product_id, ['prod_1000']),
+		product_id: randomIdNumber('product_id'), // Numeric ID (1000-1100)
 		referrer_url: pickOption(opts.referrer_url, ['direct']),
 
 		// Location
@@ -223,7 +329,7 @@ export function buildTFDPredictPayload(form: FormData): Record<string, unknown> 
 		timestamp: formatTimestamp(form.timestamp_date as string, form.timestamp_time as string),
 		amount: Number(form.amount),
 		currency: form.currency,
-		merchant_id: form.merchant_id,
+		merchant_id: buildIdString('merchant_id', Number(form.merchant_id)),
 		product_category: form.product_category,
 		transaction_type: form.transaction_type,
 		payment_method: form.payment_method,
@@ -246,8 +352,8 @@ export function buildTFDPredictPayload(form: FormData): Record<string, unknown> 
 export function buildETAPredictPayload(form: FormData): Record<string, unknown> {
 	return {
 		trip_id: form.trip_id || `trip_${randomHex(12)}`,
-		driver_id: form.driver_id,
-		vehicle_id: form.vehicle_id,
+		driver_id: buildIdString('driver_id', Number(form.driver_id)),
+		vehicle_id: buildIdString('vehicle_id', Number(form.vehicle_id)),
 		timestamp: formatTimestamp(form.timestamp_date as string, form.timestamp_time as string),
 		origin: {
 			lat: Number(form.origin_lat),
@@ -288,7 +394,7 @@ export function buildECCIPredictPayload(form: FormData): Record<string, unknown>
 			browser: form.browser,
 			os: form.os
 		},
-		product_id: form.product_id,
+		product_id: buildIdString('product_id', Number(form.product_id)),
 		product_category: form.product_category,
 		price: Number(form.price),
 		location: {

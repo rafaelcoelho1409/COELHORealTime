@@ -292,6 +292,8 @@ class TrainingStatusUpdate(BaseModel):
     stage: Optional[str] = None
     metrics: Optional[Dict[str, float]] = None
     total_rows: Optional[int] = None
+    # KMeans K-search log (for ECCI clustering)
+    kmeans_log: Optional[Dict[str, Any]] = None
 
 
 class YellowBrickRequest(BaseModel):

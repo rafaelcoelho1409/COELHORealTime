@@ -30,7 +30,7 @@
 	import { toast } from '$stores/ui';
 	import { metricInfoDialogOpen, metricInfoDialogContent } from '$stores';
 	import * as incrementalApi from '$api/incremental';
-	import { randomizeECCIForm } from '$lib/utils/randomize';
+	import { randomizeECCIForm, FIELD_CONFIG, clampFieldValue } from '$lib/utils/randomize';
 	import {
 		Shuffle,
 		ShoppingCart,
@@ -707,14 +707,20 @@
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Price</p>
+						<p class="text-xs text-muted-foreground">Price ({FIELD_CONFIG.price.min}-{FIELD_CONFIG.price.max})</p>
 						<Input
 							type="number"
 							value={currentForm.price ?? ''}
-							min="0"
-							step="0.01"
+							min={FIELD_CONFIG.price.min}
+							max={FIELD_CONFIG.price.max}
+							step={FIELD_CONFIG.price.step}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'price', parseFloat(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseFloat(e.currentTarget.value) || FIELD_CONFIG.price.min;
+								const clamped = clampFieldValue('price', val);
+								updateFormField(PROJECT, 'price', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 
@@ -739,38 +745,55 @@
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Product ID</p>
+						<p class="text-xs text-muted-foreground">Product ID ({FIELD_CONFIG.product_id.min}-{FIELD_CONFIG.product_id.max})</p>
 						<Input
-							value={(currentForm.product_id as string) ?? ''}
-							placeholder="prod_1050"
+							type="number"
+							value={(currentForm.product_id as number) ?? FIELD_CONFIG.product_id.min}
+							min={FIELD_CONFIG.product_id.min}
+							max={FIELD_CONFIG.product_id.max}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'product_id', e.currentTarget.value)}
+							oninput={(e) => {
+								const val = parseInt(e.currentTarget.value) || FIELD_CONFIG.product_id.min;
+								const clamped = clampFieldValue('product_id', val);
+								updateFormField(PROJECT, 'product_id', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Latitude</p>
+						<p class="text-xs text-muted-foreground">Latitude ({FIELD_CONFIG.lat.min}-{FIELD_CONFIG.lat.max})</p>
 						<Input
 							type="number"
 							value={currentForm.lat ?? ''}
-							min="29.5"
-							max="30.1"
-							step="0.001"
+							min={FIELD_CONFIG.lat.min}
+							max={FIELD_CONFIG.lat.max}
+							step={FIELD_CONFIG.lat.step}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'lat', parseFloat(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseFloat(e.currentTarget.value) || FIELD_CONFIG.lat.min;
+								const clamped = clampFieldValue('lat', val);
+								updateFormField(PROJECT, 'lat', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Longitude</p>
+						<p class="text-xs text-muted-foreground">Longitude ({FIELD_CONFIG.lon.min}-{FIELD_CONFIG.lon.max})</p>
 						<Input
 							type="number"
 							value={currentForm.lon ?? ''}
-							min="-95.8"
-							max="-95.0"
-							step="0.001"
+							min={FIELD_CONFIG.lon.min}
+							max={FIELD_CONFIG.lon.max}
+							step={FIELD_CONFIG.lon.step}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'lon', parseFloat(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseFloat(e.currentTarget.value) || FIELD_CONFIG.lon.min;
+								const clamped = clampFieldValue('lon', val);
+								updateFormField(PROJECT, 'lon', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 
@@ -788,40 +811,56 @@
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Quantity</p>
+						<p class="text-xs text-muted-foreground">Quantity ({FIELD_CONFIG.quantity.min}-{FIELD_CONFIG.quantity.max})</p>
 						<Input
 							type="number"
 							value={currentForm.quantity ?? ''}
-							min="1"
+							min={FIELD_CONFIG.quantity.min}
+							max={FIELD_CONFIG.quantity.max}
 							step="1"
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'quantity', parseInt(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseInt(e.currentTarget.value) || FIELD_CONFIG.quantity.min;
+								const clamped = clampFieldValue('quantity', val);
+								updateFormField(PROJECT, 'quantity', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Time (s)</p>
+						<p class="text-xs text-muted-foreground">Time (s) ({FIELD_CONFIG.time_on_page_seconds.min}-{FIELD_CONFIG.time_on_page_seconds.max})</p>
 						<Input
 							type="number"
 							value={currentForm.time_on_page_seconds ?? ''}
-							min="0"
+							min={FIELD_CONFIG.time_on_page_seconds.min}
+							max={FIELD_CONFIG.time_on_page_seconds.max}
 							step="1"
 							class="h-8 text-sm"
-							oninput={(e) =>
-								updateFormField(PROJECT, 'time_on_page_seconds', parseInt(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseInt(e.currentTarget.value) || FIELD_CONFIG.time_on_page_seconds.min;
+								const clamped = clampFieldValue('time_on_page_seconds', val);
+								updateFormField(PROJECT, 'time_on_page_seconds', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Sequence</p>
+						<p class="text-xs text-muted-foreground">Sequence ({FIELD_CONFIG.session_event_sequence.min}-{FIELD_CONFIG.session_event_sequence.max})</p>
 						<Input
 							type="number"
 							value={currentForm.session_event_sequence ?? ''}
-							min="1"
+							min={FIELD_CONFIG.session_event_sequence.min}
+							max={FIELD_CONFIG.session_event_sequence.max}
 							step="1"
 							class="h-8 text-sm"
-							oninput={(e) =>
-								updateFormField(PROJECT, 'session_event_sequence', parseInt(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseInt(e.currentTarget.value) || FIELD_CONFIG.session_event_sequence.min;
+								const clamped = clampFieldValue('session_event_sequence', val);
+								updateFormField(PROJECT, 'session_event_sequence', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 

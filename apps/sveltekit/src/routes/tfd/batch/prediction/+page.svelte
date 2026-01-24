@@ -32,7 +32,7 @@
 	} from '$stores';
 	import { toast } from '$stores/ui';
 	import * as batchApi from '$api/batch';
-	import { randomizeTFDForm } from '$lib/utils/randomize';
+	import { randomizeTFDForm, FIELD_CONFIG, clampFieldValue } from '$lib/utils/randomize';
 	import { CreditCard, Shuffle, AlertTriangle, CheckCircle, Percent } from 'lucide-svelte';
 	import Plotly from 'svelte-plotly.js';
 	import type { ProjectName } from '$types';
@@ -303,27 +303,39 @@
 				<!-- 3-column grid for form fields -->
 				<div class="grid grid-cols-3 gap-2">
 					<!-- Amount -->
-					<FormField label="Amount" id="amount" class="space-y-1">
+					<FormField label="Amount ({FIELD_CONFIG.amount.min}-{FIELD_CONFIG.amount.max})" id="amount" class="space-y-1">
 						<Input
 							id="amount"
 							type="number"
 							value={currentForm.amount ?? ''}
-							step="0.01"
+							min={FIELD_CONFIG.amount.min}
+							max={FIELD_CONFIG.amount.max}
+							step={FIELD_CONFIG.amount.step}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'amount', parseFloat(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseFloat(e.currentTarget.value) || FIELD_CONFIG.amount.min;
+								const clamped = clampFieldValue('amount', val);
+								updateFormField(PROJECT, 'amount', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</FormField>
 
 					<!-- Account Age -->
-					<FormField label="Account Age" id="account_age_days" class="space-y-1">
+					<FormField label="Account Age ({FIELD_CONFIG.account_age_days.min}-{FIELD_CONFIG.account_age_days.max})" id="account_age_days" class="space-y-1">
 						<Input
 							id="account_age_days"
 							type="number"
 							value={currentForm.account_age_days ?? ''}
-							min="0"
+							min={FIELD_CONFIG.account_age_days.min}
+							max={FIELD_CONFIG.account_age_days.max}
 							class="h-8 text-sm"
-							oninput={(e) =>
-								updateFormField(PROJECT, 'account_age_days', parseInt(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseInt(e.currentTarget.value) || FIELD_CONFIG.account_age_days.min;
+								const clamped = clampFieldValue('account_age_days', val);
+								updateFormField(PROJECT, 'account_age_days', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</FormField>
 
@@ -361,17 +373,20 @@
 					</FormField>
 
 					<!-- Merchant ID -->
-					<FormField label="Merchant ID" id="merchant_id" class="space-y-1">
-						<Select
+					<FormField label="Merchant ID ({FIELD_CONFIG.merchant_id.min}-{FIELD_CONFIG.merchant_id.max})" id="merchant_id" class="space-y-1">
+						<Input
 							id="merchant_id"
-							value={
-								(currentForm.merchant_id as string) ||
-								dropdownOptions.merchant_id?.[0] ||
-								'merchant_1'
-							}
-							options={dropdownOptions.merchant_id?.slice(0, 50) || ['merchant_1']}
+							type="number"
+							value={(currentForm.merchant_id as number) ?? FIELD_CONFIG.merchant_id.min}
+							min={FIELD_CONFIG.merchant_id.min}
+							max={FIELD_CONFIG.merchant_id.max}
 							class="h-8 text-sm"
-							onchange={(e) => updateFormField(PROJECT, 'merchant_id', e.currentTarget.value)}
+							oninput={(e) => {
+								const val = parseInt(e.currentTarget.value) || FIELD_CONFIG.merchant_id.min;
+								const clamped = clampFieldValue('merchant_id', val);
+								updateFormField(PROJECT, 'merchant_id', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</FormField>
 
@@ -409,30 +424,40 @@
 					</FormField>
 
 					<!-- Latitude -->
-					<FormField label="Latitude" id="lat" class="space-y-1">
+					<FormField label="Latitude ({FIELD_CONFIG.lat.min}-{FIELD_CONFIG.lat.max})" id="lat" class="space-y-1">
 						<Input
 							id="lat"
 							type="number"
 							value={currentForm.lat ?? ''}
-							step="0.0001"
-							min="-90"
-							max="90"
+							min={FIELD_CONFIG.lat.min}
+							max={FIELD_CONFIG.lat.max}
+							step={FIELD_CONFIG.lat.step}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'lat', parseFloat(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseFloat(e.currentTarget.value) || FIELD_CONFIG.lat.min;
+								const clamped = clampFieldValue('lat', val);
+								updateFormField(PROJECT, 'lat', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</FormField>
 
 					<!-- Longitude -->
-					<FormField label="Longitude" id="lon" class="space-y-1">
+					<FormField label="Longitude ({FIELD_CONFIG.lon.min}-{FIELD_CONFIG.lon.max})" id="lon" class="space-y-1">
 						<Input
 							id="lon"
 							type="number"
 							value={currentForm.lon ?? ''}
-							step="0.0001"
-							min="-180"
-							max="180"
+							min={FIELD_CONFIG.lon.min}
+							max={FIELD_CONFIG.lon.max}
+							step={FIELD_CONFIG.lon.step}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'lon', parseFloat(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseFloat(e.currentTarget.value) || FIELD_CONFIG.lon.min;
+								const clamped = clampFieldValue('lon', val);
+								updateFormField(PROJECT, 'lon', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</FormField>
 

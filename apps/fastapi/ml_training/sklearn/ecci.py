@@ -71,7 +71,7 @@ def check_shutdown(stage: str = "unknown"):
         sys.exit(0)
 
 
-def update_status(message: str, progress: int = None, stage: str = None, metrics: dict = None, total_rows: int = None):
+def update_status(message: str, progress: int = None, stage: str = None, metrics: dict = None, total_rows: int = None, kmeans_log: dict = None):
     """Post training status update to sklearn service."""
     try:
         payload = {"message": message}
@@ -83,6 +83,8 @@ def update_status(message: str, progress: int = None, stage: str = None, metrics
             payload["metrics"] = metrics
         if total_rows is not None:
             payload["total_rows"] = total_rows
+        if kmeans_log is not None:
+            payload["kmeans_log"] = kmeans_log
         requests.post(FASTAPI_STATUS_URL, json=payload, timeout=2)
     except Exception:
         pass  # Don't fail training if status update fails
@@ -93,10 +95,16 @@ MODEL_NAME = "KMeans"
 ENCODER_ARTIFACT_NAME = "sklearn_encoders.pkl"
 
 
-def find_optimal_k(X: np.ndarray, k_range: tuple = (2, 10)) -> dict:
+def find_optimal_k(X: np.ndarray, k_range: tuple = (2, 10), total_rows: int = 0) -> dict:
     """Find optimal K using multiple metrics (Silhouette, Calinski-Harabasz, Davies-Bouldin)."""
     results = {'k': [], 'inertia': [], 'silhouette': [], 'calinski': [], 'davies': []}
-    for k in range(k_range[0], k_range[1] + 1):
+    k_min, k_max = k_range
+    total_k = k_max - k_min + 1
+
+    for i, k in enumerate(range(k_min, k_max + 1)):
+        # Check for shutdown before each K iteration
+        check_shutdown(f"k_search_k{k}")
+
         model = KMeans(
             n_clusters=k,
             init='k-means++',
@@ -110,8 +118,33 @@ def find_optimal_k(X: np.ndarray, k_range: tuple = (2, 10)) -> dict:
         results['silhouette'].append(metrics.silhouette_score(X, labels))
         results['calinski'].append(metrics.calinski_harabasz_score(X, labels))
         results['davies'].append(metrics.davies_bouldin_score(X, labels))
+
+        # Log to console
         print(f"K={k}: Silhouette={results['silhouette'][-1]:.3f}, "
               f"CH={results['calinski'][-1]:.0f}, DB={results['davies'][-1]:.3f}")
+
+        # Calculate progress within K-search (30-60% of total training)
+        k_progress = 30 + int((i + 1) / total_k * 30)
+
+        # Send K-search log update to FastAPI
+        kmeans_log = {
+            "current_k": k,
+            "k_range": f"{k_min}-{k_max}",
+            "silhouette": round(results['silhouette'][-1], 3),
+            "calinski_harabasz": int(results['calinski'][-1]),
+            "davies_bouldin": round(results['davies'][-1], 3),
+            "best_k_so_far": results['k'][np.argmax(results['silhouette'])],
+            "best_silhouette_so_far": round(max(results['silhouette']), 3),
+            "progress": f"{i + 1}/{total_k}",
+        }
+        update_status(
+            f"K-search: K={k}, Silhouette={results['silhouette'][-1]:.3f}",
+            progress=k_progress,
+            stage="k_search",
+            total_rows=total_rows,
+            kmeans_log=kmeans_log,
+        )
+
     return results
 
 
@@ -219,7 +252,7 @@ def main(sample_frac: float | None, max_rows: int | None, n_clusters: int | None
         # Find optimal K or use provided value
         if n_clusters is None:
             print(f"\n=== Finding Optimal K (range: {k_range_min}-{k_range_max}) ===")
-            k_results = find_optimal_k(X_scaled, k_range=(k_range_min, k_range_max))
+            k_results = find_optimal_k(X_scaled, k_range=(k_range_min, k_range_max), total_rows=total_rows)
             optimal_k = select_optimal_k(k_results)
             print(f"\nOptimal K based on Silhouette score: {optimal_k}")
         else:

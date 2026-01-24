@@ -80,6 +80,7 @@ export const batchTrainingProgress = createProjectStore<number>(0);
 export const batchTrainingStage = createProjectStore<string>('');
 export const batchTrainingMetricsPreview = createProjectStore<Record<string, number>>({});
 export const batchTrainingCatboostLog = createProjectStore<Record<string, number | string>>({});
+export const batchTrainingKMeansLog = createProjectStore<Record<string, number | string>>({});
 export const batchTrainingTotalRows = createProjectStore<number>(0);
 
 // MLflow run selection

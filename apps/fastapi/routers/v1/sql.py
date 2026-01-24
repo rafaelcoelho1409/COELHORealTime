@@ -8,6 +8,8 @@ from fastapi import APIRouter, HTTPException
 import asyncio
 import time
 import os
+import math
+import pandas as pd
 
 from models import SQLQueryRequest, TableSchemaRequest
 from config import (
@@ -113,9 +115,24 @@ def execute_delta_sql_duckdb(project_name: str, query: str, limit: int = SQL_DEF
 
             execution_time_ms = (time.time() - start_time) * 1000
 
+            # Convert to records, handling NaN/NA values for JSON serialization
+            def clean_value(v):
+                """Convert NaN, NA, NaT to None for JSON serialization."""
+                if v is None:
+                    return None
+                if isinstance(v, float) and math.isnan(v):
+                    return None
+                if pd.isna(v):
+                    return None
+                return v
+
+            records = []
+            for _, row in result.iterrows():
+                records.append({col: clean_value(row[col]) for col in result.columns})
+
             return {
                 "columns": result.columns.tolist(),
-                "data": result.to_dict(orient="records"),
+                "data": records,
                 "row_count": len(result),
                 "execution_time_ms": execution_time_ms,
                 "engine": "duckdb",

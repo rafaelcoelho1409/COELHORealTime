@@ -32,7 +32,7 @@
 	} from '$stores';
 	import { toast } from '$stores/ui';
 	import * as batchApi from '$api/batch';
-	import { randomizeETAForm } from '$lib/utils/randomize';
+	import { randomizeETAForm, FIELD_CONFIG, clampFieldValue } from '$lib/utils/randomize';
 	import {
 		Clock,
 		Shuffle,
@@ -302,6 +302,22 @@
 	const runs = $derived($batchMlflowRuns[PROJECT] || []);
 	const experimentUrl = $derived($batchMlflowExperimentUrl[PROJECT] || '');
 	const lastTrainedRunId = $derived($batchLastTrainedRunId[PROJECT] || '');
+
+	// Get selected run details for MLflow badge
+	const selectedRunId = $derived($selectedBatchRun[PROJECT] || '');
+	const selectedRun = $derived.by(() => {
+		if (!selectedRunId || !runs.length) return null;
+		return runs.find((r: { run_id: string }) => r.run_id === selectedRunId) || null;
+	});
+
+	function formatRunStartTime(value?: string | number): string {
+		if (!value) return '';
+		const timestamp = typeof value === 'number' ? value : Date.parse(value);
+		if (!Number.isNaN(timestamp)) {
+			return new Date(timestamp).toISOString().replace('T', ' ').slice(0, 19);
+		}
+		return String(value);
+	}
 
 	// Helper function to calculate distance (Haversine formula)
 	function calcDistanceKm(oLat: number, oLon: number, dLat: number, dLon: number): number {
@@ -734,22 +750,36 @@
 
 				<div class="grid grid-cols-3 gap-2">
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Driver ID</p>
-						<Select
-							value={(currentForm.driver_id as string) ?? ''}
-							options={dropdownOptions.driver_id?.slice(0, 50) || ['driver_1000']}
+						<p class="text-xs text-muted-foreground">Driver ID ({FIELD_CONFIG.driver_id.min}-{FIELD_CONFIG.driver_id.max})</p>
+						<Input
+							type="number"
+							value={(currentForm.driver_id as number) ?? FIELD_CONFIG.driver_id.min}
+							min={FIELD_CONFIG.driver_id.min}
+							max={FIELD_CONFIG.driver_id.max}
 							class="h-8 text-sm"
-							onchange={(e) => updateFormField(PROJECT, 'driver_id', e.currentTarget.value)}
+							oninput={(e) => {
+								const val = parseInt(e.currentTarget.value) || FIELD_CONFIG.driver_id.min;
+								const clamped = clampFieldValue('driver_id', val);
+								updateFormField(PROJECT, 'driver_id', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Vehicle ID</p>
-						<Select
-							value={(currentForm.vehicle_id as string) ?? ''}
-							options={dropdownOptions.vehicle_id?.slice(0, 50) || ['vehicle_100']}
+						<p class="text-xs text-muted-foreground">Vehicle ID ({FIELD_CONFIG.vehicle_id.min}-{FIELD_CONFIG.vehicle_id.max})</p>
+						<Input
+							type="number"
+							value={(currentForm.vehicle_id as number) ?? FIELD_CONFIG.vehicle_id.min}
+							min={FIELD_CONFIG.vehicle_id.min}
+							max={FIELD_CONFIG.vehicle_id.max}
 							class="h-8 text-sm"
-							onchange={(e) => updateFormField(PROJECT, 'vehicle_id', e.currentTarget.value)}
+							oninput={(e) => {
+								const val = parseInt(e.currentTarget.value) || FIELD_CONFIG.vehicle_id.min;
+								const clamped = clampFieldValue('vehicle_id', val);
+								updateFormField(PROJECT, 'vehicle_id', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 
@@ -794,24 +824,38 @@
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Origin Lat</p>
+						<p class="text-xs text-muted-foreground">Origin Lat ({FIELD_CONFIG.origin_lat.min}-{FIELD_CONFIG.origin_lat.max})</p>
 						<Input
 							type="number"
 							value={currentForm.origin_lat ?? ''}
-							step="0.0001"
+							min={FIELD_CONFIG.origin_lat.min}
+							max={FIELD_CONFIG.origin_lat.max}
+							step={FIELD_CONFIG.origin_lat.step}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'origin_lat', parseFloat(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseFloat(e.currentTarget.value) || FIELD_CONFIG.origin_lat.min;
+								const clamped = clampFieldValue('origin_lat', val);
+								updateFormField(PROJECT, 'origin_lat', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Origin Lon</p>
+						<p class="text-xs text-muted-foreground">Origin Lon ({FIELD_CONFIG.origin_lon.min}-{FIELD_CONFIG.origin_lon.max})</p>
 						<Input
 							type="number"
 							value={currentForm.origin_lon ?? ''}
-							step="0.0001"
+							min={FIELD_CONFIG.origin_lon.min}
+							max={FIELD_CONFIG.origin_lon.max}
+							step={FIELD_CONFIG.origin_lon.step}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'origin_lon', parseFloat(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseFloat(e.currentTarget.value) || FIELD_CONFIG.origin_lon.min;
+								const clamped = clampFieldValue('origin_lon', val);
+								updateFormField(PROJECT, 'origin_lon', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 
@@ -829,111 +873,162 @@
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Dest Lat</p>
+						<p class="text-xs text-muted-foreground">Dest Lat ({FIELD_CONFIG.destination_lat.min}-{FIELD_CONFIG.destination_lat.max})</p>
 						<Input
 							type="number"
 							value={currentForm.destination_lat ?? ''}
-							step="0.0001"
+							min={FIELD_CONFIG.destination_lat.min}
+							max={FIELD_CONFIG.destination_lat.max}
+							step={FIELD_CONFIG.destination_lat.step}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'destination_lat', parseFloat(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseFloat(e.currentTarget.value) || FIELD_CONFIG.destination_lat.min;
+								const clamped = clampFieldValue('destination_lat', val);
+								updateFormField(PROJECT, 'destination_lat', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Dest Lon</p>
+						<p class="text-xs text-muted-foreground">Dest Lon ({FIELD_CONFIG.destination_lon.min}-{FIELD_CONFIG.destination_lon.max})</p>
 						<Input
 							type="number"
 							value={currentForm.destination_lon ?? ''}
-							step="0.0001"
+							min={FIELD_CONFIG.destination_lon.min}
+							max={FIELD_CONFIG.destination_lon.max}
+							step={FIELD_CONFIG.destination_lon.step}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'destination_lon', parseFloat(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseFloat(e.currentTarget.value) || FIELD_CONFIG.destination_lon.min;
+								const clamped = clampFieldValue('destination_lon', val);
+								updateFormField(PROJECT, 'destination_lon', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Hour</p>
+						<p class="text-xs text-muted-foreground">Hour ({FIELD_CONFIG.hour_of_day.min}-{FIELD_CONFIG.hour_of_day.max})</p>
 						<Input
 							type="number"
 							value={currentForm.hour_of_day ?? ''}
-							min="0"
-							max="23"
+							min={FIELD_CONFIG.hour_of_day.min}
+							max={FIELD_CONFIG.hour_of_day.max}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'hour_of_day', parseInt(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseInt(e.currentTarget.value) || FIELD_CONFIG.hour_of_day.min;
+								const clamped = clampFieldValue('hour_of_day', val);
+								updateFormField(PROJECT, 'hour_of_day', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Rating</p>
+						<p class="text-xs text-muted-foreground">Rating ({FIELD_CONFIG.driver_rating.min}-{FIELD_CONFIG.driver_rating.max})</p>
 						<Input
 							type="number"
 							value={currentForm.driver_rating ?? ''}
-							min="3.5"
-							max="5"
-							step="0.1"
+							min={FIELD_CONFIG.driver_rating.min}
+							max={FIELD_CONFIG.driver_rating.max}
+							step={FIELD_CONFIG.driver_rating.step}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'driver_rating', parseFloat(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseFloat(e.currentTarget.value) || FIELD_CONFIG.driver_rating.min;
+								const clamped = clampFieldValue('driver_rating', val);
+								updateFormField(PROJECT, 'driver_rating', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Temp C</p>
+						<p class="text-xs text-muted-foreground">Temp C ({FIELD_CONFIG.temperature_celsius.min}-{FIELD_CONFIG.temperature_celsius.max})</p>
 						<Input
 							type="number"
 							value={currentForm.temperature_celsius ?? ''}
-							step="0.1"
+							min={FIELD_CONFIG.temperature_celsius.min}
+							max={FIELD_CONFIG.temperature_celsius.max}
+							step={FIELD_CONFIG.temperature_celsius.step}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'temperature_celsius', parseFloat(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseFloat(e.currentTarget.value) || FIELD_CONFIG.temperature_celsius.min;
+								const clamped = clampFieldValue('temperature_celsius', val);
+								updateFormField(PROJECT, 'temperature_celsius', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Traffic Factor</p>
+						<p class="text-xs text-muted-foreground">Traffic Factor ({FIELD_CONFIG.debug_traffic_factor.min}-{FIELD_CONFIG.debug_traffic_factor.max})</p>
 						<Input
 							type="number"
 							value={currentForm.debug_traffic_factor ?? ''}
-							min="0.3"
-							max="1.9"
-							step="0.1"
+							min={FIELD_CONFIG.debug_traffic_factor.min}
+							max={FIELD_CONFIG.debug_traffic_factor.max}
+							step={FIELD_CONFIG.debug_traffic_factor.step}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'debug_traffic_factor', parseFloat(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseFloat(e.currentTarget.value) || FIELD_CONFIG.debug_traffic_factor.min;
+								const clamped = clampFieldValue('debug_traffic_factor', val);
+								updateFormField(PROJECT, 'debug_traffic_factor', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Weather Factor</p>
+						<p class="text-xs text-muted-foreground">Weather Factor ({FIELD_CONFIG.debug_weather_factor.min}-{FIELD_CONFIG.debug_weather_factor.max})</p>
 						<Input
 							type="number"
 							value={currentForm.debug_weather_factor ?? ''}
-							min="1.0"
-							max="2.0"
-							step="0.1"
+							min={FIELD_CONFIG.debug_weather_factor.min}
+							max={FIELD_CONFIG.debug_weather_factor.max}
+							step={FIELD_CONFIG.debug_weather_factor.step}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'debug_weather_factor', parseFloat(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseFloat(e.currentTarget.value) || FIELD_CONFIG.debug_weather_factor.min;
+								const clamped = clampFieldValue('debug_weather_factor', val);
+								updateFormField(PROJECT, 'debug_weather_factor', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Driver Factor</p>
+						<p class="text-xs text-muted-foreground">Driver Factor ({FIELD_CONFIG.debug_driver_factor.min}-{FIELD_CONFIG.debug_driver_factor.max})</p>
 						<Input
 							type="number"
 							value={currentForm.debug_driver_factor ?? ''}
-							min="0.85"
-							max="1.15"
-							step="0.01"
+							min={FIELD_CONFIG.debug_driver_factor.min}
+							max={FIELD_CONFIG.debug_driver_factor.max}
+							step={FIELD_CONFIG.debug_driver_factor.step}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'debug_driver_factor', parseFloat(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseFloat(e.currentTarget.value) || FIELD_CONFIG.debug_driver_factor.min;
+								const clamped = clampFieldValue('debug_driver_factor', val);
+								updateFormField(PROJECT, 'debug_driver_factor', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Incident (s)</p>
+						<p class="text-xs text-muted-foreground">Incident ({FIELD_CONFIG.debug_incident_delay_seconds.min}-{FIELD_CONFIG.debug_incident_delay_seconds.max}s)</p>
 						<Input
 							type="number"
 							value={currentForm.debug_incident_delay_seconds ?? ''}
-							min="0"
-							max="1800"
+							min={FIELD_CONFIG.debug_incident_delay_seconds.min}
+							max={FIELD_CONFIG.debug_incident_delay_seconds.max}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'debug_incident_delay_seconds', parseInt(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseInt(e.currentTarget.value) || FIELD_CONFIG.debug_incident_delay_seconds.min;
+								const clamped = clampFieldValue('debug_incident_delay_seconds', val);
+								updateFormField(PROJECT, 'debug_incident_delay_seconds', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 				</div>
@@ -983,6 +1078,7 @@
 							<span class="text-sm font-bold">ETA - Prediction</span>
 						</div>
 
+						<!-- MLflow Run Info Badge -->
 						<div class="mb-4 flex flex-wrap items-center gap-2 rounded-md bg-muted/50 p-2">
 							<span
 								class="inline-flex items-center gap-1 rounded-md bg-purple-500/10 px-2 py-1 text-xs font-medium text-purple-600"
@@ -990,19 +1086,45 @@
 								<FlaskConical class="h-3 w-3" />
 								MLflow
 							</span>
-							{#if lastTrainedRunId}
-								<span class="text-xs text-muted-foreground">
-									Run:
-									<code class="rounded bg-muted px-1">
-										{lastTrainedRunId}
-									</code>
+							{#if isTraining}
+								<span
+									class="inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-600"
+								>
+									<Loader2 class="h-3 w-3 animate-spin" />
+									TRAINING
 								</span>
-							{/if}
-							{#if $selectedBatchRun[PROJECT]}
+							{:else if selectedRun?.status}
 								<span
 									class="inline-flex items-center gap-1 rounded-md bg-blue-500/10 px-2 py-1 text-xs font-medium text-blue-600"
 								>
-									Selected
+									{selectedRun.status}
+								</span>
+							{:else if modelAvailable}
+								<span
+									class="inline-flex items-center gap-1 rounded-md bg-green-500/10 px-2 py-1 text-xs font-medium text-green-600"
+								>
+									READY
+								</span>
+							{/if}
+							{#if selectedRunId}
+								<span class="text-xs text-muted-foreground">
+									Run:
+									<code
+										class="rounded bg-muted px-1"
+										title={selectedRunId}
+									>
+										{selectedRunId.slice(0, 8)}
+									</code>
+								</span>
+							{/if}
+							{#if selectedRun?.start_time}
+								<span class="text-xs text-muted-foreground">
+									Started: {formatRunStartTime(selectedRun.start_time)}
+								</span>
+							{/if}
+							{#if lastTrainedRunId && lastTrainedRunId !== selectedRunId}
+								<span class="text-xs text-muted-foreground">
+									(Last trained: <code class="rounded bg-green-100 px-1 text-green-700 dark:bg-green-900 dark:text-green-300">{lastTrainedRunId.slice(0, 8)}</code>)
 								</span>
 							{/if}
 						</div>

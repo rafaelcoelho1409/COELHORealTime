@@ -30,7 +30,7 @@
 	} from '$stores';
 	import { toast } from '$stores/ui';
 	import * as batchApi from '$api/batch';
-	import { randomizeECCIForm } from '$lib/utils/randomize';
+	import { randomizeECCIForm, FIELD_CONFIG, clampFieldValue } from '$lib/utils/randomize';
 	import { ShoppingCart, Shuffle, MapPin, Users, BarChart3, AlertTriangle, Info } from 'lucide-svelte';
 	import type { ProjectName } from '$types';
 
@@ -281,15 +281,21 @@
 						/>
 					</FormField>
 
-					<FormField label="Price" id="price" class="space-y-1">
+					<FormField label="Price ({FIELD_CONFIG.price.min}-{FIELD_CONFIG.price.max})" id="price" class="space-y-1">
 						<Input
 							id="price"
 							type="number"
 							value={currentForm.price ?? ''}
-							step="0.01"
-							min="0"
+							step={FIELD_CONFIG.price.step}
+							min={FIELD_CONFIG.price.min}
+							max={FIELD_CONFIG.price.max}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'price', parseFloat(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseFloat(e.currentTarget.value) || FIELD_CONFIG.price.min;
+								const clamped = clampFieldValue('price', val);
+								updateFormField(PROJECT, 'price', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</FormField>
 
@@ -313,35 +319,56 @@
 						/>
 					</FormField>
 
-					<FormField label="Product ID" id="product_id" class="space-y-1">
+					<FormField label="Product ID ({FIELD_CONFIG.product_id.min}-{FIELD_CONFIG.product_id.max})" id="product_id" class="space-y-1">
 						<Input
 							id="product_id"
-							value={(currentForm.product_id as string) ?? ''}
-							placeholder="prod_1050"
+							type="number"
+							value={(currentForm.product_id as number) ?? FIELD_CONFIG.product_id.min}
+							min={FIELD_CONFIG.product_id.min}
+							max={FIELD_CONFIG.product_id.max}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'product_id', e.currentTarget.value)}
+							oninput={(e) => {
+								const val = parseInt(e.currentTarget.value) || FIELD_CONFIG.product_id.min;
+								const clamped = clampFieldValue('product_id', val);
+								updateFormField(PROJECT, 'product_id', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</FormField>
 
-					<FormField label="Latitude" id="lat" class="space-y-1">
+					<FormField label="Lat ({FIELD_CONFIG.lat.min}-{FIELD_CONFIG.lat.max})" id="lat" class="space-y-1">
 						<Input
 							id="lat"
 							type="number"
 							value={currentForm.lat ?? ''}
-							step="0.001"
+							step={FIELD_CONFIG.lat.step}
+							min={FIELD_CONFIG.lat.min}
+							max={FIELD_CONFIG.lat.max}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'lat', parseFloat(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseFloat(e.currentTarget.value) || FIELD_CONFIG.lat.min;
+								const clamped = clampFieldValue('lat', val);
+								updateFormField(PROJECT, 'lat', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</FormField>
 
-					<FormField label="Longitude" id="lon" class="space-y-1">
+					<FormField label="Lon ({FIELD_CONFIG.lon.min}-{FIELD_CONFIG.lon.max})" id="lon" class="space-y-1">
 						<Input
 							id="lon"
 							type="number"
 							value={currentForm.lon ?? ''}
-							step="0.001"
+							step={FIELD_CONFIG.lon.step}
+							min={FIELD_CONFIG.lon.min}
+							max={FIELD_CONFIG.lon.max}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'lon', parseFloat(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseFloat(e.currentTarget.value) || FIELD_CONFIG.lon.min;
+								const clamped = clampFieldValue('lon', val);
+								updateFormField(PROJECT, 'lon', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</FormField>
 
@@ -352,36 +379,54 @@
 						</Button>
 					</FormField>
 
-					<FormField label="Quantity" id="quantity" class="space-y-1">
+					<FormField label="Qty ({FIELD_CONFIG.quantity.min}-{FIELD_CONFIG.quantity.max})" id="quantity" class="space-y-1">
 						<Input
 							id="quantity"
 							type="number"
 							value={currentForm.quantity ?? ''}
-							min="1"
+							min={FIELD_CONFIG.quantity.min}
+							max={FIELD_CONFIG.quantity.max}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'quantity', parseInt(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseInt(e.currentTarget.value) || FIELD_CONFIG.quantity.min;
+								const clamped = clampFieldValue('quantity', val);
+								updateFormField(PROJECT, 'quantity', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</FormField>
 
-					<FormField label="Time (s)" id="time_on_page_seconds" class="space-y-1">
+					<FormField label="Time (s) ({FIELD_CONFIG.time_on_page_seconds.min}-{FIELD_CONFIG.time_on_page_seconds.max})" id="time_on_page_seconds" class="space-y-1">
 						<Input
 							id="time_on_page_seconds"
 							type="number"
 							value={currentForm.time_on_page_seconds ?? ''}
-							min="0"
+							min={FIELD_CONFIG.time_on_page_seconds.min}
+							max={FIELD_CONFIG.time_on_page_seconds.max}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'time_on_page_seconds', parseInt(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseInt(e.currentTarget.value) || FIELD_CONFIG.time_on_page_seconds.min;
+								const clamped = clampFieldValue('time_on_page_seconds', val);
+								updateFormField(PROJECT, 'time_on_page_seconds', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</FormField>
 
-					<FormField label="Sequence" id="session_event_sequence" class="space-y-1">
+					<FormField label="Seq ({FIELD_CONFIG.session_event_sequence.min}-{FIELD_CONFIG.session_event_sequence.max})" id="session_event_sequence" class="space-y-1">
 						<Input
 							id="session_event_sequence"
 							type="number"
 							value={currentForm.session_event_sequence ?? ''}
-							min="1"
+							min={FIELD_CONFIG.session_event_sequence.min}
+							max={FIELD_CONFIG.session_event_sequence.max}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'session_event_sequence', parseInt(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseInt(e.currentTarget.value) || FIELD_CONFIG.session_event_sequence.min;
+								const clamped = clampFieldValue('session_event_sequence', val);
+								updateFormField(PROJECT, 'session_event_sequence', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</FormField>
 

@@ -225,7 +225,7 @@ ECCI_NUMERICAL_FEATURES = [
 ]
 ECCI_CATEGORICAL_FEATURES = [
     "event_type", "product_category", "product_id", "referrer_url",
-    "browser", "os",
+    "browser", "device_type", "os",
     "year", "month", "day", "hour", "minute", "second",
 ]
 ECCI_ALL_FEATURES = ECCI_NUMERICAL_FEATURES + ECCI_CATEGORICAL_FEATURES
@@ -807,7 +807,7 @@ def _load_tfd_data_duckdb(
     """Load Transaction Fraud Detection data with pure DuckDB SQL.
 
     Single SQL query does:
-    - JSON extraction (device_info → browser, os)
+    - JSON extraction (device_info → browser, device_type, os)
     - Timestamp extraction (→ year, month, day, hour, minute, second)
     - Label encoding via DENSE_RANK() - 1 (all-numeric output)
     - Column selection and ordering (matches TFD_ALL_FEATURES order)
@@ -1036,6 +1036,7 @@ def load_ecci_event_data_duckdb(
         DENSE_RANK() OVER (ORDER BY COALESCE(product_id, 'unknown')) - 1 AS product_id,
         DENSE_RANK() OVER (ORDER BY COALESCE(referrer_url, 'unknown')) - 1 AS referrer_url,
         DENSE_RANK() OVER (ORDER BY COALESCE(device_info->>'browser', 'unknown')) - 1 AS browser,
+        DENSE_RANK() OVER (ORDER BY COALESCE(device_info->>'device_type', 'unknown')) - 1 AS device_type,
         DENSE_RANK() OVER (ORDER BY COALESCE(device_info->>'os', 'unknown')) - 1 AS os,
 
         -- Timestamp components (already integers)
@@ -1117,7 +1118,7 @@ def get_ecci_label_encodings() -> dict[str, dict[str, int]]:
 
     # Features that need encoding (exclude timestamp components which are already integers)
     features_to_encode = ["event_type", "product_category", "product_id", "referrer_url"]
-    device_features = ["browser", "os"]
+    device_features = ["browser", "device_type", "os"]
 
     encodings = {}
     conn = _get_duckdb_connection()
@@ -1328,6 +1329,7 @@ def process_sklearn_sample(x: dict, project_name: str) -> pd.DataFrame:
             "product_id": str(x.get("product_id") or "unknown"),
             "referrer_url": str(x.get("referrer_url") or "unknown"),
             "browser": str(device_info.get("browser") or "unknown"),
+            "device_type": str(device_info.get("device_type") or "unknown"),
             "os": str(device_info.get("os") or "unknown"),
             # Timestamp components (already integers)
             "year": timestamp.year,
@@ -1359,7 +1361,15 @@ def apply_ecci_label_encodings(df: pd.DataFrame, label_encodings: dict) -> pd.Da
     df = df.copy()
 
     # Features that need encoding (exclude timestamp components)
-    features_to_encode = ["event_type", "product_category", "product_id", "referrer_url", "browser", "os"]
+    features_to_encode = [
+        "event_type",
+        "product_category",
+        "product_id",
+        "referrer_url",
+        "browser",
+        "device_type",
+        "os",
+    ]
 
     for feature in features_to_encode:
         if feature in df.columns and feature in label_encodings:
@@ -1861,9 +1871,10 @@ def yellowbrick_regression_visualizers(
 # =============================================================================
 
 # Categorize visualizers by fit method (per YellowBrick docs)
-FEATURE_FIT_TRANSFORM_VISUALIZERS = ["PCA", "Manifold", "ParallelCoordinates"]
+# RadViz must use fit_transform() per GitHub issue #793 - separate fit()+transform() doesn't plot data
+FEATURE_FIT_TRANSFORM_VISUALIZERS = ["PCA", "Manifold", "ParallelCoordinates", "RadViz"]
 FEATURE_FIT_ONLY_VISUALIZERS = ["FeatureImportances", "RFECV", "JointPlot"]
-FEATURE_FIT_THEN_TRANSFORM_VISUALIZERS = ["Rank1D", "Rank2D", "RadViz"]
+FEATURE_FIT_THEN_TRANSFORM_VISUALIZERS = ["Rank1D", "Rank2D"]
 
 
 def yellowbrick_feature_analysis_kwargs(
@@ -1888,7 +1899,7 @@ def yellowbrick_feature_analysis_kwargs(
     | PCA                 | fit_transform   | YES            | YES        |
     | Manifold            | fit_transform   | YES            | YES        |
     | ParallelCoordinates | fit_transform   | YES            | NO         |
-    | RadViz              | fit + transform | YES            | NO         |
+    | RadViz              | fit_transform   | YES            | NO         |
     | JointPlot           | fit             | YES            | YES        |
     """
     task_type = PROJECT_TASK_TYPES.get(project_name, "classification")
@@ -1979,24 +1990,41 @@ def yellowbrick_feature_analysis_visualizers(
     Create and fit YellowBrick feature analysis visualizer.
 
     Uses correct fit method per YellowBrick documentation:
-    - fit_transform(): PCA, Manifold, ParallelCoordinates
+    - fit_transform(): PCA, Manifold, ParallelCoordinates, RadViz
     - fit() only: JointPlot
-    - fit() + transform(): Rank1D, Rank2D, RadViz
+    - fit() + transform(): Rank1D, Rank2D
+
+    Note: RadViz uses fit_transform() per GitHub issue #793 - separate fit()+transform()
+    doesn't plot data points correctly.
     """
     for visualizer_name, params in yb_kwargs.items():
         visualizer = getattr(features, visualizer_name)(**params)
+
+        # Handle NaN values for RadViz (rows with NaN are not plotted)
+        # Drop rows with any NaN values to ensure all data is visualized
+        X_clean = X
+        y_clean = y
+        if visualizer_name == "RadViz":
+            # Create mask for rows without NaN values
+            nan_mask = X.notna().all(axis=1)
+            if not nan_mask.all():
+                nan_count = (~nan_mask).sum()
+                print(f"RadViz: Dropping {nan_count} rows with NaN values ({nan_count/len(X)*100:.1f}%)")
+                X_clean = X[nan_mask].reset_index(drop=True)
+                y_clean = y[nan_mask].reset_index(drop=True)
+
         # Use correct fit method per YellowBrick documentation
         if visualizer_name in FEATURE_FIT_TRANSFORM_VISUALIZERS:
-            visualizer.fit_transform(X, y)
+            visualizer.fit_transform(X_clean, y_clean)
         elif visualizer_name in FEATURE_FIT_ONLY_VISUALIZERS:
-            visualizer.fit(X, y)
+            visualizer.fit(X_clean, y_clean)
         elif visualizer_name in FEATURE_FIT_THEN_TRANSFORM_VISUALIZERS:
-            visualizer.fit(X, y)
-            visualizer.transform(X)
+            visualizer.fit(X_clean, y_clean)
+            visualizer.transform(X_clean)
         else:
             # Default: fit + transform
-            visualizer.fit(X, y)
-            visualizer.transform(X)
+            visualizer.fit(X_clean, y_clean)
+            visualizer.transform(X_clean)
         return visualizer
     return None
 
@@ -2604,17 +2632,22 @@ def yellowbrick_text_analysis_visualizers(
             return visualizer
 
         elif visualizer_name == "WordCorrelationPlot":
-            # Find most common words for correlation - FULL dataset (fast)
-            word_freq = {}
-            for q in valid_queries:
-                for word in q.lower().split():
-                    if len(word) > 2:
-                        word_freq[word] = word_freq.get(word, 0) + 1
-            target_words = sorted(word_freq.keys(), key=lambda x: word_freq[x], reverse=True)[:10]
+            # Find most common words for correlation (match notebook 018 approach)
+            from collections import Counter
+
+            sample_queries = valid_queries[:500]
+            tokenized_docs = [q.lower().split() for q in sample_queries]
+            all_tokens = [word for doc in tokenized_docs for word in doc]
+            token_freq = Counter(all_tokens)
+            target_words = [
+                word
+                for word, count in token_freq.most_common(20)
+                if len(word) > 2 and count >= 3
+            ]
             if len(target_words) < 3:
                 raise ValueError("Insufficient vocabulary for WordCorrelationPlot")
-            visualizer = WordCorrelationPlot(words=target_words, **params)
-            visualizer.fit(valid_queries)
+            visualizer = WordCorrelationPlot(words=target_words[:10], **params)
+            visualizer.fit(sample_queries)
             return visualizer
 
         elif visualizer_name == "PosTagVisualizer":

@@ -99,6 +99,7 @@ export interface BatchTrainingStatus {
 	current_stage?: string;
 	metrics_preview?: Record<string, number>;
 	catboost_log?: Record<string, number | string>;
+	kmeans_log?: Record<string, number | string>;
 	total_rows?: number;
 	error?: string;
 }

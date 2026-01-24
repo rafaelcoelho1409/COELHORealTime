@@ -235,3 +235,42 @@ export async function getSample(projectName: ProjectName) {
 		project_name: projectName
 	});
 }
+
+// =============================================================================
+// Cluster Analytics (ECCI Batch ML)
+// =============================================================================
+
+/**
+ * Get cluster sample counts from batch ML training data
+ */
+export async function getClusterCounts(projectName: ProjectName, runId?: string) {
+	return apiPost<{
+		cluster_counts: Record<string, number>;
+		run_id?: string;
+		total_samples?: number;
+		error?: string;
+	}>(`${API.BATCH}/cluster-counts`, {
+		project_name: projectName,
+		run_id: runId
+	});
+}
+
+/**
+ * Get cluster feature counts from batch ML training data
+ */
+export async function getClusterFeatureCounts(
+	projectName: ProjectName,
+	featureName: string,
+	runId?: string
+) {
+	return apiPost<{
+		feature_counts: Record<string, Record<string, number>>;
+		run_id?: string;
+		total_samples?: number;
+		error?: string;
+	}>(`${API.BATCH}/cluster-feature-counts`, {
+		project_name: projectName,
+		feature_name: featureName,
+		run_id: runId
+	});
+}

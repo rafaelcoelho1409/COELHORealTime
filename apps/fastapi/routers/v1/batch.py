@@ -68,6 +68,8 @@ class BatchTrainingState:
         self.current_stage: str = ""
         self.metrics_preview: Dict[str, float] = {}
         self.total_rows: int = 0
+        # KMeans K-search log (for ECCI clustering)
+        self.kmeans_log: Dict[str, any] = {}
 
     def close_log_file(self):
         """Close the log file handle if open."""
@@ -85,6 +87,7 @@ class BatchTrainingState:
         stage: str = None,
         metrics: Dict[str, float] = None,
         total_rows: int = None,
+        kmeans_log: Dict[str, any] = None,
     ):
         """Update training status from training script."""
         self.status_message = message
@@ -96,6 +99,8 @@ class BatchTrainingState:
             self.metrics_preview = metrics
         if total_rows is not None:
             self.total_rows = total_rows
+        if kmeans_log is not None:
+            self.kmeans_log = kmeans_log
 
     def reset_status(self):
         """Reset status for new training run."""
@@ -104,6 +109,7 @@ class BatchTrainingState:
         self.current_stage = ""
         self.metrics_preview = {}
         self.total_rows = 0
+        self.kmeans_log = {}
 
 
 batch_state = BatchTrainingState()
@@ -371,6 +377,7 @@ async def get_batch_status():
         "current_stage": batch_state.current_stage,
         "metrics_preview": batch_state.metrics_preview,
         "total_rows": batch_state.total_rows,
+        "kmeans_log": batch_state.kmeans_log,
     }
 
     if batch_state.current_model_name and batch_state.current_process:
@@ -540,6 +547,7 @@ async def update_training_status(update: TrainingStatusUpdate):
         stage=update.stage,
         metrics=update.metrics,
         total_rows=update.total_rows,
+        kmeans_log=update.kmeans_log,
     )
     return {"status": "ok"}
 
@@ -667,20 +675,51 @@ async def predict(request: PredictRequest):
             }
 
         elif project_name == "E-Commerce Customer Interactions":
+            # Load preprocessor (scaler + label encodings) from MLflow artifacts
+            def load_preprocessor():
+                encoder_path = mlflow.artifacts.download_artifacts(
+                    run_id=run_id,
+                    artifact_path="sklearn_encoders.pkl",
+                )
+                with open(encoder_path, 'rb') as f:
+                    return pickle.load(f)
+
+            preprocessor = await asyncio.to_thread(load_preprocessor)
+            scaler = preprocessor.get("scaler")
+            feature_names = preprocessor.get("feature_names", [])
+            label_encodings = preprocessor.get("label_encodings", {})
+
             # Build feature dict for clustering
             device_info = request.device_info or {}
             timestamp = pd.to_datetime(request.timestamp) if request.timestamp else pd.Timestamp.now()
-            features = {
-                "price": request.price or 0,
-                "quantity": request.quantity or 0,
-                "session_event_sequence": request.session_event_sequence or 0,
-                "time_on_page_seconds": request.time_on_page_seconds or 0,
+
+            # Raw categorical values
+            raw_features = {
                 "event_type": request.event_type or "unknown",
                 "product_category": request.product_category or "unknown",
                 "product_id": request.product_id or "unknown",
                 "referrer_url": request.referrer_url or "unknown",
                 "browser": device_info.get("browser", "unknown"),
                 "os": device_info.get("os", "unknown"),
+                "device_type": device_info.get("device_type", "unknown"),
+            }
+
+            # Apply label encodings (DENSE_RANK style: value -> int)
+            encoded_features = {}
+            for col, value in raw_features.items():
+                if col in label_encodings:
+                    encoding_map = label_encodings[col]
+                    # Use encoded value if found, else use max + 1 (unknown category)
+                    encoded_features[col] = encoding_map.get(value, len(encoding_map) + 1)
+                else:
+                    encoded_features[col] = 0  # Default for missing encodings
+
+            # Numeric features
+            numeric_features = {
+                "price": float(request.price or 0),
+                "quantity": int(request.quantity or 0),
+                "session_event_sequence": int(request.session_event_sequence or 0),
+                "time_on_page_seconds": int(request.time_on_page_seconds or 0),
                 "year": timestamp.year,
                 "month": timestamp.month,
                 "day": timestamp.day,
@@ -688,9 +727,21 @@ async def predict(request: PredictRequest):
                 "minute": timestamp.minute,
                 "second": timestamp.second,
             }
-            df = pd.DataFrame([features])
+
+            # Combine all features
+            all_features = {**encoded_features, **numeric_features}
+
+            # Build DataFrame with correct feature order
+            df = pd.DataFrame([{col: all_features.get(col, 0) for col in feature_names}])
+
+            # Scale features
+            if scaler is not None:
+                X_scaled = scaler.transform(df)
+            else:
+                X_scaled = df.values
+
             # For clustering, predict returns cluster assignment
-            cluster_id = int(model.predict(df)[0])
+            cluster_id = int(model.predict(X_scaled)[0])
             return {
                 "cluster_id": cluster_id,
                 "model_source": "mlflow",
@@ -1025,6 +1076,93 @@ async def get_cluster_feature_counts(payload: dict):
 
 
 # =============================================================================
+# Cluster Counts Cache (ECCI)
+# =============================================================================
+_cluster_counts_cache: Dict[str, dict] = {}
+_cluster_counts_cache_time: Dict[str, float] = {}
+CLUSTER_COUNTS_CACHE_TTL = 30.0  # seconds
+
+
+@router.post("/cluster-counts")
+async def get_cluster_counts(payload: dict):
+    """Get cluster sample counts for batch ML (ECCI clustering).
+
+    Computes samples per cluster from MLflow training data artifact.
+    Uses X_events.parquet which contains cluster_label column.
+
+    Payload:
+        project_name: str - Must be "E-Commerce Customer Interactions"
+        run_id: str (optional) - Specific MLflow run ID, or None for best
+
+    Returns:
+        cluster_counts: Dict mapping cluster_id -> sample_count
+        run_id: str - The MLflow run ID used
+        total_samples: int - Total number of samples
+    """
+    import pandas as pd
+
+    project_name = payload.get("project_name", "E-Commerce Customer Interactions")
+    run_id = payload.get("run_id")
+
+    if project_name != "E-Commerce Customer Interactions":
+        return {"cluster_counts": {}, "error": "Only ECCI clustering is supported"}
+
+    # Get best run if not specified
+    if not run_id:
+        model_name = BATCH_MODEL_NAMES.get(project_name)
+        run_id = get_best_mlflow_run(project_name, model_name)
+        if not run_id:
+            return {"cluster_counts": {}, "message": "No MLflow runs found"}
+
+    # Check cache
+    cache_key = f"counts:{run_id}"
+    cache_time = _cluster_counts_cache_time.get(cache_key, 0)
+    if time.time() - cache_time < CLUSTER_COUNTS_CACHE_TTL:
+        cached = _cluster_counts_cache.get(cache_key)
+        if cached:
+            return cached
+
+    try:
+        def compute_counts():
+            # Download X_events.parquet from MLflow
+            local_path = mlflow.artifacts.download_artifacts(
+                run_id=run_id,
+                artifact_path="training_data/X_events.parquet",
+            )
+            df = pd.read_parquet(local_path)
+
+            if "cluster_label" not in df.columns:
+                return {"cluster_counts": {}, "error": "cluster_label not found in data"}
+
+            # Compute counts per cluster
+            counts = df["cluster_label"].value_counts().sort_index().to_dict()
+            cluster_counts = {str(k): int(v) for k, v in counts.items()}
+
+            return {
+                "cluster_counts": cluster_counts,
+                "run_id": run_id,
+                "total_samples": len(df),
+            }
+
+        result = await asyncio.wait_for(
+            asyncio.to_thread(compute_counts),
+            timeout=30.0
+        )
+
+        # Cache result
+        _cluster_counts_cache[cache_key] = result
+        _cluster_counts_cache_time[cache_key] = time.time()
+
+        return result
+
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Query timed out")
+    except Exception as e:
+        print(f"Error getting cluster counts: {e}")
+        return {"cluster_counts": {}, "error": str(e)}
+
+
+# =============================================================================
 # YellowBrick Visualization Helpers
 # =============================================================================
 def _get_visualization_artifact_path(metric_type: str, metric_name: str) -> str:
@@ -1107,15 +1245,35 @@ def _save_artifact(run_id: str, artifact_path: str, data: bytes) -> bool:
 def _load_search_queries_from_mlflow(run_id: str, project_name: str) -> list:
     """Load search queries from MLflow artifact for text analysis."""
     import pandas as pd
+    from utils.sklearn import _get_duckdb_connection
     try:
         local_path = mlflow.artifacts.download_artifacts(
             run_id=run_id,
             artifact_path="training_data/search_queries.parquet",
         )
         df = pd.read_parquet(local_path)
-        return df["search_query"].dropna().tolist()
+        queries = df["search_query"].dropna().tolist()
+        if len(queries) >= 10:
+            return queries
     except Exception as e:
         print(f"Failed to load search queries: {e}")
+    # Fallback: query Delta Lake directly (matches training data source)
+    try:
+        delta_path = DELTA_PATHS.get(project_name)
+        if not delta_path:
+            return []
+        conn = _get_duckdb_connection()
+        search_query = f"""
+        SELECT DISTINCT search_query
+        FROM delta_scan('{delta_path}')
+        WHERE search_query IS NOT NULL
+          AND search_query != ''
+          AND LENGTH(search_query) > 2
+        """
+        df = conn.execute(search_query).df()
+        return df["search_query"].dropna().tolist()
+    except Exception as e:
+        print(f"Failed to load search queries from Delta Lake: {e}")
         return []
 
 

@@ -36,14 +36,14 @@
 		batchModelAvailable,
 		batchMlflowExperimentUrl,
 		batchLastTrainedRunId,
-		batchTrainingCatboostLog,
+		batchTrainingKMeansLog,
 		updateFormField,
 		updateProjectStore
 	} from '$stores';
 	import { toast } from '$stores/ui';
 	import { metricInfoDialogOpen, metricInfoDialogContent } from '$stores';
 	import * as batchApi from '$api/batch';
-	import { randomizeECCIForm } from '$lib/utils/randomize';
+	import { randomizeECCIForm, FIELD_CONFIG, clampFieldValue } from '$lib/utils/randomize';
 	import {
 		Shuffle,
 		ShoppingCart,
@@ -55,7 +55,6 @@
 		Crosshair,
 		Settings2,
 		FileText,
-		Lightbulb,
 		Info,
 		Square,
 		RefreshCw,
@@ -66,32 +65,61 @@
 		FlaskConical,
 		ExternalLink,
 		MapPin,
-		TrendingUp,
-		Clock,
-		Star
+		GitBranch,
+		Play,
+		Layers,
+		PieChart
 	} from 'lucide-svelte';
 	import type { DropdownOptions, ProjectName } from '$types';
+	import { cn } from '$lib/utils';
 
 	const PROJECT: ProjectName = 'E-Commerce Customer Interactions';
 	const MODEL_NAME = 'KMeans (Scikit-Learn)';
 
+	const ECCI_FEATURE_OPTIONS = [
+		'event_type',
+		'product_category',
+		'referrer_url',
+		'quantity',
+		'time_on_page_seconds',
+		'session_event_sequence',
+		'device_type',
+		'browser',
+		'os'
+	];
+
 	// Transform MLflow metrics from API format to simple format (clustering metrics)
 	function transformMetrics(rawMetrics: Record<string, unknown>): Record<string, number> {
-		const getMetric = (name: string): number => {
-			const key = `metrics.${name}`;
-			const val = rawMetrics[key];
-			return val !== undefined && val !== null ? Number(val) : 0;
+		const getMetric = (...names: string[]): number | undefined => {
+			for (const name of names) {
+				const direct = rawMetrics[name];
+				if (direct !== undefined && direct !== null) {
+					return Number(direct);
+				}
+				const key = `metrics.${name}`;
+				const val = rawMetrics[key];
+				if (val !== undefined && val !== null) {
+					return Number(val);
+				}
+			}
+			return undefined;
 		};
 
 		return {
-			silhouette_score: getMetric('silhouette_score') || getMetric('Silhouette'),
-			calinski_harabasz_score: getMetric('calinski_harabasz_score') || getMetric('CalinskiHarabasz'),
-			davies_bouldin_score: getMetric('davies_bouldin_score') || getMetric('DaviesBouldin'),
-			inertia: getMetric('inertia') || getMetric('Inertia'),
-			n_clusters: getMetric('n_clusters') || getMetric('NClusters'),
-			preprocessing_time_seconds: getMetric('preprocessing_time_seconds'),
-			n_samples: getMetric('n_samples') ||
-			           Number(rawMetrics['params.train_samples'] || 0) + Number(rawMetrics['params.test_samples'] || 0)
+			// Primary clustering metrics
+			silhouette_score: getMetric('silhouette_score', 'Silhouette') ?? 0,
+			calinski_harabasz_score: getMetric('calinski_harabasz_score', 'CalinskiHarabasz') ?? 0,
+			davies_bouldin_score: getMetric('davies_bouldin_score', 'DaviesBouldin') ?? 0,
+			inertia: getMetric('inertia', 'Inertia') ?? 0,
+			n_clusters: getMetric('n_clusters', 'NClusters') ?? 0,
+			// Rolling metrics (same as incremental)
+			rolling_silhouette: getMetric('rolling_silhouette', 'RollingSilhouette', 'rollingSilhouette') ?? 0,
+			time_rolling_silhouette: getMetric('time_rolling_silhouette', 'TimeRollingSilhouette', 'timeRollingSilhouette') ?? 0,
+			// Sample info
+			preprocessing_time_seconds: getMetric('preprocessing_time_seconds') ?? 0,
+			n_samples:
+				getMetric('n_samples') ??
+				Number(rawMetrics['params.train_samples'] || 0) + Number(rawMetrics['params.test_samples'] || 0)
 		};
 	}
 
@@ -140,22 +168,11 @@
 		]
 	};
 
-	const ECCI_FEATURE_OPTIONS = [
-		'event_type',
-		'product_category',
-		'referrer_url',
-		'quantity',
-		'time_on_page_seconds',
-		'session_event_sequence',
-		'device_type',
-		'browser',
-		'os'
-	];
-
 	let activeTab = $state('prediction');
 	let activeMetricsTab = $state('overview');
 	let metricsLoading = $state(false);
 	let sampleLoading = $state(false);
+	let runsLoading = $state(false);
 	let statusInterval: ReturnType<typeof setInterval> | null = null;
 	let dropdownOptions = $state<DropdownOptions>({});
 	let selectedFeature = $state(ECCI_FEATURE_OPTIONS[0]);
@@ -165,7 +182,22 @@
 	let yellowBrickCancelRequested = $state(false);
 	let currentYellowBrickCategory = $state('Clustering');
 	let yellowBrickInfoOpen = $state(false);
-	let yellowBrickInfoContent = $state<Record<string, unknown>>({});
+	let yellowBrickInfoContent = $state({
+		name: '',
+		category: '',
+		description: '',
+		interpretation: '',
+		context: '',
+		whenToUse: '',
+		parameters: '',
+		docsUrl: ''
+	});
+	let yellowBrickError = $state('');
+
+	// Analytics tab state
+	let clusterCounts = $state<Record<string, number>>({});
+	let clusterCountsLoading = $state(false);
+	let allClustersFeatureCounts = $state<Record<string, Record<string, number>>>({});
 
 	onMount(async () => {
 		// Load dropdown options
@@ -189,6 +221,10 @@
 
 		// Initialize batch page with runs and metrics
 		await initBatchPage();
+
+		// Load analytics data
+		await fetchClusterCounts();
+		await fetchAllClustersFeatureCounts();
 	});
 
 	onDestroy(() => {
@@ -210,43 +246,56 @@
 	});
 
 	async function initBatchPage() {
-		const runId = $selectedBatchRun[PROJECT] || undefined;
-		const result = await batchApi.initBatchPage(PROJECT, runId);
+		runsLoading = true;
+		metricsLoading = true;
 
-		if (result.data) {
-			const { runs, model_available, experiment_url, metrics, best_run_id } = result.data;
+		try {
+			const runId = $selectedBatchRun[PROJECT] || undefined;
+			const result = await batchApi.initBatchPage(PROJECT, runId);
 
-			updateProjectStore(batchMlflowRuns, PROJECT, runs || []);
-			updateProjectStore(batchModelAvailable, PROJECT, model_available);
+			if (result.data) {
+				const { runs, model_available, experiment_url, metrics, best_run_id } = result.data;
 
-			if (experiment_url) {
-				updateProjectStore(batchMlflowExperimentUrl, PROJECT, experiment_url);
+				updateProjectStore(batchMlflowRuns, PROJECT, runs || []);
+				updateProjectStore(batchModelAvailable, PROJECT, model_available);
+
+				if (experiment_url) {
+					updateProjectStore(batchMlflowExperimentUrl, PROJECT, experiment_url);
+				}
+
+				if (metrics && !metrics._no_runs) {
+					const transformed = transformMetrics(metrics);
+					updateProjectStore(batchMlflowMetrics, PROJECT, transformed);
+				}
+
+				// Auto-select best run if none selected
+				if (!$selectedBatchRun[PROJECT] && runs?.length > 0) {
+					const bestRun = runs.find((r: { is_best?: boolean }) => r.is_best) || runs[0];
+					updateProjectStore(selectedBatchRun, PROJECT, bestRun.run_id);
+				}
 			}
-
-			if (metrics && !metrics._no_runs) {
-				const transformed = transformMetrics(metrics);
-				updateProjectStore(batchMlflowMetrics, PROJECT, transformed);
-			}
-
-			// Auto-select best run if none selected
-			if (!$selectedBatchRun[PROJECT] && runs?.length > 0) {
-				const bestRun = runs.find((r: { is_best?: boolean }) => r.is_best) || runs[0];
-				updateProjectStore(selectedBatchRun, PROJECT, bestRun.run_id);
-			}
+		} finally {
+			runsLoading = false;
+			metricsLoading = false;
 		}
 	}
 
 	async function loadRuns() {
-		const result = await batchApi.getMLflowRuns(PROJECT);
-		if (result.data?.runs) {
-			updateProjectStore(batchMlflowRuns, PROJECT, result.data.runs);
-			updateProjectStore(batchModelAvailable, PROJECT, result.data.runs.length > 0);
+		runsLoading = true;
+		try {
+			const result = await batchApi.getMLflowRuns(PROJECT);
+			if (result.data?.runs) {
+				updateProjectStore(batchMlflowRuns, PROJECT, result.data.runs);
+				updateProjectStore(batchModelAvailable, PROJECT, result.data.runs.length > 0);
+			}
+		} finally {
+			runsLoading = false;
 		}
 	}
 
-	async function loadMetrics() {
+	async function loadMetrics(runIdOverride?: string) {
 		metricsLoading = true;
-		const runId = $selectedBatchRun[PROJECT] || undefined;
+		const runId = runIdOverride || $selectedBatchRun[PROJECT] || undefined;
 		const result = await batchApi.getMLflowMetrics(PROJECT, runId);
 		if (result.data && !result.data._no_runs) {
 			const transformed = transformMetrics(result.data);
@@ -270,11 +319,13 @@
 	async function loadVisualizer(category: string, visualizerName: string) {
 		if (!visualizerName) {
 			updateProjectStore(selectedYellowBrickVisualizer, PROJECT, '');
+			yellowBrickError = '';
 			return;
 		}
 
 		yellowBrickCancelRequested = false;
 		currentYellowBrickCategory = category;
+		yellowBrickError = '';
 		updateProjectStore(selectedYellowBrickVisualizer, PROJECT, visualizerName);
 		updateProjectStore(yellowBrickLoading, PROJECT, { [visualizerName]: true });
 
@@ -292,7 +343,8 @@
 				}
 			}));
 		} else if (result.error || result.data?.error) {
-			toast.error(`Failed to load ${visualizerName}: ${result.error || result.data?.error}`);
+			yellowBrickError = result.error || result.data?.error || 'Failed to load visualization';
+			toast.error(`Failed to load ${visualizerName}: ${yellowBrickError}`);
 		}
 
 		updateProjectStore(yellowBrickLoading, PROJECT, { [visualizerName]: false });
@@ -300,6 +352,7 @@
 
 	function cancelYellowBrickLoading() {
 		yellowBrickCancelRequested = true;
+		yellowBrickError = '';
 		updateProjectStore(yellowBrickLoading, PROJECT, {});
 		updateProjectStore(selectedYellowBrickVisualizer, PROJECT, '');
 		yellowBrickImages.update((imgs) => ({ ...imgs, [PROJECT]: {} }));
@@ -331,15 +384,24 @@
 		fetch('/data/yellowbrick_info_ecci.json')
 			.then((r) => r.json())
 			.then((data) => {
-				const info = data[visualizerName];
+				const info = data.visualizers?.[visualizerName];
 				if (info) {
-					yellowBrickInfoContent = info;
+					yellowBrickInfoContent = {
+						name: info.name,
+						category: info.category,
+						description: info.description,
+						interpretation: info.interpretation,
+						context: info.ecci_context || '',
+						whenToUse: info.when_to_use || '',
+						parameters: info.parameters || '',
+						docsUrl: info.docs_url || ''
+					};
 					yellowBrickInfoOpen = true;
 				}
 			});
 	}
 
-	// Handle outer tab changes (Prediction/Metrics)
+	// Handle outer tab changes (Prediction/Metrics/Analytics)
 	function onOuterTabChange(newTab: string) {
 		activeTab = newTab;
 	}
@@ -349,6 +411,7 @@
 		activeMetricsTab = newTab;
 		const yellowBrickTabs = ['clustering', 'features', 'target', 'diagnostics', 'text'];
 		if (yellowBrickTabs.includes(newTab)) {
+			yellowBrickError = '';
 			updateProjectStore(selectedYellowBrickVisualizer, PROJECT, '');
 			yellowBrickImages.update((imgs) => ({
 				...imgs,
@@ -359,7 +422,8 @@
 
 	async function onRunChange(runId: string) {
 		updateProjectStore(selectedBatchRun, PROJECT, runId);
-		await loadMetrics();
+		await loadMetrics(runId);
+		yellowBrickError = '';
 		const yellowBrickTabs = ['clustering', 'features', 'target', 'diagnostics', 'text'];
 		if (yellowBrickTabs.includes(activeMetricsTab)) {
 			const currentViz = $selectedYellowBrickVisualizer[PROJECT];
@@ -403,10 +467,50 @@
 				if (cluster !== undefined) {
 					toast.success(`Assigned to Cluster ${cluster}`);
 				}
+				// Load cluster feature counts for behavior chart
+				await fetchClusterFeatureCounts(selectedFeature);
 			}
 		} finally {
 			updateProjectStore(batchPredictionLoading, PROJECT, false);
 		}
+	}
+
+	// Analytics functions (using batch API - from MLflow training data)
+	async function fetchClusterCounts() {
+		clusterCountsLoading = true;
+		try {
+			const runId = $selectedBatchRun[PROJECT] || undefined;
+			const result = await batchApi.getClusterCounts(PROJECT, runId);
+			if (result.data?.cluster_counts) {
+				clusterCounts = result.data.cluster_counts;
+			}
+		} finally {
+			clusterCountsLoading = false;
+		}
+	}
+
+	async function fetchClusterFeatureCounts(feature: string) {
+		const runId = $selectedBatchRun[PROJECT] || undefined;
+		const result = await batchApi.getClusterFeatureCounts(PROJECT, feature, runId);
+		if (result.data?.feature_counts) {
+			clusterFeatureCounts = result.data.feature_counts;
+		}
+	}
+
+	async function fetchAllClustersFeatureCounts() {
+		const runId = $selectedBatchRun[PROJECT] || undefined;
+		const result = await batchApi.getClusterFeatureCounts(PROJECT, selectedFeature, runId);
+		if (result.data?.feature_counts) {
+			allClustersFeatureCounts = result.data.feature_counts;
+		}
+	}
+
+	function handleFeatureChange(event: Event) {
+		selectedFeature = (event.currentTarget as HTMLSelectElement).value;
+		if (hasPrediction) {
+			fetchClusterFeatureCounts(selectedFeature);
+		}
+		fetchAllClustersFeatureCounts();
 	}
 
 	// Training functions
@@ -475,6 +579,10 @@
 			if (result.data.current_stage) {
 				updateProjectStore(batchTrainingStage, PROJECT, result.data.current_stage);
 			}
+			// Handle KMeans K-search log
+			if (result.data.kmeans_log && Object.keys(result.data.kmeans_log).length > 0) {
+				updateProjectStore(batchTrainingKMeansLog, PROJECT, result.data.kmeans_log);
+			}
 
 			if (result.data.status === 'completed') {
 				stopStatusPolling();
@@ -482,6 +590,7 @@
 				updateProjectStore(batchTrainingStatus, PROJECT, 'Training complete!');
 				updateProjectStore(batchTrainingProgress, PROJECT, 100);
 				updateProjectStore(batchTrainingStage, PROJECT, 'complete');
+				updateProjectStore(batchTrainingKMeansLog, PROJECT, {});
 				toast.success('Batch ML training complete');
 
 				await loadRunsAfterTraining();
@@ -492,11 +601,13 @@
 				updateProjectStore(batchTrainingLoading, PROJECT, false);
 				updateProjectStore(batchTrainingStatus, PROJECT, `Failed: ${errorMsg}`);
 				updateProjectStore(batchTrainingStage, PROJECT, 'error');
+				updateProjectStore(batchTrainingKMeansLog, PROJECT, {});
 				toast.error(errorMsg);
 			} else if (result.data.status !== 'running') {
 				stopStatusPolling();
 				updateProjectStore(batchTrainingLoading, PROJECT, false);
 				updateProjectStore(batchTrainingStatus, PROJECT, '');
+				updateProjectStore(batchTrainingKMeansLog, PROJECT, {});
 
 				await loadRuns();
 				await loadMetrics();
@@ -513,6 +624,28 @@
 		return String(timestamp);
 	}
 
+	function getMetricValue(
+		metrics: Record<string, number | string> | undefined,
+		metricKeys: string[]
+	): number | undefined {
+		if (!metrics) return undefined;
+		for (const key of metricKeys) {
+			const direct = metrics[key];
+			if (direct !== undefined && direct !== null) {
+				const value = Number(direct);
+				return Number.isNaN(value) ? undefined : value;
+			}
+		}
+		const normalizedKeys = metricKeys.map((key) => key.toLowerCase());
+		for (const [key, value] of Object.entries(metrics)) {
+			if (normalizedKeys.includes(key.toLowerCase())) {
+				const parsed = Number(value);
+				return Number.isNaN(parsed) ? undefined : parsed;
+			}
+		}
+		return undefined;
+	}
+
 	// Derived values
 	const currentForm = $derived($formData[PROJECT] || {});
 	const currentPrediction = $derived($batchPredictionResults[PROJECT] || {});
@@ -520,6 +653,32 @@
 	const runs = $derived($batchMlflowRuns[PROJECT] || []);
 	const selectedRunId = $derived($selectedBatchRun[PROJECT] || '');
 	const selectedRun = $derived(runs.find((r) => r.run_id === selectedRunId));
+	const rollingSilhouetteValue = $derived.by(() => {
+		const runMetric = getMetricValue(selectedRun?.metrics, [
+			'RollingSilhouette',
+			'rolling_silhouette',
+			'rollingSilhouette'
+		]);
+		const currentMetric = getMetricValue(currentMetrics as Record<string, number | string>, [
+			'rolling_silhouette',
+			'RollingSilhouette',
+			'rollingSilhouette'
+		]);
+		return runMetric ?? currentMetric ?? 0;
+	});
+	const timeRollingSilhouetteValue = $derived.by(() => {
+		const runMetric = getMetricValue(selectedRun?.metrics, [
+			'TimeRollingSilhouette',
+			'time_rolling_silhouette',
+			'timeRollingSilhouette'
+		]);
+		const currentMetric = getMetricValue(currentMetrics as Record<string, number | string>, [
+			'time_rolling_silhouette',
+			'TimeRollingSilhouette',
+			'timeRollingSilhouette'
+		]);
+		return runMetric ?? currentMetric ?? 0;
+	});
 	const currentVisualizer = $derived($selectedYellowBrickVisualizer[PROJECT] || '');
 	const currentImage = $derived($yellowBrickImages[PROJECT]?.[currentVisualizer] || '');
 	const isImageLoading = $derived($yellowBrickLoading[PROJECT]?.[currentVisualizer] || false);
@@ -528,6 +687,15 @@
 	const isLoading = $derived($batchPredictionLoading[PROJECT]);
 	const experimentUrl = $derived($batchMlflowExperimentUrl[PROJECT]);
 	const lastTrainedRunId = $derived($batchLastTrainedRunId[PROJECT]);
+
+	// MLflow URL: experiment page when no run selected, run page when run is selected
+	const mlflowUrl = $derived.by(() => {
+		if (!experimentUrl) return '';
+		if (!selectedRunId) return experimentUrl;
+		if (experimentUrl.includes(`/runs/${selectedRunId}`)) return experimentUrl;
+		const baseUrl = experimentUrl.replace(/\/runs\/[^/]+$/, '');
+		return `${baseUrl}/runs/${selectedRunId}`;
+	});
 
 	// Prediction display
 	const predictedCluster = $derived(
@@ -540,6 +708,16 @@
 	// Customer coordinates
 	const customerLat = $derived(Number(currentForm?.lat) || 29.8);
 	const customerLon = $derived(Number(currentForm?.lon) || -95.4);
+
+	// Cluster behavior chart data
+	const selectedClusterFeatureCounts = $derived(
+		clusterFeatureCounts[String(predictedCluster)] ?? {}
+	);
+	const topClusterFeatureEntries = $derived(
+		Object.entries(selectedClusterFeatureCounts)
+			.sort((a, b) => b[1] - a[1])
+			.slice(0, 10)
+	);
 
 	// Plotly data for cluster prediction indicator
 	const clusterPredictionData = $derived.by(() => [
@@ -558,6 +736,92 @@
 		margin: { l: 20, r: 20, t: 40, b: 20 },
 		paper_bgcolor: 'transparent',
 		plot_bgcolor: 'transparent'
+	};
+
+	// Cluster Behavior Vertical Bar Chart
+	const clusterBehaviorData = $derived.by(() => {
+		if (topClusterFeatureEntries.length === 0) return [];
+		const entries = topClusterFeatureEntries.slice(0, 8);
+		const labels = entries.map(([label]) => label.length > 10 ? label.slice(0, 10) + '…' : label);
+		const values = entries.map(([, count]) => count);
+		const fullLabels = entries.map(([label]) => label);
+		return [
+			{
+				type: 'bar',
+				x: labels,
+				y: values,
+				marker: { color: '#3b82f6' },
+				customdata: fullLabels,
+				hovertemplate: '%{customdata}: %{y}<extra></extra>'
+			}
+		];
+	});
+
+	const clusterBehaviorLayout = {
+		width: 240,
+		height: 190,
+		autosize: false,
+		margin: { l: 25, r: 5, t: 5, b: 55 },
+		paper_bgcolor: 'transparent',
+		plot_bgcolor: 'transparent',
+		xaxis: { tickangle: -45, tickfont: { size: 7 }, fixedrange: true },
+		yaxis: { tickfont: { size: 7 }, fixedrange: true },
+		bargap: 0.2
+	};
+
+	// Analytics: Cluster counts chart
+	const clusterCountsData = $derived.by(() => {
+		const clusters = Object.keys(clusterCounts).sort((a, b) => Number(a) - Number(b));
+		const counts = clusters.map((k) => clusterCounts[k]);
+		return [
+			{
+				type: 'bar',
+				x: clusters.map((c) => `Cluster ${c}`),
+				y: counts,
+				marker: { color: '#3b82f6' }
+			}
+		];
+	});
+
+	const clusterCountsLayout = {
+		height: 200,
+		margin: { l: 40, r: 20, t: 20, b: 40 },
+		paper_bgcolor: 'transparent',
+		plot_bgcolor: 'transparent',
+		xaxis: { title: '' },
+		yaxis: { title: 'Samples' }
+	};
+
+	// Analytics: Feature distribution chart
+	const featureDistributionData = $derived.by(() => {
+		const clusters = Object.keys(allClustersFeatureCounts).sort((a, b) => Number(a) - Number(b));
+		if (clusters.length === 0) return [];
+
+		const allFeatureValues = new Set<string>();
+		clusters.forEach((cluster) => {
+			Object.keys(allClustersFeatureCounts[cluster] || {}).forEach((v) => allFeatureValues.add(v));
+		});
+		const featureValues = Array.from(allFeatureValues).slice(0, 10);
+
+		return clusters.map((cluster, idx) => {
+			const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+			return {
+				type: 'bar',
+				name: `Cluster ${cluster}`,
+				x: featureValues,
+				y: featureValues.map((fv) => allClustersFeatureCounts[cluster]?.[fv] || 0),
+				marker: { color: colors[idx % colors.length] }
+			};
+		});
+	});
+
+	const featureDistributionLayout = {
+		height: 200,
+		margin: { l: 40, r: 20, t: 20, b: 60 },
+		paper_bgcolor: 'transparent',
+		plot_bgcolor: 'transparent',
+		barmode: 'group',
+		legend: { orientation: 'h', y: -0.3 }
 	};
 
 	const plotlyConfig = { displayModeBar: false, responsive: true };
@@ -659,37 +923,69 @@
 	});
 </script>
 
-<!-- 40%/60% Layout -->
-<div class="flex gap-4">
+<!-- 40%/60% Layout (matching TFD) -->
+<div class="flex gap-6">
 	<!-- Left Column - Training Box + Form (40%) -->
-	<div class="w-2/5 min-w-0 space-y-4">
-		<!-- Batch ML Training Card -->
+	<div class="w-[40%] space-y-4">
+		<!-- Batch ML Training Box (cloned from TFD) -->
 		<Card>
-			<CardContent class="space-y-3 pt-4">
-				<div class="flex items-center justify-between">
-					<div class="flex items-center gap-2">
-						<Brain class="h-5 w-5 text-primary" />
-						<h3 class="text-base font-bold">Batch ML Training</h3>
-					</div>
-					{#if experimentUrl}
+			<CardContent class="space-y-3 p-3">
+				<!-- MLflow Run Section Header with Model Name Badge -->
+				<div class="flex items-center gap-2">
+					<GitBranch class="h-4 w-4 text-blue-600" />
+					<span class="text-xs font-medium">MLflow Run</span>
+					<!-- Model Name Badge -->
+					<span class="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-900 dark:text-blue-300">
+						{MODEL_NAME}
+					</span>
+					{#if runsLoading}
+						<Loader2 class="h-3 w-3 animate-spin text-muted-foreground" />
+					{/if}
+					<div class="flex-1"></div>
+					<!-- MLflow Button -->
+					{#if mlflowUrl}
 						<a
-							href={experimentUrl}
+							href={mlflowUrl}
 							target="_blank"
 							rel="noopener noreferrer"
-							class="inline-flex items-center gap-1 text-xs text-purple-600 hover:underline"
+							class="inline-flex items-center gap-1 rounded-md bg-cyan-100 px-2 py-1 text-xs font-medium text-cyan-700 hover:bg-cyan-200 dark:bg-cyan-900 dark:text-cyan-300 dark:hover:bg-cyan-800"
+							title={selectedRunId ? `Open run ${selectedRunId.slice(0, 8)} in MLflow` : 'Open experiment in MLflow'}
 						>
-							<FlaskConical class="h-3 w-3" />
+							<img
+								src="https://cdn.simpleicons.org/mlflow/0194E2"
+								alt="MLflow"
+								class="h-3.5 w-3.5"
+							/>
 							MLflow
-							<ExternalLink class="h-3 w-3" />
 						</a>
+					{:else}
+						<span
+							class="inline-flex cursor-not-allowed items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-400 dark:bg-gray-800"
+						>
+							<img
+								src="https://cdn.simpleicons.org/mlflow/0194E2"
+								alt="MLflow"
+								class="h-3.5 w-3.5 opacity-50"
+							/>
+							MLflow
+						</span>
 					{/if}
+					<button
+						type="button"
+						class="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+						onclick={loadRuns}
+						disabled={runsLoading}
+						title="Refresh runs"
+					>
+						<RefreshCw class="h-3 w-3" />
+					</button>
 				</div>
+				<!-- Debug: runs count indicator -->
+				<span class="text-[9px] text-muted-foreground/50">({runs.length} runs)</span>
 
-				<!-- MLflow Run Selector -->
-				<div class="flex items-center gap-2">
-					<span class="text-xs text-muted-foreground">Run:</span>
+				{#if runs.length > 0}
 					<select
-						class="flex-1 rounded border border-input bg-background px-2 py-1 text-xs"
+						class="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-xs shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
 						value={selectedRunId}
 						onchange={(e) => onRunChange(e.currentTarget.value)}
 					>
@@ -698,29 +994,38 @@
 							<option value={run.run_id}>{run.is_best ? '★ ' : ''}{run.run_id}</option>
 						{/each}
 					</select>
-					<button
-						type="button"
-						class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-						onclick={loadRuns}
-						title="Refresh runs"
-					>
-						<RefreshCw class="h-3.5 w-3.5" />
-					</button>
-				</div>
+				{:else}
+					<p class="text-xs text-muted-foreground">No runs available. Train a model first.</p>
+				{/if}
 
-				<!-- Model info badge -->
-				<div class="flex items-center gap-2 rounded-md bg-blue-50 px-2 py-1 dark:bg-blue-950">
-					<span class="text-xs font-medium text-blue-700 dark:text-blue-300">{MODEL_NAME}</span>
-				</div>
+				<!-- Divider -->
+				<hr class="border-border" />
 
-				<!-- Training controls -->
-				<div class="flex items-center gap-2">
-					{#if !isTraining}
-						<Button class="flex-1" size="sm" onclick={startTraining}>
-							<Brain class="mr-2 h-4 w-4" />
-							Train Model
-						</Button>
-					{:else}
+				<!-- Batch ML Training Section -->
+				<div class="flex items-center justify-between">
+					<div class="flex items-center gap-2">
+						<div
+							class={cn(
+								'flex h-5 w-5 items-center justify-center rounded',
+								modelAvailable ? 'text-blue-600' : 'text-muted-foreground'
+							)}
+						>
+							<Database class="h-4 w-4" />
+						</div>
+						<div>
+							<span class="text-sm font-medium">Batch ML Training</span>
+							<p class="text-[10px] text-muted-foreground">
+								{#if isTraining}
+									Training in progress...
+								{:else if modelAvailable}
+									Model trained and ready
+								{:else}
+									Click Train to create model
+								{/if}
+							</p>
+						</div>
+					</div>
+					{#if isTraining}
 						<div class="flex items-center gap-2">
 							<Loader2 class="h-4 w-4 animate-spin text-blue-600" />
 							<button
@@ -732,9 +1037,19 @@
 								Stop
 							</button>
 						</div>
+					{:else}
+						<button
+							type="button"
+							class="inline-flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+							onclick={startTraining}
+						>
+							<Play class="h-3 w-3" />
+							Train
+						</button>
 					{/if}
 				</div>
 
+				<!-- Training Progress -->
 				{#if isTraining}
 					<div class="space-y-2">
 						<div class="h-1.5 w-full overflow-hidden rounded-full bg-muted">
@@ -746,6 +1061,8 @@
 						<div class="flex items-center gap-2 text-[10px] text-muted-foreground">
 							{#if $batchTrainingStage[PROJECT] === 'loading_data'}
 								<Database class="h-3 w-3 text-blue-600" />
+							{:else if $batchTrainingStage[PROJECT] === 'k_search'}
+								<Target class="h-3 w-3 text-amber-600" />
 							{:else if $batchTrainingStage[PROJECT] === 'training'}
 								<Brain class="h-3 w-3 text-purple-600" />
 							{:else if $batchTrainingStage[PROJECT] === 'evaluating'}
@@ -754,25 +1071,64 @@
 								<Loader2 class="h-3 w-3 animate-spin" />
 							{/if}
 							<span class="italic">{$batchTrainingStatus[PROJECT]}</span>
-							<span class="ml-auto font-medium text-blue-600"
-								>{$batchTrainingProgress[PROJECT]}%</span
-							>
+							<span class="ml-auto font-medium text-blue-600">{$batchTrainingProgress[PROJECT]}%</span>
 						</div>
+
+						<!-- KMeans K-Search Log (shown during k_search stage) -->
+						{#if $batchTrainingStage[PROJECT] === 'k_search' && Object.keys($batchTrainingKMeansLog[PROJECT] || {}).length > 0}
+							{@const log = $batchTrainingKMeansLog[PROJECT]}
+							<div class="rounded bg-muted/50 p-2 space-y-1">
+								<div class="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
+									<!-- Current K -->
+									<div class="flex items-center gap-1">
+										<span class="text-muted-foreground w-[55px]">K</span>
+										<span class="font-bold text-amber-600">{log.current_k || '-'}</span>
+										<span class="text-muted-foreground/70">({log.k_range || '2-10'})</span>
+									</div>
+									<!-- Progress -->
+									<div class="flex items-center gap-1">
+										<span class="text-muted-foreground w-[55px]">Progress</span>
+										<span class="font-medium text-blue-600">{log.progress || '-'}</span>
+									</div>
+									<!-- Silhouette -->
+									<div class="flex items-center gap-1">
+										<span class="text-muted-foreground w-[55px]">Silhouette</span>
+										<span class="font-medium text-green-600">{log.silhouette || '-'}</span>
+									</div>
+									<!-- Calinski-Harabasz -->
+									<div class="flex items-center gap-1">
+										<span class="text-muted-foreground w-[55px]">CH</span>
+										<span class="font-medium text-purple-600">{log.calinski_harabasz || '-'}</span>
+									</div>
+									<!-- Davies-Bouldin -->
+									<div class="flex items-center gap-1">
+										<span class="text-muted-foreground w-[55px]">DB</span>
+										<span class="font-medium text-cyan-600">{log.davies_bouldin || '-'}</span>
+									</div>
+									<!-- Best K So Far -->
+									<div class="flex items-center gap-1">
+										<span class="text-muted-foreground w-[55px]">Best K</span>
+										<span class="font-bold text-green-600">{log.best_k_so_far || '-'}</span>
+										<span class="text-muted-foreground/70">({log.best_silhouette_so_far || '-'})</span>
+									</div>
+								</div>
+							</div>
+						{/if}
 					</div>
 				{/if}
 
+				<!-- Last trained run ID display -->
 				{#if lastTrainedRunId}
 					<div class="flex items-center gap-1 pt-1">
 						<CheckCircle class="h-3 w-3 text-green-600" />
 						<span class="text-[10px] text-muted-foreground">Last trained:</span>
-						<code
-							class="rounded bg-green-100 px-1 py-0.5 text-[10px] text-green-700 dark:bg-green-900 dark:text-green-300"
-						>
+						<code class="rounded bg-green-100 px-1 py-0.5 text-[10px] text-green-700 dark:bg-green-900 dark:text-green-300">
 							{lastTrainedRunId}
 						</code>
 					</div>
 				{/if}
 
+				<!-- Training Data Options -->
 				{#if !isTraining}
 					<div class="flex items-center gap-2">
 						<Database class="h-3.5 w-3.5 text-muted-foreground" />
@@ -780,12 +1136,7 @@
 						<select
 							class="rounded border border-input bg-background px-2 py-1 text-xs"
 							value={$batchTrainingMode[PROJECT]}
-							onchange={(e) =>
-								updateProjectStore(
-									batchTrainingMode,
-									PROJECT,
-									e.currentTarget.value as 'percentage' | 'max_rows'
-								)}
+							onchange={(e) => updateProjectStore(batchTrainingMode, PROJECT, e.currentTarget.value as 'percentage' | 'max_rows')}
 						>
 							<option value="percentage">Percentage</option>
 							<option value="max_rows">Max Rows</option>
@@ -796,12 +1147,7 @@
 								min="1"
 								max="100"
 								value={$batchTrainingDataPercentage[PROJECT]}
-								oninput={(e) =>
-									updateProjectStore(
-										batchTrainingDataPercentage,
-										PROJECT,
-										parseInt(e.currentTarget.value) || 10
-									)}
+								oninput={(e) => updateProjectStore(batchTrainingDataPercentage, PROJECT, parseInt(e.currentTarget.value) || 10)}
 								class="w-14 rounded border border-input bg-background px-2 py-1 text-xs"
 							/>
 							<span class="text-xs text-muted-foreground">%</span>
@@ -811,12 +1157,7 @@
 								min="1000"
 								max={$batchDeltaLakeTotalRows[PROJECT] || 10000000}
 								value={$batchTrainingMaxRows[PROJECT]}
-								oninput={(e) =>
-									updateProjectStore(
-										batchTrainingMaxRows,
-										PROJECT,
-										parseInt(e.currentTarget.value) || 10000
-									)}
+								oninput={(e) => updateProjectStore(batchTrainingMaxRows, PROJECT, parseInt(e.currentTarget.value) || 10000)}
 								class="w-20 rounded border border-input bg-background px-2 py-1 text-xs"
 							/>
 							<span class="text-xs text-muted-foreground">rows</span>
@@ -826,21 +1167,18 @@
 			</CardContent>
 		</Card>
 
-		<!-- Customer Interaction Form -->
+		<!-- Form Card (cloned from Incremental ML) -->
 		<Card>
 			<CardContent class="space-y-3 pt-4">
+				<!-- Form Legend -->
 				<div class="flex items-center gap-2">
 					<ShoppingCart class="h-5 w-5 text-primary" />
 					<h3 class="text-base font-bold">Customer Interaction</h3>
 				</div>
 
+				<!-- Predict + Randomize Buttons -->
 				<div class="flex gap-2">
-					<Button
-						class="flex-1"
-						onclick={predict}
-						loading={isLoading}
-						disabled={!modelAvailable || !selectedRunId}
-					>
+					<Button class="flex-1" onclick={predict} loading={isLoading} disabled={!modelAvailable || !selectedRunId}>
 						Predict
 					</Button>
 					<Button
@@ -909,14 +1247,20 @@
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Price</p>
+						<p class="text-xs text-muted-foreground">Price ({FIELD_CONFIG.price.min}-{FIELD_CONFIG.price.max})</p>
 						<Input
 							type="number"
 							value={currentForm.price ?? ''}
-							min="0"
-							step="0.01"
+							min={FIELD_CONFIG.price.min}
+							max={FIELD_CONFIG.price.max}
+							step={FIELD_CONFIG.price.step}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'price', parseFloat(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseFloat(e.currentTarget.value) || FIELD_CONFIG.price.min;
+								const clamped = clampFieldValue('price', val);
+								updateFormField(PROJECT, 'price', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 
@@ -941,38 +1285,55 @@
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Product ID</p>
+						<p class="text-xs text-muted-foreground">Product ID ({FIELD_CONFIG.product_id.min}-{FIELD_CONFIG.product_id.max})</p>
 						<Input
-							value={(currentForm.product_id as string) ?? ''}
-							placeholder="prod_1050"
+							type="number"
+							value={(currentForm.product_id as number) ?? FIELD_CONFIG.product_id.min}
+							min={FIELD_CONFIG.product_id.min}
+							max={FIELD_CONFIG.product_id.max}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'product_id', e.currentTarget.value)}
+							oninput={(e) => {
+								const val = parseInt(e.currentTarget.value) || FIELD_CONFIG.product_id.min;
+								const clamped = clampFieldValue('product_id', val);
+								updateFormField(PROJECT, 'product_id', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Latitude</p>
+						<p class="text-xs text-muted-foreground">Latitude ({FIELD_CONFIG.lat.min}-{FIELD_CONFIG.lat.max})</p>
 						<Input
 							type="number"
 							value={currentForm.lat ?? ''}
-							min="29.5"
-							max="30.1"
-							step="0.001"
+							min={FIELD_CONFIG.lat.min}
+							max={FIELD_CONFIG.lat.max}
+							step={FIELD_CONFIG.lat.step}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'lat', parseFloat(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseFloat(e.currentTarget.value) || FIELD_CONFIG.lat.min;
+								const clamped = clampFieldValue('lat', val);
+								updateFormField(PROJECT, 'lat', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Longitude</p>
+						<p class="text-xs text-muted-foreground">Longitude ({FIELD_CONFIG.lon.min}-{FIELD_CONFIG.lon.max})</p>
 						<Input
 							type="number"
 							value={currentForm.lon ?? ''}
-							min="-95.8"
-							max="-95.0"
-							step="0.001"
+							min={FIELD_CONFIG.lon.min}
+							max={FIELD_CONFIG.lon.max}
+							step={FIELD_CONFIG.lon.step}
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'lon', parseFloat(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseFloat(e.currentTarget.value) || FIELD_CONFIG.lon.min;
+								const clamped = clampFieldValue('lon', val);
+								updateFormField(PROJECT, 'lon', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 
@@ -990,40 +1351,56 @@
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Quantity</p>
+						<p class="text-xs text-muted-foreground">Quantity ({FIELD_CONFIG.quantity.min}-{FIELD_CONFIG.quantity.max})</p>
 						<Input
 							type="number"
 							value={currentForm.quantity ?? ''}
-							min="1"
+							min={FIELD_CONFIG.quantity.min}
+							max={FIELD_CONFIG.quantity.max}
 							step="1"
 							class="h-8 text-sm"
-							oninput={(e) => updateFormField(PROJECT, 'quantity', parseInt(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseInt(e.currentTarget.value) || FIELD_CONFIG.quantity.min;
+								const clamped = clampFieldValue('quantity', val);
+								updateFormField(PROJECT, 'quantity', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Time (s)</p>
+						<p class="text-xs text-muted-foreground">Time (s) ({FIELD_CONFIG.time_on_page_seconds.min}-{FIELD_CONFIG.time_on_page_seconds.max})</p>
 						<Input
 							type="number"
 							value={currentForm.time_on_page_seconds ?? ''}
-							min="0"
+							min={FIELD_CONFIG.time_on_page_seconds.min}
+							max={FIELD_CONFIG.time_on_page_seconds.max}
 							step="1"
 							class="h-8 text-sm"
-							oninput={(e) =>
-								updateFormField(PROJECT, 'time_on_page_seconds', parseInt(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseInt(e.currentTarget.value) || FIELD_CONFIG.time_on_page_seconds.min;
+								const clamped = clampFieldValue('time_on_page_seconds', val);
+								updateFormField(PROJECT, 'time_on_page_seconds', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 
 					<div class="space-y-1">
-						<p class="text-xs text-muted-foreground">Sequence</p>
+						<p class="text-xs text-muted-foreground">Sequence ({FIELD_CONFIG.session_event_sequence.min}-{FIELD_CONFIG.session_event_sequence.max})</p>
 						<Input
 							type="number"
 							value={currentForm.session_event_sequence ?? ''}
-							min="1"
+							min={FIELD_CONFIG.session_event_sequence.min}
+							max={FIELD_CONFIG.session_event_sequence.max}
 							step="1"
 							class="h-8 text-sm"
-							oninput={(e) =>
-								updateFormField(PROJECT, 'session_event_sequence', parseInt(e.currentTarget.value))}
+							oninput={(e) => {
+								const val = parseInt(e.currentTarget.value) || FIELD_CONFIG.session_event_sequence.min;
+								const clamped = clampFieldValue('session_event_sequence', val);
+								updateFormField(PROJECT, 'session_event_sequence', clamped);
+								e.currentTarget.value = String(clamped);
+							}}
 						/>
 					</div>
 
@@ -1038,6 +1415,7 @@
 					</div>
 				</div>
 
+				<!-- Display fields -->
 				<div class="space-y-1 text-xs text-muted-foreground">
 					<p>Customer ID: {currentForm.customer_id || '-'}</p>
 					<p>Event ID: {currentForm.event_id || '-'}</p>
@@ -1048,7 +1426,7 @@
 	</div>
 
 	<!-- Right Column - Tabs (60%) -->
-	<div class="w-3/5 min-w-0">
+	<div class="w-[60%]">
 		<Tabs value={activeTab} onValueChange={onOuterTabChange}>
 			<TabsList class="w-full">
 				<TabsTrigger value="prediction" class="flex-1">
@@ -1059,9 +1437,13 @@
 					<BarChart3 class="mr-2 h-4 w-4" />
 					Metrics
 				</TabsTrigger>
+				<TabsTrigger value="analytics" class="flex-1">
+					<Layers class="mr-2 h-4 w-4" />
+					Analytics
+				</TabsTrigger>
 			</TabsList>
 
-			<!-- MLflow Badge -->
+			<!-- MLflow Run Info Badge (matching TFD style) -->
 			<div class="mt-3 flex flex-wrap items-center gap-2">
 				<span
 					class="inline-flex items-center gap-1 rounded-md bg-purple-500/10 px-2 py-1 text-xs font-medium text-purple-600"
@@ -1075,6 +1457,13 @@
 					{MODEL_NAME}
 				</span>
 				{#if selectedRunId}
+					{#if selectedRun?.is_best}
+						<span
+							class="inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-600"
+						>
+							Best Run
+						</span>
+					{/if}
 					<span class="text-xs text-muted-foreground">
 						Run:
 						<code class="rounded bg-muted px-1" title={selectedRunId}>
@@ -1093,7 +1482,7 @@
 				{/if}
 			</div>
 
-			<!-- Prediction Tab -->
+			<!-- Prediction Tab (cloned from Incremental ML) -->
 			<TabsContent value="prediction" class="mt-4">
 				<div class="space-y-4">
 					<!-- Customer Location Map -->
@@ -1113,37 +1502,90 @@
 						</CardContent>
 					</Card>
 
-					<!-- Predicted Cluster -->
-					<Card>
-						<CardContent class="p-4">
-							<div class="mb-2 flex items-center gap-2">
-								<Target class="h-4 w-4 text-primary" />
-								<span class="text-sm font-bold">Predicted Cluster</span>
-							</div>
-							{#if hasPrediction}
-								<Plotly
-									data={clusterPredictionData}
-									layout={clusterPredictionLayout}
-									config={plotlyConfig}
-								/>
-							{:else}
-								<div
-									class="flex h-[200px] items-center justify-center rounded-lg border border-blue-200 bg-blue-50 p-4 text-center text-sm text-blue-600 dark:border-blue-800 dark:bg-blue-900/20"
-								>
-									Click <strong>Predict</strong> to identify the customer segment.
+					<!-- Prediction boxes -->
+					<div class="flex gap-3">
+						<!-- Left: Cluster prediction -->
+						<Card class="h-[320px] w-1/2">
+							<CardContent class="h-full p-4">
+								<div class="flex h-full flex-col">
+									<div class="mb-2 flex items-center gap-2">
+										<Target class="h-4 w-4 text-primary" />
+										<span class="text-sm font-bold">Predicted Cluster</span>
+									</div>
+									<div class="flex flex-1 items-center justify-center">
+										{#if hasPrediction}
+											<Plotly
+												data={clusterPredictionData}
+												layout={clusterPredictionLayout}
+												config={plotlyConfig}
+											/>
+										{:else if modelAvailable}
+											<div
+												class="rounded-lg border border-blue-200 bg-blue-50 p-4 text-center text-sm text-blue-600 dark:border-blue-800 dark:bg-blue-900/20"
+											>
+												Click <strong>Predict</strong> to identify the customer segment.
+											</div>
+										{:else}
+											<div
+												class="rounded-lg border border-orange-200 bg-orange-50 p-4 text-center text-sm text-orange-600 dark:border-orange-800 dark:bg-orange-900/20"
+											>
+												No trained model available. Click <strong>Train</strong> to train the batch model first.
+											</div>
+										{/if}
+									</div>
 								</div>
-							{/if}
-						</CardContent>
-					</Card>
+							</CardContent>
+						</Card>
 
+						<!-- Right: Cluster Behavior -->
+						<Card class="h-[320px] w-1/2">
+							<CardContent class="h-full p-4">
+								<div class="flex h-full flex-col">
+									<div class="mb-2 flex items-center gap-2">
+										<BarChart3 class="h-4 w-4 text-primary" />
+										<span class="text-sm font-bold">Cluster Behavior</span>
+									</div>
+									{#if hasPrediction}
+										<div class="flex flex-1 flex-col space-y-2">
+											<Select
+												value={selectedFeature}
+												options={ECCI_FEATURE_OPTIONS}
+												class="h-8 text-sm"
+												onchange={handleFeatureChange}
+											/>
+											{#if clusterBehaviorData.length > 0}
+												<div class="flex flex-1 items-center justify-center">
+													<Plotly
+														data={clusterBehaviorData}
+														layout={clusterBehaviorLayout}
+														config={plotlyConfig}
+													/>
+												</div>
+											{:else}
+												<p class="text-xs text-muted-foreground">No feature data available.</p>
+											{/if}
+										</div>
+									{:else}
+										<div
+											class="flex flex-1 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 p-4 text-center text-sm text-blue-600 dark:border-blue-800 dark:bg-blue-900/20"
+										>
+											Cluster behavior shown after prediction.
+										</div>
+									{/if}
+								</div>
+							</CardContent>
+						</Card>
+					</div>
+
+					<!-- Cluster interpretation -->
 					{#if hasPrediction}
 						<Card>
 							<CardContent class="p-4">
 								<div class="flex items-start gap-2 text-sm">
 									<span class="text-blue-500">ⓘ</span>
 									<p>
-										This customer interaction was assigned to <strong>Cluster {predictedCluster}</strong
-										>. Clusters represent groups of similar customer behaviors based on their browsing
+										This customer interaction was assigned to <strong>Cluster {predictedCluster}</strong>.
+										Clusters represent groups of similar customer behaviors based on their browsing
 										patterns, device usage, and purchase activities.
 									</p>
 								</div>
@@ -1157,15 +1599,13 @@
 			<TabsContent value="metrics" class="mt-4">
 				<div class="space-y-4">
 					<div class="flex items-center justify-between">
-						<div class="flex items-center gap-2">
-							<LayoutDashboard class="h-4 w-4 text-primary" />
-							<h3 class="text-sm font-bold">Clustering Metrics</h3>
-						</div>
+						<h2 class="text-lg font-bold">Clustering Metrics</h2>
 						<Button variant="ghost" size="sm" onclick={loadMetrics} loading={metricsLoading}>
 							<RefreshCw class="h-4 w-4" />
 						</Button>
 					</div>
 
+					<!-- Metrics Sub-tabs -->
 					<Tabs value={activeMetricsTab} onValueChange={onMetricsTabChange} class="w-full">
 						<TabsList class="grid w-full grid-cols-6">
 							<TabsTrigger value="overview" class="px-1 text-[11px]">
@@ -1194,27 +1634,22 @@
 							</TabsTrigger>
 						</TabsList>
 
-						<!-- Overview Tab -->
+						<!-- Overview Tab (sklearn clustering metrics) -->
 						<TabsContent value="overview" class="pt-4">
 							<div class="space-y-4">
 								{#if Object.keys(currentMetrics).length > 0}
+									<!-- TRAINING DATA INFO -->
 									{#if currentMetrics.n_samples > 0}
-										<div
-											class="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950"
-										>
+										<div class="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950">
 											<Database class="h-4 w-4 text-blue-600" />
-											<span class="text-sm font-medium text-blue-700 dark:text-blue-300"
-												>Training Data:</span
-											>
-											<span
-												class="rounded bg-blue-600 px-2 py-0.5 text-sm font-bold text-white"
-											>
+											<span class="text-sm font-medium text-blue-700 dark:text-blue-300">Training Data:</span>
+											<span class="rounded bg-blue-600 px-2 py-0.5 text-sm font-bold text-white">
 												{(currentMetrics.n_samples as number)?.toLocaleString()} rows
 											</span>
 										</div>
 									{/if}
 
-									<!-- Primary Clustering Metrics -->
+									<!-- PRIMARY CLUSTERING METRICS -->
 									<div class="flex items-center gap-2">
 										<Target class="h-4 w-4 text-blue-600" />
 										<span class="text-sm font-bold">Primary Metrics</span>
@@ -1246,31 +1681,85 @@
 
 									<hr class="border-border" />
 
-									<!-- Secondary Metrics -->
+									<!-- SECONDARY METRICS -->
 									<div class="flex items-center gap-2">
 										<BarChart3 class="h-4 w-4 text-indigo-600" />
 										<span class="text-sm font-bold">Secondary Metrics</span>
 									</div>
-									<div class="grid grid-cols-2 gap-2">
+									<div class="grid grid-cols-3 gap-2">
 										<MetricCard
 											name="Inertia (WCSS)"
 											value={currentMetrics.inertia as number}
 											decimals={0}
 											onInfoClick={() => openMetricInfo('inertia')}
 										/>
-										<MetricCard
-											name="Preprocessing Time"
-											value={currentMetrics.preprocessing_time_seconds as number}
-											decimals={2}
-										/>
+									<MetricCard
+										name="Rolling Silhouette"
+										value={rollingSilhouetteValue}
+										onInfoClick={() => openMetricInfo('rolling_silhouette')}
+									/>
+									<MetricCard
+										name="Time Rolling Silhouette"
+										value={timeRollingSilhouetteValue}
+										onInfoClick={() => openMetricInfo('time_rolling_silhouette')}
+									/>
+									</div>
+
+									<hr class="border-border" />
+
+									<!-- CLUSTER STATS -->
+									<div class="grid grid-cols-2 gap-4">
+										<Card>
+											<CardContent class="p-4">
+												<div class="flex items-center justify-between">
+													<span class="text-sm font-medium">Silhouette Score</span>
+													<button
+														class="text-muted-foreground hover:text-foreground"
+														onclick={() => openMetricInfo('silhouette_score')}
+													>
+														<span class="text-xs">ⓘ</span>
+													</button>
+												</div>
+												<div class="mt-2 flex items-center gap-2">
+													<div class="h-2 flex-1 rounded-full bg-muted">
+														<div
+															class="h-2 rounded-full bg-primary transition-all"
+															style="width: {((currentMetrics.silhouette_score || 0) + 1) * 50}%"
+														></div>
+													</div>
+													<span class="text-sm font-bold">{(currentMetrics.silhouette_score || 0).toFixed(4)}</span>
+												</div>
+											</CardContent>
+										</Card>
+										<Card>
+											<CardContent class="p-4">
+												<div class="flex items-center justify-between">
+													<span class="text-sm font-medium">Cluster Statistics</span>
+													<button
+														class="text-muted-foreground hover:text-foreground"
+														onclick={() => openMetricInfo('n_clusters')}
+													>
+														<span class="text-xs">ⓘ</span>
+													</button>
+												</div>
+												<div class="mt-2 flex justify-around text-center">
+													<div>
+														<p class="text-2xl font-bold">{currentMetrics.n_clusters || 0}</p>
+														<p class="text-xs text-muted-foreground">Clusters</p>
+													</div>
+													<div>
+														<p class="text-2xl font-bold">{Math.round(currentMetrics.inertia || 0).toLocaleString()}</p>
+														<p class="text-xs text-muted-foreground">Inertia</p>
+													</div>
+												</div>
+											</CardContent>
+										</Card>
 									</div>
 								{:else}
 									<div class="flex flex-col items-center justify-center py-12 text-center">
 										<LayoutDashboard class="h-12 w-12 text-muted-foreground/50" />
 										<p class="mt-4 text-sm text-muted-foreground">
-											{runs.length === 0
-												? 'Train a model first to see metrics'
-												: 'Loading metrics...'}
+											{runs.length === 0 ? 'Train a model first to see metrics' : 'Loading metrics...'}
 										</p>
 									</div>
 								{/if}
@@ -1449,9 +1938,197 @@
 					</Tabs>
 				</div>
 			</TabsContent>
+
+			<!-- Analytics Tab (cloned from Incremental ML) -->
+			<TabsContent value="analytics" class="mt-4 space-y-4">
+				<!-- Samples per Cluster -->
+				<Card>
+					<CardContent class="p-4">
+						<div class="mb-4 flex items-center justify-between">
+							<div class="flex items-center gap-2">
+								<PieChart class="h-4 w-4 text-primary" />
+								<span class="text-sm font-bold">Samples per Cluster</span>
+							</div>
+							<Button
+								variant="outline"
+								size="sm"
+								onclick={fetchClusterCounts}
+								loading={clusterCountsLoading}
+							>
+								<RefreshCw class="mr-2 h-3 w-3" />
+								Refresh
+							</Button>
+						</div>
+						{#if Object.keys(clusterCounts).length > 0}
+							<Plotly
+								data={clusterCountsData}
+								layout={clusterCountsLayout}
+								config={plotlyConfig}
+							/>
+						{:else}
+							<div
+								class="flex h-[200px] items-center justify-center rounded-md bg-muted/30 p-4"
+							>
+								<p class="text-sm text-muted-foreground">
+									Click Refresh to load cluster distribution
+								</p>
+							</div>
+						{/if}
+					</CardContent>
+				</Card>
+
+				<!-- Feature Distribution -->
+				<Card>
+					<CardContent class="p-4">
+						<div class="mb-4 flex items-center justify-between">
+							<div class="flex items-center gap-2">
+								<BarChart3 class="h-4 w-4 text-primary" />
+								<span class="text-sm font-bold">Feature Distribution</span>
+							</div>
+							<Select
+								value={selectedFeature}
+								options={ECCI_FEATURE_OPTIONS}
+								class="w-[200px]"
+								onchange={(e) => {
+									selectedFeature = e.currentTarget.value;
+									fetchAllClustersFeatureCounts();
+								}}
+							/>
+						</div>
+						{#if featureDistributionData.length > 0}
+							<Plotly
+								data={featureDistributionData}
+								layout={featureDistributionLayout}
+								config={plotlyConfig}
+							/>
+						{:else}
+							<div
+								class="flex h-[200px] items-center justify-center rounded-md bg-muted/30 p-4"
+							>
+								<p class="text-sm text-muted-foreground">
+									Select a feature to view distribution across clusters
+								</p>
+							</div>
+						{/if}
+					</CardContent>
+				</Card>
+
+				<!-- Info callout -->
+				<Card>
+					<CardContent class="p-4">
+						<div class="flex items-start gap-2 text-sm">
+							<span class="text-blue-500">ⓘ</span>
+						<p>
+							Analytics uses Scikit-Learn training data from the selected MLflow run
+							(<code class="rounded bg-muted px-1">training_data/X_events.parquet</code>),
+							so it reflects the batch model’s dataset rather than incremental streams.
+						</p>
+					</div>
+				</CardContent>
+			</Card>
+			</TabsContent>
 		</Tabs>
 	</div>
 </div>
+
+<!-- YellowBrick Info Dialog -->
+{#if yellowBrickInfoOpen}
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+		onclick={() => (yellowBrickInfoOpen = false)}
+	>
+		<div
+			class="mx-4 max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-lg bg-card p-6 shadow-xl"
+			onclick={(e) => e.stopPropagation()}
+		>
+			<div class="mb-4 flex items-center justify-between">
+				<div class="flex items-center gap-2">
+					<BarChart3 class="h-5 w-5 text-primary" />
+					<h2 class="text-lg font-bold">{yellowBrickInfoContent.name}</h2>
+				</div>
+				<button
+					type="button"
+					class="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+					onclick={() => (yellowBrickInfoOpen = false)}
+				>
+					<span class="text-xl">&times;</span>
+				</button>
+			</div>
+
+			<hr class="mb-4 border-border" />
+
+			<div class="space-y-4">
+				<span
+					class="inline-block rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-medium text-purple-700 dark:bg-purple-900 dark:text-purple-300"
+				>
+					{yellowBrickInfoContent.category}
+				</span>
+
+				<div class="rounded-lg bg-muted/50 p-3">
+					<div class="mb-1 flex items-center gap-1.5">
+						<span class="text-sm">👁️</span>
+						<span class="text-sm font-semibold">What it shows</span>
+					</div>
+					<p class="text-sm text-muted-foreground">{yellowBrickInfoContent.description}</p>
+				</div>
+
+				<div>
+					<div class="mb-1 flex items-center gap-1.5">
+						<span class="text-sm">🔍</span>
+						<span class="text-sm font-semibold">How to read it</span>
+					</div>
+					<p class="text-sm text-muted-foreground">{@html yellowBrickInfoContent.interpretation}</p>
+				</div>
+
+				{#if yellowBrickInfoContent.context}
+					<div class="rounded-lg bg-blue-50 p-3 dark:bg-blue-950">
+						<div class="mb-1 flex items-center gap-1.5">
+							<Info class="h-4 w-4 text-blue-600" />
+							<span class="text-sm font-semibold text-blue-700 dark:text-blue-300"
+								>In ECCI Batch ML</span
+							>
+						</div>
+						<p class="text-sm text-blue-600 dark:text-blue-400">
+							{@html yellowBrickInfoContent.context}
+						</p>
+					</div>
+				{/if}
+
+				{#if yellowBrickInfoContent.whenToUse}
+					<div>
+						<div class="mb-1 flex items-center gap-1.5">
+							<span class="text-sm">💡</span>
+							<span class="text-sm font-semibold">When to use</span>
+						</div>
+						<p class="text-sm text-muted-foreground">{yellowBrickInfoContent.whenToUse}</p>
+					</div>
+				{/if}
+
+				{#if yellowBrickInfoContent.parameters}
+					<div>
+						<div class="mb-1 flex items-center gap-1.5">
+							<span class="text-sm">⚙️</span>
+							<span class="text-sm font-semibold">Parameters</span>
+						</div>
+						<p class="text-sm text-muted-foreground">{yellowBrickInfoContent.parameters}</p>
+					</div>
+				{/if}
+
+				{#if yellowBrickInfoContent.docsUrl}
+					<a
+						href={yellowBrickInfoContent.docsUrl}
+						target="_blank"
+						rel="noopener noreferrer"
+						class="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:underline"
+					>
+						<ExternalLink class="h-3.5 w-3.5" />
+						Official Documentation
+					</a>
+				{/if}
+			</div>
+		</div>
+	</div>
+{/if}
 
 {#snippet visualizationDisplay()}
 	<div
@@ -1478,6 +2155,10 @@
 				alt={currentVisualizer}
 				class="max-h-[500px] max-w-full"
 			/>
+		{:else if yellowBrickError}
+			<div class="rounded-md border border-blue-200 bg-blue-50 p-4 text-center text-sm text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300">
+				{yellowBrickError}
+			</div>
 		{:else}
 			<p class="text-sm text-muted-foreground">Select a visualizer</p>
 		{/if}

@@ -30,6 +30,7 @@
 		ChevronRight
 	} from 'lucide-svelte';
 	import type { ProjectName } from '$types';
+	import { onMount } from 'svelte';
 
 	const PROJECT: ProjectName = 'E-Commerce Customer Interactions';
 	const PAGE_SIZE = 50;
@@ -39,6 +40,28 @@
 	let sortDirection = $state<'asc' | 'desc'>('asc');
 	let abortController: AbortController | null = $state(null);
 	let currentPage = $state(1);
+
+	// Cleanup: Stop query on page refresh, tab change, or navigation
+	function handleBeforeUnload() {
+		if (abortController) {
+			abortController.abort();
+		}
+	}
+
+	onMount(() => {
+		// Add beforeunload listener for page refresh
+		window.addEventListener('beforeunload', handleBeforeUnload);
+
+		// Cleanup function runs on component destroy (tab change, navigation)
+		return () => {
+			window.removeEventListener('beforeunload', handleBeforeUnload);
+			if (abortController) {
+				abortController.abort();
+				abortController = null;
+				setSqlLoading(PROJECT, false);
+			}
+		};
+	});
 
 	async function executeQuery() {
 		const query = $sqlQueryInput[PROJECT];
@@ -163,13 +186,13 @@
 	const hasResults = $derived(currentResults.columns.length > 0);
 </script>
 
-<!-- 35%/65% Layout -->
-<div class="flex gap-6">
+<!-- 35%/65% Layout with matched heights -->
+<div class="flex gap-6" style="height: calc(100vh - 180px);">
 	<!-- Left Column - SQL Editor, Templates -->
-	<div class="w-[35%] space-y-3">
+	<div class="flex w-[35%] flex-col gap-3">
 		<!-- SQL Editor Card -->
-		<Card>
-			<CardContent class="space-y-3 pt-4">
+		<Card class="flex-1">
+			<CardContent class="flex h-full flex-col space-y-3 pt-4">
 				<div class="flex items-center justify-between">
 					<div class="flex items-center gap-2">
 						<Terminal class="h-4 w-4 text-primary" />
@@ -186,7 +209,7 @@
 				<textarea
 					value={currentQuery}
 					oninput={(e) => updateSqlQuery(PROJECT, e.currentTarget.value)}
-					class="min-h-[180px] w-full rounded-md border border-input bg-muted/30 p-3 font-mono text-xs text-foreground placeholder-muted-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+					class="min-h-[180px] flex-1 w-full rounded-md border border-input bg-muted/30 p-3 font-mono text-xs text-foreground placeholder-muted-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring resize-none"
 					placeholder="SELECT * FROM data LIMIT 100"
 					onkeydown={(e) => {
 						if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
@@ -233,9 +256,9 @@
 	</div>
 
 	<!-- Right Column - Query Results (65%) -->
-	<div class="w-[65%]">
-		<Card class="h-full">
-			<CardContent class="flex h-full flex-col space-y-3 pt-4">
+	<div class="w-[65%] flex flex-col">
+		<Card class="flex-1 flex flex-col min-h-0">
+			<CardContent class="flex flex-1 flex-col space-y-3 pt-4 min-h-0">
 				<!-- Header -->
 				<div class="flex items-center justify-between">
 					<div class="flex items-center gap-2">
@@ -288,8 +311,8 @@
 					</div>
 				{:else if hasResults}
 					<!-- Results Table with horizontal and vertical scroll -->
-					<div class="flex-1 overflow-auto rounded-md border border-border">
-						<table class="w-full text-sm">
+					<div class="flex-1 min-h-0 overflow-auto rounded-md border border-border">
+						<table class="w-full text-sm min-w-max">
 							<thead class="sticky top-0 z-10 bg-muted">
 								<tr>
 									{#each currentResults.columns as col}
