@@ -7,6 +7,7 @@ dependencies = [
     "kafka-python>=2.0.2",
     "Faker",
     "click",
+    "orjson",
 ]
 
 [build-system]

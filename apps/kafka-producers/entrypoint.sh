@@ -33,11 +33,6 @@ PYTHONUNBUFFERED=1 python3 estimated_time_of_arrival.py \
 PYTHONUNBUFFERED=1 python3 e_commerce_customer_interactions.py \
   --event-rate-per-minute 600 2>&1 &
 
-#PYTHONUNBUFFERED=1 python3 sales_forecasting.py \
-#  --time-scale-factor 3600 \
-#  --max-events 0 \
-#  --initial-delay-s 0.1 2>&1 &
-
 echo "All producers started."
 
 wait

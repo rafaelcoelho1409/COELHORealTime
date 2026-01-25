@@ -20,7 +20,7 @@ from kafka import (
     TopicPartition
 )
 from kafka.errors import NoBrokersAvailable
-import json
+import orjson
 import datetime as dt
 import pandas as pd
 import deltalake
@@ -197,13 +197,13 @@ def save_live_model_to_redis(
         encoder_bytes = pickle.dumps(encoders)
         client.setex(encoder_key, ttl_seconds, encoder_bytes)
         # Update training status with timestamp
-        status_data = json.dumps({
+        status_data = orjson.dumps({
             "active": True,
             "last_update": dt.datetime.now().isoformat(),
             "project_name": project_name,
             "model_name": model_name,
         })
-        client.setex(status_key, ttl_seconds, status_data.encode())
+        client.setex(status_key, ttl_seconds, status_data)
         return True
     except Exception as e:
         print(f"Error saving live model to Redis: {e}")
@@ -263,7 +263,7 @@ def is_training_active(project_name: str, model_name: str) -> bool:
         status_bytes = client.get(status_key)
         if status_bytes is None:
             return False
-        status = json.loads(status_bytes.decode())
+        status = orjson.loads(status_bytes)
         return status.get("active", False)
     except Exception as e:
         print(f"Error checking training status: {e}")
@@ -523,8 +523,8 @@ def load_kafka_offset_from_mlflow(project_name: str) -> Optional[int]:
                     run_id = best_run_id,
                     artifact_path = KAFKA_OFFSET_ARTIFACT
                 )
-                with open(local_path, 'r') as f:
-                    offset_data = json.load(f)
+                with open(local_path, 'rb') as f:
+                    offset_data = orjson.loads(f.read())
                 offset = offset_data.get("last_offset")
                 if offset is not None:
                     print(f"Kafka offset loaded from best run: {project_name} offset={offset} (run_id={best_run_id})")
@@ -555,8 +555,8 @@ def load_kafka_offset_from_mlflow(project_name: str) -> Optional[int]:
                     run_id = run_id,
                     artifact_path = KAFKA_OFFSET_ARTIFACT
                 )
-                with open(local_path, 'r') as f:
-                    offset_data = json.load(f)
+                with open(local_path, 'rb') as f:
+                    offset_data = orjson.loads(f.read())
                 offset = offset_data.get("last_offset")
                 if offset is not None and (highest_offset is None or offset > highest_offset):
                     highest_offset = offset
@@ -1664,7 +1664,7 @@ def create_consumer(project_name, max_retries: int = 5, retry_delay: float = 5.0
             # Create consumer without topic subscription (manual assignment)
             consumer = KafkaConsumer(
                 bootstrap_servers = KAFKA_BROKERS,
-                value_deserializer = lambda v: json.loads(v.decode('utf-8')),
+                value_deserializer = lambda v: orjson.loads(v),
                 consumer_timeout_ms = 1000,  # 1 second timeout for graceful shutdown checks
                 api_version = (3, 7),  # Force API version for Kafka 4.0 compatibility
             )

@@ -681,7 +681,7 @@ async def get_cluster_counts():
 
     Results are cached for 1 minute to avoid repeated MLflow artifact downloads.
     """
-    import json as json_lib
+    import orjson
 
     try:
         project_name = "E-Commerce Customer Interactions"
@@ -703,8 +703,8 @@ async def get_cluster_counts():
             run_id=run_id,
             artifact_path="cluster_counts.json",
         )
-        with open(local_path, "r") as f:
-            cluster_counts = json_lib.load(f)
+        with open(local_path, "rb") as f:
+            cluster_counts = orjson.loads(f.read())
 
         # Update cache
         _cluster_cache[cache_key] = (time.time(), run_id, cluster_counts)
@@ -724,7 +724,7 @@ async def get_cluster_feature_counts(payload: dict):
     Payload:
         column_name: str - The feature column to get counts for
     """
-    import json as json_lib
+    import orjson
 
     column_name = payload.get("column_name")
     if not column_name:
@@ -751,8 +751,8 @@ async def get_cluster_feature_counts(payload: dict):
             run_id=run_id,
             artifact_path="cluster_feature_counts.json",
         )
-        with open(local_path, "r") as f:
-            cluster_counts = json_lib.load(f)
+        with open(local_path, "rb") as f:
+            cluster_counts = orjson.loads(f.read())
 
         # Update cache with full data
         _cluster_cache[cache_key] = (time.time(), run_id, cluster_counts)

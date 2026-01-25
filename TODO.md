@@ -115,7 +115,6 @@ Kafka → River ML Training Scripts → MLflow
   - [x] Graceful model swap without downtime
 - [x] Update prediction endpoints:
   - [x] Use MLflow-loaded models for inference
-  - [ ] Return model version in prediction response
 - [x] Add model info to Reflex UI:
   - [x] Display current model version on each page
   - [x] Show last model update timestamp
@@ -255,7 +254,6 @@ apps/sklearn/
   - [x] PostgreSQL metrics (Bitnami exporter)
   - [x] Redis metrics (Bitnami exporter)
   - [x] MinIO metrics (ServiceMonitor with cluster/node metrics)
-  - [ ] Kafka metrics (disabled - JMX exporter incompatible with Kafka 4.0)
   - [x] MLflow metrics (enabled via Bitnami chart `tracking.metrics.enabled`)
   - [x] Reflex backend metrics (prometheus-fastapi-instrumentator added)
 - [x] Create custom Grafana dashboards:
@@ -383,7 +381,7 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
   - [x] YellowBrick visualizers: KElbowVisualizer, SilhouetteVisualizer, InterclusterDistance
   - [x] YellowBrick text visualizers: FreqDistVisualizer, TSNEVisualizer, DispersionPlot, WordCorrelationPlot
   - [x] find_optimal_k() with silhouette optimization (complementary to KElbowVisualizer)
-  - [ ] Training script adaptation (pending notebook testing)
+  - [x] Training script adaptation
 - [x] **Enhance Batch ML Training Status Explanations** (Priority: LOW)
   - Current: Real-time status shows CatBoost iteration metrics (Test, Best, Total, Remaining)
   - Enhancement ideas:
@@ -439,14 +437,6 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
     - Heavy SQL usage degrades ML prediction latency
     - Different scaling profiles needed for SQL vs ML
 
-### Code Quality
-- [ ] **Secure Environment Variables Handling** (Priority: HIGH)
-  - [ ] Transform all `os.environ.get(..., default)` to `os.environ[...]` (fail fast if missing)
-  - [ ] Centralize all environment variables in dedicated config modules per service
-  - [ ] Ensure no credentials are hardcoded in source code
-  - [ ] Validate required env vars at application startup
-  - [ ] Update Helm ConfigMaps/Secrets to provide all necessary env vars
-
 ### Cleanup Tasks
 - [x] **Remove Polars - Migrate to DuckDB Only** (Priority: HIGH)
   - [x] Remove Polars from `apps/river/pyproject.toml`
@@ -472,7 +462,6 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
 ### Documentation
 - [ ] Create README.md with project overview
 - [ ] Document architecture decisions (ADR)
-- [ ] API documentation (FastAPI auto-docs)
 - [ ] Deployment guide for k3d
 
 ### UI/UX Enhancements
@@ -497,14 +486,6 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
   - [ ] Add configurable fraud rate / anomaly injection rate
   - [ ] Add data validation before producing (schema validation, range checks)
 
-- [ ] **Concept Drift Simulation** (Priority: HIGH)
-  - [ ] Implement multiple drift types:
-    - Sudden drift (abrupt change in distribution)
-    - Gradual drift (slow transition between concepts)
-    - Incremental drift (continuous small changes)
-    - Recurring drift (seasonal/cyclical patterns)
-  - [ ] Add drift severity configuration (mild, moderate, severe)
-  - [ ] Log drift events to enable model performance analysis
 
 ### Performance
 
@@ -549,11 +530,11 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
 **6. Defer Heavy Imports** (Low Impact)
 
 **7. Migrate from stdlib json to orjson** (High Impact)
-- [ ] Replace `import json` with `import orjson` across all apps:
-  - [ ] `apps/river/app.py` and `apps/river/functions.py`
-  - [ ] `apps/sklearn/app.py` and `apps/sklearn/functions.py`
-  - [ ] `apps/reflex/coelho_realtime/state.py`
-  - [ ] `apps/kafka-producers/*.py`
+- [x] Replace `import json` with `import orjson` across all apps:
+  - [x] `apps/river/app.py` and `apps/river/functions.py`
+  - [x] `apps/sklearn/app.py` and `apps/sklearn/functions.py`
+  - [x] `apps/reflex/coelho_realtime/state.py`
+  - [x] `apps/kafka-producers/*.py`
 
 **8. Split state.py into State Modules** (High Impact) - ✅ COMPLETED
 - [x] Create `coelho_realtime/states/` directory structure:

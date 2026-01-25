@@ -18,6 +18,10 @@ COPY . .
 # Generate SvelteKit types
 RUN pnpm svelte-kit sync
 
+# Pre-bundle dependencies for instant startup (avoid 100s+ re-optimization)
+# Run dev server briefly to generate .vite cache, then fetch page to trigger transforms
+RUN timeout 60 sh -c 'pnpm dev & sleep 20 && node -e "fetch(\"http://localhost:5173\").catch(()=>{})" && sleep 5' || true
+
 # Expose port
 EXPOSE 5173
 

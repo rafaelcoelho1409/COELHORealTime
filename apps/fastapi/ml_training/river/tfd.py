@@ -2,7 +2,7 @@ from river import (
     metrics
 )
 import pickle
-import json
+import orjson
 import os
 import signal
 import sys
@@ -289,8 +289,8 @@ def main():
                                 pickle.dump(model, f)
                             with open(encoder_path, 'wb') as f:
                                 pickle.dump(encoders, f)
-                            with open(offset_path, 'w') as f:
-                                json.dump({"last_offset": current_offset}, f)
+                            with open(offset_path, 'wb') as f:
+                                f.write(orjson.dumps({"last_offset": current_offset}))
                             with open(report_path, 'wb') as f:
                                 pickle.dump(report_metrics, f)
                             mlflow.log_artifact(model_path)
@@ -314,8 +314,8 @@ def main():
                     pickle.dump(model, f)
                 with open(encoder_path, 'wb') as f:
                     pickle.dump(encoders, f)
-                with open(offset_path, 'w') as f:
-                    json.dump({"last_offset": current_offset}, f)
+                with open(offset_path, 'wb') as f:
+                    f.write(orjson.dumps({"last_offset": current_offset}))
                 with open(report_path, 'wb') as f:
                     pickle.dump(report_metrics, f)
                 mlflow.log_artifact(model_path)

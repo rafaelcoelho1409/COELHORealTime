@@ -4,7 +4,7 @@ from river import (
 )
 import datetime as dt
 import pickle
-import json
+import orjson
 import os
 import signal
 import tempfile
@@ -75,8 +75,8 @@ def load_cluster_data_from_mlflow():
                 run_id = run_id,
                 artifact_path = CLUSTER_COUNTS_ARTIFACT
             )
-            with open(local_path, 'r') as f:
-                cluster_counts = Counter(json.load(f))
+            with open(local_path, 'rb') as f:
+                cluster_counts = Counter(orjson.loads(f.read()))
             print("Cluster counts loaded from MLflow.")
         except Exception as e:
             print(f"Could not load cluster counts from MLflow: {e}")
@@ -86,8 +86,8 @@ def load_cluster_data_from_mlflow():
                 run_id = run_id,
                 artifact_path = CLUSTER_FEATURE_COUNTS_ARTIFACT
             )
-            with open(local_path, 'r') as f:
-                loaded_counts_str_keys = json.load(f)
+            with open(local_path, 'rb') as f:
+                loaded_counts_str_keys = orjson.loads(f.read())
                 for cluster_id_str, features in loaded_counts_str_keys.items():
                     try:
                         cluster_id_int = int(cluster_id_str)
@@ -339,16 +339,17 @@ def main():
                                 pickle.dump(model, f)
                             with open(encoder_path, 'wb') as f:
                                 pickle.dump(encoders, f)
-                            with open(cluster_counts_path, 'w') as f:
-                                json.dump(dict(cluster_counts), f, indent=4)
+                            with open(cluster_counts_path, 'wb') as f:
+                                # Convert int cluster IDs to strings for JSON serialization
+                                f.write(orjson.dumps({str(k): v for k, v in cluster_counts.items()}, option=orjson.OPT_INDENT_2))
                             plain_dict_feature_counts = {
-                                k: {fk: dict(fv) for fk, fv in v.items()}
+                                str(k): {fk: {str(vk): vv for vk, vv in fv.items()} for fk, fv in v.items()}
                                 for k, v in cluster_feature_counts.items()
                             }
-                            with open(cluster_feature_counts_path, 'w') as f:
-                                json.dump(plain_dict_feature_counts, f, indent=4)
-                            with open(offset_path, 'w') as f:
-                                json.dump({"last_offset": current_offset}, f)
+                            with open(cluster_feature_counts_path, 'wb') as f:
+                                f.write(orjson.dumps(plain_dict_feature_counts, option=orjson.OPT_INDENT_2))
+                            with open(offset_path, 'wb') as f:
+                                f.write(orjson.dumps({"last_offset": current_offset}))
                             mlflow.log_artifact(model_path)
                             mlflow.log_artifact(encoder_path)
                             mlflow.log_artifact(cluster_counts_path)
@@ -372,16 +373,17 @@ def main():
                     pickle.dump(model, f)
                 with open(encoder_path, 'wb') as f:
                     pickle.dump(encoders, f)
-                with open(cluster_counts_path, 'w') as f:
-                    json.dump(dict(cluster_counts), f, indent = 4)
+                with open(cluster_counts_path, 'wb') as f:
+                    # Convert int cluster IDs to strings for JSON serialization
+                    f.write(orjson.dumps({str(k): v for k, v in cluster_counts.items()}, option=orjson.OPT_INDENT_2))
                 plain_dict_feature_counts = {
-                    k: {fk: dict(fv) for fk, fv in v.items()}
+                    str(k): {fk: {str(vk): vv for vk, vv in fv.items()} for fk, fv in v.items()}
                     for k, v in cluster_feature_counts.items()
                 }
-                with open(cluster_feature_counts_path, 'w') as f:
-                    json.dump(plain_dict_feature_counts, f, indent = 4)
-                with open(offset_path, 'w') as f:
-                    json.dump({"last_offset": current_offset}, f)
+                with open(cluster_feature_counts_path, 'wb') as f:
+                    f.write(orjson.dumps(plain_dict_feature_counts, option=orjson.OPT_INDENT_2))
+                with open(offset_path, 'wb') as f:
+                    f.write(orjson.dumps({"last_offset": current_offset}))
                 mlflow.log_artifact(model_path)
                 mlflow.log_artifact(encoder_path)
                 mlflow.log_artifact(cluster_counts_path)

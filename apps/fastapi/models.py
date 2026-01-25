@@ -9,7 +9,7 @@ This module contains all request/response models used across routers:
 from pydantic import BaseModel, field_validator
 from typing import Optional, Any, Dict
 import math
-import json
+import orjson
 
 from config import PROJECT_NAMES, SQL_DEFAULT_LIMIT
 
@@ -96,8 +96,8 @@ class TransactionFraudDetection(BaseModel):
             return v
         if isinstance(v, str):
             try:
-                return json.loads(v)
-            except (json.JSONDecodeError, TypeError):
+                return orjson.loads(v)
+            except (orjson.JSONDecodeError, TypeError):
                 return {}
         return {}
 
@@ -137,8 +137,8 @@ class EstimatedTimeOfArrival(BaseModel):
             return v
         if isinstance(v, str):
             try:
-                return json.loads(v)
-            except (json.JSONDecodeError, TypeError):
+                return orjson.loads(v)
+            except (orjson.JSONDecodeError, TypeError):
                 return {}
         return {}
 
@@ -177,9 +177,9 @@ class ECommerceCustomerInteractions(BaseModel):
             return DeviceInfo(**v)
         if isinstance(v, str):
             try:
-                parsed = json.loads(v)
+                parsed = orjson.loads(v)
                 return DeviceInfo(**parsed) if parsed else None
-            except (json.JSONDecodeError, TypeError):
+            except (orjson.JSONDecodeError, TypeError):
                 return None
         return None
 
@@ -195,9 +195,9 @@ class ECommerceCustomerInteractions(BaseModel):
             return Location(**v)
         if isinstance(v, str):
             try:
-                parsed = json.loads(v)
+                parsed = orjson.loads(v)
                 return Location(**parsed) if parsed else None
-            except (json.JSONDecodeError, TypeError):
+            except (orjson.JSONDecodeError, TypeError):
                 return None
         return None
 

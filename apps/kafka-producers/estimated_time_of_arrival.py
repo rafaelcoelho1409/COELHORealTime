@@ -1,4 +1,4 @@
-import json
+import orjson
 import time
 import random
 import uuid
@@ -49,7 +49,7 @@ def create_producer():
         try:
             producer = KafkaProducer(
                 bootstrap_servers = KAFKA_BROKERS,
-                value_serializer = lambda v: json.dumps(v).encode('utf-8'),
+                value_serializer = lambda v: orjson.dumps(v),
                 client_id = f"{KAFKA_TOPIC}_client",
                 request_timeout_ms = 30000,
                 metadata_max_age_ms = 10000,

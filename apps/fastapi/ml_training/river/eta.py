@@ -3,7 +3,7 @@ from river import (
     utils,
 )
 import pickle
-import json
+import orjson
 import os
 import signal
 import tempfile
@@ -243,8 +243,8 @@ def main():
                                 pickle.dump(model, f)
                             with open(encoder_path, 'wb') as f:
                                 pickle.dump(encoders, f)
-                            with open(offset_path, 'w') as f:
-                                json.dump({"last_offset": current_offset}, f)
+                            with open(offset_path, 'wb') as f:
+                                f.write(orjson.dumps({"last_offset": current_offset}))
                             mlflow.log_artifact(model_path)
                             mlflow.log_artifact(encoder_path)
                             mlflow.log_artifact(offset_path)
@@ -264,8 +264,8 @@ def main():
                     pickle.dump(model, f)
                 with open(encoder_path, 'wb') as f:
                     pickle.dump(encoders, f)
-                with open(offset_path, 'w') as f:
-                    json.dump({"last_offset": current_offset}, f)
+                with open(offset_path, 'wb') as f:
+                    f.write(orjson.dumps({"last_offset": current_offset}))
                 mlflow.log_artifact(model_path)
                 mlflow.log_artifact(encoder_path)
                 mlflow.log_artifact(offset_path)
