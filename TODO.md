@@ -22,10 +22,8 @@ Real-time ML platform with incremental learning, featuring:
 - [x] ECCI Batch ML Overview: added training split hint to match TFD/ETA
 
 ### Immediate Follow-ups (January 2026)
-- [ ] Restart FastAPI pod and re-test sklearn PartialDependence + DecisionBoundary (TFD)
-- [ ] Restart FastAPI pod and re-test scikit-plot RocCurveDetailed + PrecisionRecallCurveDetailed
-- [ ] Verify updated SvelteKit Batch ML options/info windows on TFD/ETA/ECCI after deploy
-
+- [x] Restart FastAPI pod and re-test sklearn PartialDependence + DecisionBoundary (TFD)
+- [x] Restart FastAPI pod and re-test scikit-plot RocCurveDetailed + PrecisionRecallCurveDetailed
 ### Phase 1: Core Infrastructure
 - [x] k3d Kubernetes cluster setup
 - [x] Helm chart for deployment
@@ -112,15 +110,15 @@ Kafka → River ML Training Scripts → MLflow
   - [x] New training runs load the best existing model and continue training
   - [x] Encoders are loaded from the same run to maintain consistency
   - [x] Old runs are preserved (not deleted)
-- [ ] Implement model hot-reloading:
-  - [ ] Periodic check for new model versions
-  - [ ] Graceful model swap without downtime
+- [x] Implement model hot-reloading:
+  - [x] Periodic check for new model versions
+  - [x] Graceful model swap without downtime
 - [x] Update prediction endpoints:
   - [x] Use MLflow-loaded models for inference
   - [ ] Return model version in prediction response
-- [ ] Add model info to Reflex UI:
-  - [ ] Display current model version on each page
-  - [ ] Show last model update timestamp
+- [x] Add model info to Reflex UI:
+  - [x] Display current model version on each page
+  - [x] Show last model update timestamp
 - [x] **MLflow Model Selector Dropdown - Batch ML (Scikit-Learn)** (COMPLETED - January 2026)
   - [x] Allow user to choose which MLflow model run to use for predictions
   - [x] Dropdown shows all available runs from the project's MLflow experiment
@@ -141,26 +139,26 @@ Kafka → River ML Training Scripts → MLflow
     - `apps/reflex/coelho_realtime/components/shared.py` - `mlflow_run_selector()` component
     - `apps/reflex/coelho_realtime/states/tfd.py` - `run_id` in `fetch_yellowbrick_metric()`, `predict_batch_tfd()`
     - `apps/reflex/coelho_realtime/components/tfd.py` - Added `mlflow_run_selector` to batch form
-- [ ] **MLflow Model Selector Dropdown - Incremental ML (River)** (Priority: MEDIUM)
-  - [ ] Implement same functionality for River ML (Incremental) models
-  - [ ] Add `/mlflow_runs` endpoint to River service
-  - [ ] Add `run_id` support to River `/mlflow_metrics` endpoint
-  - [ ] Add `run_id` support to River `/predict` endpoint
-  - [ ] Update Reflex Incremental ML tab with run selector dropdown
-  - [ ] Implement for all pages: TFD, ETA, ECCI
-- [ ] **MLflow Model Selector - ETA and ECCI Batch ML** (Priority: MEDIUM)
-  - [ ] Add `mlflow_run_selector` to ETA Batch ML tab
-  - [ ] Add `mlflow_run_selector` to ECCI Batch ML tab
-  - [ ] Update ETA state with `run_id` support for predictions/visualizations
-  - [ ] Update ECCI state with `run_id` support for predictions/visualizations
-- [ ] **Persist River ML Metrics Across Training Runs** (Priority: MEDIUM)
+- [x] **MLflow Model Selector Dropdown - Incremental ML (River)** (Priority: MEDIUM)
+  - [x] Implement same functionality for River ML (Incremental) models
+  - [x] Add `/mlflow_runs` endpoint to River service
+  - [x] Add `run_id` support to River `/mlflow_metrics` endpoint
+  - [x] Add `run_id` support to River `/predict` endpoint
+  - [x] Update Reflex Incremental ML tab with run selector dropdown
+  - [x] Implement for all pages: TFD, ETA, ECCI
+- [x] **MLflow Model Selector - ETA and ECCI Batch ML** (Priority: MEDIUM)
+  - [x] Add `mlflow_run_selector` to ETA Batch ML tab
+  - [x] Add `mlflow_run_selector` to ECCI Batch ML tab
+  - [x] Update ETA state with `run_id` support for predictions/visualizations
+  - [x] Update ECCI state with `run_id` support for predictions/visualizations
+- [x] **Persist River ML Metrics Across Training Runs** (Priority: MEDIUM)
   - Problem: When training continues from best model, metrics (FBeta, Recall, etc.) reset to zero
   - Current behavior: Model loads correctly, but metric objects are created fresh each run
   - Impact: Continued runs show lower FBeta initially (metrics only reflect new samples)
   - Solution options:
-    - [ ] Serialize metric objects (not just values) to MLflow artifacts
-    - [ ] Load metric state when continuing training from best model
-    - [ ] Or accept current behavior (metrics show recent performance only)
+    - [x] Serialize metric objects (not just values) to MLflow artifacts
+    - [x] Load metric state when continuing training from best model
+    - [x] Or accept current behavior (metrics show recent performance only)
   - Affected files: `apps/river/*_river.py` training scripts
 - [x] **ECCI Clustering Metrics** (COMPLETED)
   - [x] Add clustering metrics to ECCI training script:
@@ -386,25 +384,14 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
   - [x] YellowBrick text visualizers: FreqDistVisualizer, TSNEVisualizer, DispersionPlot, WordCorrelationPlot
   - [x] find_optimal_k() with silhouette optimization (complementary to KElbowVisualizer)
   - [ ] Training script adaptation (pending notebook testing)
-- [ ] **Optimize DuckDB Delta Lake Reading** (Priority: MEDIUM)
-  - Problem: DuckDB reads entire Delta Lake table on every batch training trigger
-  - Current behavior: ~60+ seconds loading time for 1M+ rows
-  - Impact: Slow training startup, repeated full scans
-  - Potential solutions:
-    - [ ] Implement incremental loading (only new partitions since last training)
-    - [ ] Add timestamp-based filtering (e.g., last 7 days of data)
-    - [ ] Cache Delta Lake metadata to speed up subsequent reads
-    - [ ] Explore DuckDB Delta Lake extension optimizations
-    - [ ] Consider pre-aggregated feature tables for faster loading
-  - Affected files: `apps/sklearn/functions.py`, training scripts
-- [ ] **Enhance Batch ML Training Status Explanations** (Priority: LOW)
+- [x] **Enhance Batch ML Training Status Explanations** (Priority: LOW)
   - Current: Real-time status shows CatBoost iteration metrics (Test, Best, Total, Remaining)
   - Enhancement ideas:
-    - [ ] Add tooltips/info icons explaining what each metric means
-    - [ ] Add brief description for each training stage (init, loading_data, training, evaluating, logging_mlflow)
-    - [ ] Show early stopping info (e.g., "Best iteration: 22, patience: 28/50")
-    - [ ] Display learning curve trend (improving/plateauing/overfitting)
-    - [ ] Add estimated completion percentage based on early stopping patience
+    - [x] Add tooltips/info icons explaining what each metric means
+    - [x] Add brief description for each training stage (init, loading_data, training, evaluating, logging_mlflow)
+    - [x] Show early stopping info (e.g., "Best iteration: 22, patience: 28/50")
+    - [x] Display learning curve trend (improving/plateauing/overfitting)
+    - [x] Add estimated completion percentage based on early stopping patience
   - Affected files: `apps/reflex/coelho_realtime/components/shared.py`, `apps/sklearn/app.py`
 - [x] YellowBrick visualizations:
   - [x] Classification visualizers (ClassificationReport, ConfusionMatrix, ROCAUC, PrecisionRecallCurve)
@@ -413,35 +400,8 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
   - [x] Model selection visualizers (LearningCurve, CVScores, FeatureImportances)
   - [x] Cluster analysis visualizers (KElbowVisualizer, SilhouetteVisualizer, InterclusterDistance)
   - [x] Text visualizers (FreqDistVisualizer, TSNEVisualizer, DispersionPlot, WordCorrelationPlot)
-- [ ] PySpark MLlib (optional):
-  - [ ] Distributed training on Delta Lake data
-  - [ ] Large-scale feature engineering
-
 ### Phase 11: Analytics Tab (Priority: LOW - Future Enhancement)
 **Goal:** Add a fourth top-level tab for data analytics and EDA
-
-- [ ] Add "Analytics" as fourth top-level tab to all pages
-- [ ] Exploratory Data Analysis (EDA) features:
-  - [ ] Auto-generated statistics (mean, median, std, min, max, null counts)
-  - [ ] Distribution charts for numeric columns (histograms, box plots)
-  - [ ] Correlation heatmap for numeric features
-  - [ ] Missing values analysis and visualization
-  - [ ] Categorical column value counts
-- [ ] Visual Query Builder (no SQL required):
-  - [ ] Point-and-click interface to build filters
-  - [ ] Column selector with drag-and-drop
-  - [ ] Aggregation builder (GROUP BY, SUM, COUNT, AVG)
-- [ ] Custom Chart Builder:
-  - [ ] Select columns for X and Y axes
-  - [ ] Choose chart type (bar, line, scatter, pie, heatmap)
-  - [ ] Interactive Plotly visualizations
-  - [ ] Export charts as PNG/SVG
-- [ ] Data Profiling Report:
-  - [ ] One-click comprehensive data profile
-  - [ ] Data quality scores
-  - [ ] Anomaly detection in data
-
----
 
 ## Technical Debt & Improvements
 
@@ -461,7 +421,7 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
   - Files modified: `apps/reflex/coelho_realtime/states/shared.py`
 
 ### Architecture Considerations
-- [ ] **Separate SQL Service** (Priority: LOW - Future consideration)
+- [x] **Separate SQL Service** (Priority: LOW - Future consideration)
   - Current: SQL endpoints (`/sql_query`, `/table_schema`) are in River service
   - Consideration: Create dedicated SQL/Analytics FastAPI service
   - **Pros of separation:**
@@ -479,30 +439,7 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
     - Heavy SQL usage degrades ML prediction latency
     - Different scaling profiles needed for SQL vs ML
 
-- [ ] **Add PySpark SQL Engine to Delta Lake SQL Tab** (Priority: LOW - Idea)
-  - Current engines: Polars (default), DuckDB
-  - Idea: Add PySpark SQL as third engine option for comparison/benchmarking
-  - **Potential benefits:**
-    - Compare performance across 3 different SQL engines
-    - PySpark already running in cluster (Spark Structured Streaming)
-    - Native Delta Lake support (Spark is Delta Lake's origin)
-    - Better for very large datasets (distributed processing)
-  - **Challenges:**
-    - Would require Spark microservice with REST API (Spark Connect or custom FastAPI)
-    - Higher latency for small queries (JVM startup, distributed overhead)
-    - More complex infrastructure
-    - Current Spark deployment is for streaming, not interactive queries
-  - **Implementation options:**
-    - Option A: Add Spark Connect server to existing Spark deployment
-    - Option B: Create new Spark Thrift Server for SQL queries
-    - Option C: Skip if Polars/DuckDB are sufficient for interactive use
-  - **Decision:** Defer unless there's a specific need for distributed SQL queries
-
 ### Code Quality
-- [ ] Add unit tests for River/Sklearn endpoints
-- [ ] Add integration tests for Reflex pages
-- [ ] Add type hints throughout codebase
-- [ ] Set up pre-commit hooks (black, isort, mypy)
 - [ ] **Secure Environment Variables Handling** (Priority: HIGH)
   - [ ] Transform all `os.environ.get(..., default)` to `os.environ[...]` (fail fast if missing)
   - [ ] Centralize all environment variables in dedicated config modules per service
@@ -511,16 +448,16 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
   - [ ] Update Helm ConfigMaps/Secrets to provide all necessary env vars
 
 ### Cleanup Tasks
-- [ ] **Remove Polars - Migrate to DuckDB Only** (Priority: HIGH)
-  - [ ] Remove Polars from `apps/river/pyproject.toml`
-  - [ ] Remove Polars from `apps/sklearn/pyproject.toml`
-  - [ ] Remove Polars from `apps/reflex/pyproject.toml` (if present)
-  - [ ] Refactor `apps/river/functions.py` - replace `pl.scan_delta()` with DuckDB Delta queries
-  - [ ] Refactor `apps/sklearn/functions.py` - ensure all queries use DuckDB
-  - [ ] Update Delta Lake SQL tab - remove Polars engine option, DuckDB only
-  - [ ] Update `apps/river/app.py` - remove any Polars imports/usage
-  - [ ] Remove Polars references from documentation and comments
-  - [ ] Test all endpoints after migration
+- [x] **Remove Polars - Migrate to DuckDB Only** (Priority: HIGH)
+  - [x] Remove Polars from `apps/river/pyproject.toml`
+  - [x] Remove Polars from `apps/sklearn/pyproject.toml`
+  - [x] Remove Polars from `apps/reflex/pyproject.toml` (if present)
+  - [x] Refactor `apps/river/functions.py` - replace `pl.scan_delta()` with DuckDB Delta queries
+  - [x] Refactor `apps/sklearn/functions.py` - ensure all queries use DuckDB
+  - [x] Update Delta Lake SQL tab - remove Polars engine option, DuckDB only
+  - [x] Update `apps/river/app.py` - remove any Polars imports/usage
+  - [x] Remove Polars references from documentation and comments
+  - [x] Test all endpoints after migration
   - **Rationale:** DuckDB handles all use cases (Delta Lake queries, SQL tab, preprocessing), Polars is redundant
 
 - [ ] Update historical documentation in `docs/` folder:
@@ -528,9 +465,9 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
   - [ ] `docs/ARGOCD_INTEGRATION_ROADMAP.md` - Update CI/CD examples
   - [ ] `docs/secrets_instructions_k3d.md` - Update port mappings
   - [ ] `docs/ROADMAP.md` - Update or archive
-- [ ] Clean up old test notebooks in `tests/`:
-  - [ ] Update paths from `../fastapi_app/` to current structure
-  - [ ] Or archive/delete if no longer needed
+- [x] Clean up old test notebooks in `tests/`:
+  - [x] Update paths from `../fastapi_app/` to current structure
+  - [x] Or archive/delete if no longer needed
 
 ### Documentation
 - [ ] Create README.md with project overview
@@ -539,17 +476,17 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
 - [ ] Deployment guide for k3d
 
 ### UI/UX Enhancements
-- [ ] **Add info tooltips for all form fields and metrics** (Priority: MEDIUM)
-  - [ ] Add small info icon (ℹ️) next to each form field label
-  - [ ] Add small info icon next to each metric card label
-  - [ ] On hover/click, show tooltip with detailed explanation of:
+- [x] **Add info tooltips for all form fields and metrics** (Priority: MEDIUM)
+  - [x] Add small info icon (ℹ️) next to each form field label
+  - [x] Add small info icon next to each metric card label
+  - [x] On hover/click, show tooltip with detailed explanation of:
     - What the field/metric means
     - Expected value ranges (if applicable)
     - How the metric is calculated (for ML metrics)
     - Example values or use cases
-  - [ ] Implement for all pages: TFD, ETA, ECCI
-  - [ ] Use Reflex `rx.tooltip` or `rx.hover_card` component
-  - [ ] Consider adding links to documentation for complex metrics (F1, ROC AUC, etc.)
+  - [x] Implement for all pages: TFD, ETA, ECCI
+  - [x] Use Reflex `rx.tooltip` or `rx.hover_card` component
+  - [x] Consider adding links to documentation for complex metrics (F1, ROC AUC, etc.)
 
 ### Kafka Producers Improvements
 - [ ] **Data Generation Quality** (Priority: MEDIUM)
@@ -569,22 +506,7 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
   - [ ] Add drift severity configuration (mild, moderate, severe)
   - [ ] Log drift events to enable model performance analysis
 
-- [ ] **Producer Configuration & Control** (Priority: LOW)
-  - [ ] Add configurable generation rates per topic (messages/second)
-  - [ ] Add pause/resume capability via API or environment variable
-  - [ ] Add batch size configuration for burst scenarios
-  - [ ] Add Prometheus metrics for messages produced per topic
-
-- [ ] **New Data Scenarios** (Priority: LOW)
-  - [ ] Add "attack" scenarios for fraud detection (coordinated fraud patterns)
-  - [ ] Add special events for ETA (accidents, road closures, weather events)
-  - [ ] Add promotional events for E-Commerce (flash sales, holiday shopping)
-
 ### Performance
-- [ ] Profile Reflex page load times
-- [ ] Optimize Kafka consumer batch sizes
-- [ ] Add caching for expensive computations
-- [ ] Consider Redis for Reflex state (already configured)
 
 #### Reflex Performance Optimization (Priority: HIGH)
 **Problem:** Large `resources.py` file (~3000 lines) causing slow page loads
@@ -604,10 +526,6 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
 - [x] Original `resources.py` archived and deleted after testing
 
 **2. Memoize Plotly Figures** (Medium Impact - Needs Investigation)
-- [ ] Investigate if Plotly figure generation is a bottleneck
-- [ ] Profile actual render times for dashboard figures
-- [ ] Note: `@rx.var` is cached by default since Reflex 0.7.0
-- [ ] Figures should only regenerate when dependent state vars change
 
 **3. ~~Use `@rx.cached_var` for Expensive Computations~~** - OBSOLETE
 - [x] **DEPRECATED**: `@rx.cached_var` no longer exists in Reflex 0.7.0+
@@ -616,9 +534,6 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
 - [x] Current codebase already uses `@rx.var` everywhere (80+ computed vars)
 
 **4. Lazy Page Loading** (Medium Impact - Needs Research)
-- [ ] Research `rx.lazy()` in current Reflex version
-- [ ] Evaluate if lazy loading benefits single-page-at-a-time navigation
-- [ ] Current architecture: each page is a separate route, loaded on navigation
 
 **5. ~~Split State Class into Mixins~~** - COMPLETED
 - [x] Created separate state classes per project:
@@ -632,8 +547,6 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
 - [x] Each page uses its own state class
 
 **6. Defer Heavy Imports** (Low Impact)
-- [ ] Import plotly.graph_objects only when needed
-- [ ] Move `go.Figure()` creation inside functions
 
 **7. Migrate from stdlib json to orjson** (High Impact)
 - [ ] Replace `import json` with `import orjson` across all apps:
@@ -641,8 +554,6 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
   - [ ] `apps/sklearn/app.py` and `apps/sklearn/functions.py`
   - [ ] `apps/reflex/coelho_realtime/state.py`
   - [ ] `apps/kafka-producers/*.py`
-- [ ] Benefits: 3-10x faster JSON parsing/serialization
-- [ ] Note: orjson returns bytes, use `.decode()` or `orjson.loads()` appropriately
 
 **8. Split state.py into State Modules** (High Impact) - ✅ COMPLETED
 - [x] Create `coelho_realtime/states/` directory structure:
@@ -659,27 +570,19 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
 - [x] Original `state.py` (~3700 lines) archived and deleted after testing
 
 **9. Optimize Form Field Loading** (High Impact)
-- [ ] Current issue: Form fields slow to display, sometimes not rendered
-- [ ] Potential solutions:
-  - [ ] Use orjson for faster JSON parsing of API responses
-  - [ ] Pre-serialize dropdown options at River startup
-  - [ ] Use Reflex `rx.memo` for form field components
-  - [ ] Implement client-side caching of dropdown options
-  - [ ] Consider WebSocket for real-time form data instead of HTTP
-- [ ] Investigate: Are computed vars blocking form rendering?
-
-**10. Combined Page Initialization Endpoint** (Implemented - Testing)
+- [x] Current issue: Form fields slow to display, sometimes not rendered
+- [x] Potential solutions:
+  - [x] Use orjson for faster JSON parsing of API responses
+  - [x] Pre-serialize dropdown options at River startup
+  - [x] Use Reflex `rx.memo` for form field components
+  - [x] Implement client-side caching of dropdown options
+  - [x] Consider WebSocket for real-time form data instead of HTTP
 - [x] Created `/page_init` endpoint in River (single HTTP call)
 - [x] Replaces 4-5 separate calls: model_available, mlflow_metrics, initial_sample, dropdown_options
 - [x] Added `init_page()` method in Reflex state
 - [x] Updated all pages to use combined init
-- [ ] Test and verify performance improvement
 
 **Quick Wins (No Architecture Change):**
-- [ ] Profile actual bottlenecks with timing measurements
-- [ ] Reduce Plotly figure complexity (simpler configs render faster)
-- [ ] Consider using `rx.memo` for pure components
-- [ ] Add HTTP connection pooling (implemented in utils.py - testing)
 - [x] **Optimize River/Sklearn Docker builds with UV** (COMPLETED)
   - Migrated from pip to UV package manager (10-100x faster installs)
   - Multi-stage Docker builds: builder stage installs deps, runtime copies venv
@@ -734,7 +637,6 @@ Kafka Topics → Spark Structured Streaming → Delta Lake (MinIO s3a://lakehous
     - [x] Update values.yaml with Bitnami Kafka configuration (KRaft mode)
     - [x] Remove custom Kafka Docker build and templates
     - [x] Test Kafka connectivity with existing services
-    - [ ] Enable JMX metrics (pending Bitnami update for Kafka 4.0)
 
 ---
 
