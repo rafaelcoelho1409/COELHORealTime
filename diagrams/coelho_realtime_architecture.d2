@@ -1,0 +1,404 @@
+direction: right
+
+# ── Global defaults for node labels and edge labels ─────────
+*.style.font-size: 64
+*.style.font-color: "#000000"
+(* -> *)[*].style.font-size: 64
+(* -> *)[*].style.font-color: "#000000"
+(* -> *)[*].style.stroke-width: 8
+
+# ============================================================
+# COELHO RealTime — Platform Architecture
+# ============================================================
+# Generate with:  ./generate.sh
+# Or manually:    d2 --layout=elk coelho_realtime_architecture.d2 coelho_realtime_architecture.svg
+# ============================================================
+
+title: |md
+  # COELHO RealTime — Platform Architecture
+| {
+  near: top-center
+  style.font-size: 96
+}
+
+# ── Layer 1: Container Orchestration & IaC ──────────────────
+
+infra: Container Orchestration & Infrastructure as Code {
+  style.fill: "#E6E6FA"
+  style.stroke: "#5C4EE5"
+  style.stroke-width: 4
+  style.border-radius: 12
+  style.font-size: 96
+  style.font-color: "#000000"
+  style.bold: true
+
+  terraform: Terraform {
+    shape: image
+    icon: ./icons/terraform.svg
+    width: 500
+    height: 500
+    style.font-size: 64
+  }
+  docker: Docker {
+    shape: image
+    icon: ./icons/docker.svg
+    width: 500
+    height: 500
+    style.font-size: 64
+  }
+  k3d: "K3D Cluster\n(1 Server + 3 Agents)" {
+    shape: image
+    icon: ./icons/k3d.svg
+    width: 500
+    height: 500
+    style.font-size: 64
+  }
+  rancher: "Rancher\n(Cluster Management)" {
+    shape: image
+    icon: ./icons/rancher.png
+    width: 500
+    height: 500
+    style.font-size: 64
+  }
+  k3d_registry: "K3D Registry\n(localhost:5000)" {
+    shape: image
+    icon: ./icons/k3d.svg
+    width: 500
+    height: 500
+    style.font-size: 64
+  }
+  helm: Helm Charts {
+    shape: image
+    icon: ./icons/helm.svg
+    width: 500
+    height: 500
+    style.font-size: 64
+  }
+  skaffold: "Skaffold\n(Dev Hot-Reload)" {
+    shape: image
+    icon: ./icons/skaffold.png
+    width: 500
+    height: 500
+    style.font-size: 64
+  }
+
+  # Infrastructure provisioning flow
+  terraform -> docker: {style.stroke: "#5C4EE5"; style.stroke-width: 8}
+  docker -> k3d: {style.stroke: "#0066CC"; style.stroke-width: 8}
+  terraform -> rancher: provisions {style.stroke: "#5C4EE5"; style.stroke-width: 7}
+  rancher -> k3d: manages {style.stroke: "#5C4EE5"; style.stroke-width: 7}
+  docker -> k3d_registry: {style.stroke: "#0066CC"; style.stroke-width: 2; style.stroke-dash: 5}
+  k3d -> helm: {style.stroke: "#0066CC"; style.stroke-width: 8}
+  skaffold -> helm: "dev workflow" {style.stroke: "#0066CC"; style.stroke-width: 2; style.stroke-dash: 5}
+}
+
+
+# ── Layer 2: GitOps & CI/CD ─────────────────────────────────
+
+gitops: GitOps & CI/CD Layer {
+  style.fill: "#FFF4E6"
+  style.stroke: "#FF6B35"
+  style.stroke-width: 4
+  style.border-radius: 12
+  style.font-size: 96
+  style.font-color: "#000000"
+  style.bold: true
+
+  gitlab: "GitLab\n(CI/CD Pipelines)" {
+    shape: image
+    icon: ./icons/gitlab.svg
+    width: 500
+    height: 500
+    style.font-size: 64
+  }
+  argocd: "ArgoCD\n(GitOps Sync)" {
+    shape: image
+    icon: ./icons/argocd.svg
+    width: 500
+    height: 500
+    style.font-size: 64
+  }
+  argocd_updater: "ArgoCD\nImage Updater" {
+    shape: image
+    icon: ./icons/argocd.svg
+    width: 500
+    height: 500
+    style.font-size: 64
+  }
+}
+
+
+# ── Layer 3: Data & Streaming ───────────────────────────────
+
+streaming: Data & Streaming Layer {
+  style.fill: "#F0FFF0"
+  style.stroke: "#28A745"
+  style.stroke-width: 4
+  style.border-radius: 12
+  style.font-size: 96
+  style.font-color: "#000000"
+  style.bold: true
+
+  kafka_producers: "Kafka Producers\n(3 Topics)" {
+    shape: image
+    icon: ./icons/python.svg
+    width: 500
+    height: 500
+    style.font-size: 64
+  }
+  kafka: "Apache Kafka\n(KRaft Mode)" {
+    shape: image
+    icon: ./icons/kafka.svg
+    width: 500
+    height: 500
+    style.font-size: 64
+  }
+
+  spark_cluster: Spark Structured Streaming {
+    style.fill: "#F8FFF8"
+    style.stroke: "#28A745"
+    style.stroke-width: 2
+    style.stroke-dash: 5
+    style.border-radius: 8
+    style.font-size: 80
+    style.font-color: "#000000"
+    style.bold: true
+
+    spark_tfd: "TFD\n(Transaction\nFraud Detection)" {
+      shape: image
+      icon: ./icons/spark.png
+      width: 500
+      height: 500
+      style.font-size: 64
+    }
+    spark_eta: "ETA\n(Estimated Time\nof Arrival)" {
+      shape: image
+      icon: ./icons/spark.png
+      width: 500
+      height: 500
+      style.font-size: 64
+    }
+    spark_ecci: "ECCI\n(E-Commerce Customer\nInteractions)" {
+      shape: image
+      icon: ./icons/spark.png
+      width: 500
+      height: 500
+      style.font-size: 64
+    }
+  }
+
+  delta_lake: "Delta Lake\n(Lakehouse)" {
+    shape: image
+    icon: ./icons/delta_lake.png
+    width: 500
+    height: 500
+    style.font-size: 64
+  }
+
+  # Data pipeline flow
+  kafka_producers -> kafka: "produce\nevents" {style.stroke: "#28A745"; style.stroke-width: 8}
+  kafka -> spark_cluster.spark_tfd: {style.stroke: "#28A745"; style.stroke-width: 8}
+  kafka -> spark_cluster.spark_eta: {style.stroke: "#28A745"; style.stroke-width: 7}
+  kafka -> spark_cluster.spark_ecci: {style.stroke: "#28A745"; style.stroke-width: 7}
+  spark_cluster.spark_tfd -> delta_lake: "persist to\nlakehouse" {style.stroke: "#28A745"; style.stroke-width: 8}
+  spark_cluster.spark_eta -> delta_lake: {style.stroke: "#28A745"; style.stroke-width: 7}
+  spark_cluster.spark_ecci -> delta_lake: {style.stroke: "#28A745"; style.stroke-width: 7}
+}
+
+
+# ── Layer 4: Application Services ───────────────────────────
+
+app: Application Services Layer {
+  style.fill: "#E8F4F8"
+  style.stroke: "#0066CC"
+  style.stroke-width: 4
+  style.border-radius: 12
+  style.font-size: 96
+  style.font-color: "#000000"
+  style.bold: true
+
+  fastapi: "FastAPI — Unified ML Service" {
+    style.fill: "#F0F4FF"
+    style.stroke: "#0066CC"
+    style.stroke-width: 2
+    style.stroke-dash: 5
+    style.border-radius: 8
+    style.font-size: 80
+    style.font-color: "#000000"
+    style.bold: true
+
+    incremental: "/v1/incremental\n(River ML)" {
+      shape: image
+      icon: ./icons/fastapi.png
+      width: 500
+      height: 500
+      style.font-size: 64
+    }
+    batch: "/v1/batch\n(Scikit-Learn + CatBoost)" {
+      shape: image
+      icon: ./icons/fastapi.png
+      width: 500
+      height: 500
+      style.font-size: 64
+    }
+    sql: "/v1/sql\n(DuckDB Queries)" {
+      shape: image
+      icon: ./icons/fastapi.png
+      width: 500
+      height: 500
+      style.font-size: 64
+    }
+  }
+
+  sveltekit: "SvelteKit\n(Frontend)" {
+    shape: image
+    icon: ./icons/svelte.png
+    width: 500
+    height: 500
+    style.font-size: 64
+  }
+  mlflow: "MLflow\n(Experiment Tracking)" {
+    shape: image
+    icon: ./icons/mlflow.png
+    width: 500
+    height: 500
+    style.font-size: 64
+  }
+  redis: "Redis\n(Model Cache\n30s TTL)" {
+    shape: image
+    icon: ./icons/redis.svg
+    width: 500
+    height: 500
+    style.font-size: 64
+  }
+  duckdb: "DuckDB\n(SQL Engine)" {
+    shape: image
+    icon: ./icons/duckdb.png
+    width: 500
+    height: 500
+    style.font-size: 64
+  }
+  minio: "MinIO\n(Object Storage)" {
+    shape: image
+    icon: ./icons/minio.png
+    width: 500
+    height: 500
+    style.font-size: 64
+  }
+  postgresql: "PostgreSQL\n(MLflow Metadata)" {
+    shape: image
+    icon: ./icons/postgresql.svg
+    width: 500
+    height: 500
+    style.font-size: 64
+  }
+
+  # Internal app connections
+  sveltekit -> fastapi.incremental: "REST API" {style.stroke: "#00B4D8"; style.stroke-width: 8}
+  sveltekit -> fastapi.batch: {style.stroke: "#00B4D8"; style.stroke-width: 7}
+  sveltekit -> fastapi.sql: {style.stroke: "#00B4D8"; style.stroke-width: 7}
+
+  fastapi.sql -> duckdb: {style.stroke: "#0066CC"; style.stroke-width: 7}
+
+  fastapi.incremental -> redis: "cache\nmodels" {style.stroke: "#0066CC"; style.stroke-width: 7}
+  fastapi.batch -> redis: {style.stroke: "#0066CC"; style.stroke-width: 7}
+
+  fastapi.incremental -> mlflow: "log\nexperiments" {style.stroke: "#6B46C1"; style.stroke-width: 7}
+  fastapi.batch -> mlflow: {style.stroke: "#6B46C1"; style.stroke-width: 7}
+
+  mlflow -> postgresql: metadata {style.stroke: "#6B46C1"; style.stroke-width: 7}
+  mlflow -> minio: artifacts {style.stroke: "#6B46C1"; style.stroke-width: 7}
+}
+
+
+# ── Layer 5: Observability & Monitoring ─────────────────────
+
+monitoring: Observability & Monitoring {
+  style.fill: "#FFF0F0"
+  style.stroke: "#E53E3E"
+  style.stroke-width: 4
+  style.border-radius: 12
+  style.font-size: 96
+  style.font-color: "#000000"
+  style.bold: true
+
+  prometheus: "Prometheus\n(ServiceMonitors)" {
+    shape: image
+    icon: ./icons/prometheus.svg
+    width: 500
+    height: 500
+    style.font-size: 64
+  }
+  grafana: "Grafana\n(Dashboards)" {
+    shape: image
+    icon: ./icons/grafana.svg
+    width: 500
+    height: 500
+    style.font-size: 64
+  }
+  alertmanager: Alertmanager {
+    shape: image
+    icon: ./icons/prometheus.svg
+    width: 500
+    height: 500
+    style.font-size: 64
+  }
+  karma: "Karma\n(Alert Dashboard)" {
+    shape: image
+    icon: ./icons/prometheus.svg
+    width: 500
+    height: 500
+    style.font-size: 64
+  }
+
+  # Monitoring internal flow
+  prometheus -> grafana: dashboards {style.stroke: "#E53E3E"; style.stroke-width: 2; style.stroke-dash: 3}
+  prometheus -> alertmanager: alerts {style.stroke: "#E53E3E"; style.stroke-width: 2; style.stroke-dash: 3}
+  alertmanager -> karma: dashboard {style.stroke: "#E53E3E"; style.stroke-width: 2; style.stroke-dash: 3}
+}
+
+
+# ============================================================
+# CROSS-LAYER EDGES
+# ============================================================
+
+# ── Layer ordering (infra -> gitops -> streaming -> app -> monitoring) ──
+infra -> gitops: {style.stroke: "#CCCCCC"; style.stroke-width: 6; style.stroke-dash: 8; style.opacity: 0.3}
+gitops -> streaming: {style.stroke: "#CCCCCC"; style.stroke-width: 6; style.stroke-dash: 8; style.opacity: 0.3}
+streaming -> app: {style.stroke: "#CCCCCC"; style.stroke-width: 6; style.stroke-dash: 8; style.opacity: 0.3}
+app -> monitoring: {style.stroke: "#CCCCCC"; style.stroke-width: 6; style.stroke-dash: 8; style.opacity: 0.3}
+
+# ── GitOps flow (orange dashed) ─────────────────────────────
+gitops.argocd -> gitops.gitlab: "watches\nrepo (CD)" {style.stroke: "#FF6B35"; style.stroke-width: 2; style.stroke-dash: 5}
+gitops.gitlab -> infra.k3d_registry: "CI/CD\nimage push" {style.stroke: "#FF6B35"; style.stroke-width: 2; style.stroke-dash: 5}
+infra.k3d_registry -> gitops.argocd_updater: "detect\nnew tags" {style.stroke: "#FF6B35"; style.stroke-width: 2; style.stroke-dash: 5}
+gitops.argocd_updater -> gitops.argocd: {style.stroke: "#FF6B35"; style.stroke-width: 2; style.stroke-dash: 5}
+gitops.argocd -> infra.helm: "GitOps\ndeploy" {style.stroke: "#FF6B35"; style.stroke-width: 2; style.stroke-dash: 5}
+
+# ── Helm deployment edges (faint dashed blue) ───────────────
+infra.helm -> streaming.kafka_producers: {style.stroke: "#004D99"; style.stroke-width: 6; style.stroke-dash: 5; style.opacity: 0.4}
+infra.helm -> streaming.kafka: {style.stroke: "#004D99"; style.stroke-width: 6; style.stroke-dash: 5; style.opacity: 0.4}
+infra.helm -> streaming.spark_cluster: {style.stroke: "#004D99"; style.stroke-width: 6; style.stroke-dash: 5; style.opacity: 0.4}
+infra.helm -> app.fastapi: {style.stroke: "#004D99"; style.stroke-width: 6; style.stroke-dash: 5; style.opacity: 0.4}
+infra.helm -> app.sveltekit: {style.stroke: "#004D99"; style.stroke-width: 6; style.stroke-dash: 5; style.opacity: 0.4}
+infra.helm -> app.mlflow: {style.stroke: "#004D99"; style.stroke-width: 6; style.stroke-dash: 5; style.opacity: 0.4}
+infra.helm -> app.redis: {style.stroke: "#004D99"; style.stroke-width: 6; style.stroke-dash: 5; style.opacity: 0.4}
+infra.helm -> app.minio: {style.stroke: "#004D99"; style.stroke-width: 6; style.stroke-dash: 5; style.opacity: 0.4}
+infra.helm -> app.postgresql: {style.stroke: "#004D99"; style.stroke-width: 6; style.stroke-dash: 5; style.opacity: 0.4}
+infra.helm -> monitoring.prometheus: {style.stroke: "#004D99"; style.stroke-width: 6; style.stroke-dash: 5; style.opacity: 0.4}
+infra.helm -> monitoring.grafana: {style.stroke: "#004D99"; style.stroke-width: 6; style.stroke-dash: 5; style.opacity: 0.4}
+infra.helm -> monitoring.alertmanager: {style.stroke: "#004D99"; style.stroke-width: 6; style.stroke-dash: 5; style.opacity: 0.4}
+infra.helm -> monitoring.karma: {style.stroke: "#004D99"; style.stroke-width: 6; style.stroke-dash: 5; style.opacity: 0.4}
+
+# ── Data pipeline cross-layer (green) ───────────────────────
+streaming.delta_lake -> app.minio: "stored on" {style.stroke: "#28A745"; style.stroke-width: 7}
+
+# ── Application data flow cross-layer (blue) ────────────────
+streaming.kafka -> app.fastapi.incremental: "incremental\nlearning" {style.stroke: "#0066CC"; style.stroke-width: 7}
+app.minio -> app.fastapi.batch: "batch\ndata reads" {style.stroke: "#0066CC"; style.stroke-width: 7}
+app.duckdb -> app.minio: "query\nDelta Lake" {style.stroke: "#0066CC"; style.stroke-width: 2; style.stroke-dash: 5}
+
+# ── Monitoring scraping cross-layer (red dotted) ────────────
+app.fastapi.incremental -> monitoring.prometheus: metrics {style.stroke: "#E53E3E"; style.stroke-width: 6; style.stroke-dash: 3}
+streaming.kafka -> monitoring.prometheus: {style.stroke: "#E53E3E"; style.stroke-width: 6; style.stroke-dash: 3}
+streaming.spark_cluster.spark_tfd -> monitoring.prometheus: {style.stroke: "#E53E3E"; style.stroke-width: 6; style.stroke-dash: 3}
