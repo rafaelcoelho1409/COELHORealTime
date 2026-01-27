@@ -100,10 +100,6 @@ spec:
                 --conf spark.hadoop.fs.s3a.threads.keepalivetime=60 \
                 --conf spark.hadoop.fs.s3a.multipart.purge.age=86400"
 
-              # Driver memory: 512m per driver (3 drivers = 1.5g heap, ~2.7g with overhead)
-              # Default 1g caused OOMKilled with 3 concurrent drivers in a 4Gi pod
-              DRIVER_CONF="--conf spark.driver.memory=512m"
-
               # Common executor config: 1 executor with 2 cores per app (3 apps × 2 cores = 6 of 8 cores)
               EXECUTOR_CONF="--conf spark.executor.cores=2 --conf spark.executor.memory=512m --conf spark.executor.instances=1 --conf spark.cores.max=2"
 
@@ -125,7 +121,6 @@ spec:
                 --conf "spark.driver.bindAddress=0.0.0.0" \
                 --conf "spark.ui.port=4040" \
                 $S3A_CONF \
-                $DRIVER_CONF \
                 $EXECUTOR_CONF \
                 $METRICS_CONF \
                 --conf "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension" \
@@ -142,7 +137,6 @@ spec:
                 --conf "spark.driver.bindAddress=0.0.0.0" \
                 --conf "spark.ui.port=4041" \
                 $S3A_CONF \
-                $DRIVER_CONF \
                 $EXECUTOR_CONF \
                 $METRICS_CONF \
                 --conf "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension" \
@@ -159,7 +153,6 @@ spec:
                 --conf "spark.driver.bindAddress=0.0.0.0" \
                 --conf "spark.ui.port=4042" \
                 $S3A_CONF \
-                $DRIVER_CONF \
                 $EXECUTOR_CONF \
                 $METRICS_CONF \
                 --conf "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension" \
@@ -204,12 +197,12 @@ spec:
                 fieldRef:
                   fieldPath: status.podIP
           resources:
-            # 3 concurrent Spark drivers: 3 × (512m heap + 384m overhead) ≈ 2.7g + OS/Python
+            # Increased for 3 concurrent Spark drivers (was OOMKilled with 2Gi)
             requests:
               memory: "2Gi"
               cpu: "1000m"
             limits:
-              memory: "5Gi"
+              memory: "4Gi"
               cpu: "2000m"
           volumeMounts:
             - name: spark-jobs

@@ -8,16 +8,16 @@ metadata:
   annotations:
     # ArgoCD Image Updater Configuration
     # Automatically updates image tags when new images are pushed to k3d registry
-    argocd-image-updater.argoproj.io/image-list: kafka=master-registry:5000/coelho-realtime-kafka,fastapi=master-registry:5000/coelho-realtime-fastapi,sveltekit=master-registry:5000/coelho-realtime-sveltekit
+    argocd-image-updater.argoproj.io/image-list: kafka-producers=master-registry:5000/coelho-realtime-kafka-producers,fastapi=master-registry:5000/coelho-realtime-fastapi,sveltekit=master-registry:5000/coelho-realtime-sveltekit
     # Write changes back to Git
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/git-creds
     argocd-image-updater.argoproj.io/git-branch: master
     # Update strategy: use latest tag
-    argocd-image-updater.argoproj.io/kafka.update-strategy: latest
+    argocd-image-updater.argoproj.io/kafka-producers.update-strategy: latest
     argocd-image-updater.argoproj.io/fastapi.update-strategy: latest
     argocd-image-updater.argoproj.io/sveltekit.update-strategy: latest
     # Helm parameter paths for each image
-    argocd-image-updater.argoproj.io/kafka.helm.image-name: kafka.image
+    argocd-image-updater.argoproj.io/kafka-producers.helm.image-name: kafka-producers.image
     argocd-image-updater.argoproj.io/fastapi.helm.image-name: fastapi.image
     argocd-image-updater.argoproj.io/sveltekit.helm.image-name: sveltekit.image
 spec:
