@@ -346,7 +346,7 @@ def _get_duckdb_connection(force_reconnect: bool = False) -> duckdb.DuckDBPyConn
     # Create connection with optimized settings
     conn = duckdb.connect(config={
         'threads': os.cpu_count(),  # Use all available CPU cores
-        'memory_limit': '4GB',       # Limit memory to avoid OOM
+        'memory_limit': '2GB',       # Limit memory to avoid OOM
         'temp_directory': '/tmp/duckdb',  # Use temp dir for spilling
     })
     # Enable autoinstall/autoload for faster subsequent loads

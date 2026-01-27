@@ -428,9 +428,9 @@ kube-prometheus-stack:
       # Scrape interval and evaluation
       scrapeInterval: 30s
       evaluationInterval: 30s
-      # Retention period (7 days for local dev)
-      retention: 7d
-      retentionSize: "5GB"
+      # Retention period (3 days for local dev)
+      retention: 3d
+      retentionSize: "2GB"
       # Resource limits for local k3d
       resources:
         requests:
@@ -834,6 +834,45 @@ kube-prometheus-stack:
       windows: false
 
 
+# Karma - Alertmanager Dashboard (https://github.com/prymitive/karma)
+karma:
+  enabled: true
+  image: ghcr.io/prymitive/karma:latest
+  imagePullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      memory: "64Mi"
+      cpu: "50m"
+    limits:
+      memory: "128Mi"
+      cpu: "100m"
+  portsSettings:
+    ports:
+      - name: http
+        port: 8088
+        targetPort: 8088
+        nodePort: 30088
+        protocol: TCP
+    type: LoadBalancer
+  livenessProbeSettings:
+    livenessProbe:
+      httpGet:
+        path: /
+        port: 8088
+      initialDelaySeconds: 15
+      periodSeconds: 10
+      failureThreshold: 3
+  readinessProbeSettings:
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: 8088
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      failureThreshold: 3
+
+
 # Bitnami Spark configuration (https://github.com/bitnami/charts/tree/main/bitnami/spark)
 # Used for Kafka → Delta Lake streaming pipeline
 # Delta Lake tables stored on MinIO (S3-compatible)
@@ -907,13 +946,13 @@ spark:
   worker:
     # Single worker for local development
     replicaCount: 1
-    # Resource limits
+    # Resource limits (3 executors × (512m + 384m overhead) + worker JVM)
     resources:
       requests:
         memory: "2Gi"
         cpu: "1000m"
       limits:
-        memory: "4Gi"
+        memory: "5Gi"
         cpu: "2000m"
     # Same init container for workers
     extraEnvVars:

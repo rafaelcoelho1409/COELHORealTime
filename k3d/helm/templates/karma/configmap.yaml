@@ -1,0 +1,9 @@
+{{- $appName := "karma" -}}
+{{- $appConfig := index $.Values $appName }}
+{{- if $appConfig.enabled }}
+apiVersion: v1
+{{- include "coelho-realtime.ConfigMapSettings" (dict "appName" $appName "root" .) | nindent 0 }}
+data:
+  ALERTMANAGER_URI: "http://coelho-realtime-kube-prome-alertmanager:9094"
+  PORT: "8088"
+{{- end }}

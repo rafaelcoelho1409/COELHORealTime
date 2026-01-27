@@ -126,6 +126,13 @@ portForward:
     port: 9094
     localPort: 9094
     address: 0.0.0.0
+  # Karma (Alertmanager Dashboard)
+  - resourceType: service
+    resourceName: coelho-realtime-karma
+    namespace: coelho-realtime
+    port: 8088
+    localPort: 8088
+    address: 0.0.0.0
   # Spark Master Web UI (shows running applications, workers, streaming jobs)
   - resourceType: service
     resourceName: coelho-realtime-spark-master-svc

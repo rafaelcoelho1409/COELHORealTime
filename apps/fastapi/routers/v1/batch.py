@@ -13,6 +13,7 @@ import subprocess
 import asyncio
 import time
 import os
+import gc
 from datetime import datetime
 import mlflow
 
@@ -144,6 +145,8 @@ sklearn_healthcheck = SklearnHealthcheck()
 # =============================================================================
 class ModelCache:
     """Cache for loaded models and encoders from MLflow."""
+    MAX_ENTRIES = 3  # One per project
+
     def __init__(self, ttl_seconds: int = 30):
         self.models: Dict[str, any] = {}
         self.encoders: Dict[str, any] = {}
@@ -156,6 +159,16 @@ class ModelCache:
         if project_name not in self.timestamps:
             return True
         return (time.time() - self.timestamps[project_name]) > self.ttl_seconds
+
+    def _evict_oldest(self):
+        """Evict oldest cache entry if at capacity."""
+        if len(self.models) >= self.MAX_ENTRIES:
+            oldest_key = min(self.timestamps, key=self.timestamps.get)
+            self.models.pop(oldest_key, None)
+            self.encoders.pop(oldest_key, None)
+            self.run_ids.pop(oldest_key, None)
+            self.timestamps.pop(oldest_key, None)
+            gc.collect()
 
     def get_model(self, project_name: str):
         """Get cached model or load from MLflow if expired/missing."""
@@ -171,6 +184,7 @@ class ModelCache:
             return None, None
         model = load_model_from_mlflow(project_name, model_name, run_id=run_id)
         if model is not None:
+            self._evict_oldest()
             self.models[project_name] = model
             self.run_ids[project_name] = run_id
             self.timestamps[project_name] = time.time()
@@ -189,6 +203,7 @@ class ModelCache:
             self.encoders.clear()
             self.run_ids.clear()
             self.timestamps.clear()
+        gc.collect()
 
 
 model_cache = ModelCache(ttl_seconds=30)  # 30 second cache
@@ -198,6 +213,8 @@ model_cache = ModelCache(ttl_seconds=30)  # 30 second cache
 # MLflow Caches
 # =============================================================================
 class MLflowMetricsCache:
+    MAX_ENTRIES = 50
+
     def __init__(self, ttl_seconds: int = MLFLOW_METRICS_CACHE_TTL):
         self._cache: Dict[str, tuple[float, dict]] = {}
         self._ttl = ttl_seconds
@@ -211,6 +228,10 @@ class MLflowMetricsCache:
         return None
 
     def set(self, key: str, value: dict):
+        # Evict oldest entries when at capacity
+        if len(self._cache) >= self.MAX_ENTRIES and key not in self._cache:
+            oldest_key = min(self._cache, key=lambda k: self._cache[k][0])
+            del self._cache[oldest_key]
         self._cache[key] = (time.time(), value)
 
     def clear(self):
@@ -1522,6 +1543,12 @@ def _sync_generate_yellowbrick_plot(
         plt.close('all')
         if fig_buf:
             fig_buf.close()
+        # Free large DataFrames
+        try:
+            del X_train, X_test, y_train, y_test, X, y, result
+        except NameError:
+            pass
+        gc.collect()
 
 
 def _sync_generate_sklearn_plot(
@@ -1637,6 +1664,12 @@ def _sync_generate_sklearn_plot(
         plt.clf()
         plt.close("all")
         fig_buf.close()
+        # Free large DataFrames
+        try:
+            del X_train, X_test, y_train, y_test, result
+        except NameError:
+            pass
+        gc.collect()
 
 
 def _sync_generate_scikitplot_plot(
@@ -1709,6 +1742,12 @@ def _sync_generate_scikitplot_plot(
         plt.clf()
         plt.close("all")
         fig_buf.close()
+        # Free large DataFrames
+        try:
+            del X_train, X_test, y_train, y_test, result
+        except NameError:
+            pass
+        gc.collect()
 
 
 @router.post("/visualization/metric/yellowbrick")

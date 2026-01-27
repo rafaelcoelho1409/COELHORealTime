@@ -123,6 +123,7 @@ with Diagram(
         "nodesep": "1.0",
         "ranksep": "2.5",
         "compound": "true",
+        "dpi": "200",
     },
 ):
 
@@ -196,6 +197,7 @@ with Diagram(
         prometheus = Prometheus("Prometheus\n(ServiceMonitors)")
         grafana = Grafana("Grafana\n(Dashboards)")
         alertmanager = Prometheus("Alertmanager")
+        karma = Prometheus("Karma\n(Alert Dashboard)")
 
     # ===========================================================
     # EDGES
@@ -260,6 +262,7 @@ with Diagram(
     helm >> Edge(**_helm_edge) >> prometheus
     helm >> Edge(**_helm_edge) >> grafana
     helm >> Edge(**_helm_edge) >> alertmanager
+    helm >> Edge(**_helm_edge) >> karma
 
     # ── GitOps Flow (dashed orange) ───────────────────────────
     argocd >> Edge(
@@ -389,6 +392,13 @@ with Diagram(
         penwidth="2",
         label="alerts",
     ) >> alertmanager
+    alertmanager >> Edge(
+        color="#E53E3E",
+        style="dotted",
+        penwidth="2",
+        label="dashboard",
+        constraint="false",
+    ) >> karma
 
     # Scraping edges (key services only, constraint=false to avoid layout disruption)
     fastapi_inc >> Edge(

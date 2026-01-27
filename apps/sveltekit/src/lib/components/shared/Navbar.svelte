@@ -109,6 +109,12 @@
 			href: 'http://localhost:9094',
 			icon: 'https://cdn.jsdelivr.net/gh/devicons/devicon/icons/prometheus/prometheus-original.svg',
 			description: 'Alert Management'
+		},
+		{
+			name: 'Karma',
+			href: 'http://localhost:8088',
+			icon: 'https://cdn.simpleicons.org/prometheus/E6522C',
+			description: 'Alert Dashboard'
 		}
 	];
 
