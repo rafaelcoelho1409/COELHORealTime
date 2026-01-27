@@ -34,6 +34,7 @@ with incremental learning (River), batch learning (CatBoost/Scikit-Learn), and f
 - [Tech Stack](#tech-stack)
 - [Key Components](#key-components)
 - [Prerequisites](#prerequisites)
+- [Infrastructure Specifications](#infrastructure-specifications)
 - [Getting Started](#getting-started)
 - [Service Access](#service-access)
 - [API Reference](#api-reference)
@@ -275,6 +276,57 @@ A single umbrella chart with 7 dependencies:
 | **Helm** | 3.12+ | Chart management |
 | **Skaffold** | latest | Local development workflow (optional — see Helm-only method) |
 | **Git** | latest | Version control |
+
+---
+
+## Infrastructure Specifications
+
+> **Minimum 32GB RAM required.** This platform runs multiple memory-intensive services concurrently (FastAPI with 8GB limit, Spark workers with 5GB limit, Kafka with 2GB limit, Prometheus with 2GB limit, etc.). Systems with less than 32GB will experience OOMKills and pod restart loops.
+
+### Development Environment
+
+| Component | Specification |
+|---|---|
+| **OS** | Arch Linux (any Linux distribution supported) |
+| **RAM** | 64GB |
+| **Processor** | Intel Core i7 11th Generation |
+| **CPU Cores** | 8 |
+| **Storage** | 2TB SSD NVMe |
+
+### Kubernetes Resource Allocation
+
+The table below shows the memory requests and limits configured for each service. All services run concurrently in the same k3d cluster.
+
+| Service | Memory Request | Memory Limit | CPU Request | CPU Limit |
+|---|---|---|---|---|
+| **FastAPI** (Unified ML API) | 4Gi | 8Gi | 1000m | 2000m |
+| **Spark Worker** (x1) | 2Gi | 5Gi | 1000m | 2000m |
+| **Spark Master** | 1Gi | 2Gi | 500m | 1000m |
+| **Kafka** (KRaft controller) | 1Gi | 2Gi | 500m | 1000m |
+| **Prometheus** | 512Mi | 2Gi | 200m | 1000m |
+| **SvelteKit** (Frontend) | 1Gi | 2Gi | 250m | 500m |
+| **MLflow** | 512Mi | 1Gi | 250m | 500m |
+| **Redis** | 256Mi | 512Mi | 100m | 250m |
+| **MinIO** | 256Mi | 512Mi | 100m | — |
+| **PostgreSQL** | 256Mi | 512Mi | 100m | 500m |
+| **Grafana** | 256Mi | 512Mi | 100m | 500m |
+| **Kafka Producers** | 256Mi | 512Mi | 100m | 250m |
+| **Prometheus Operator** | 128Mi | 256Mi | 100m | 200m |
+| **Alertmanager** | 64Mi | 128Mi | 50m | 100m |
+| **Karma** | 64Mi | 128Mi | 50m | 100m |
+| **Redis Metrics Exporter** | 64Mi | 128Mi | 50m | 100m |
+| **PostgreSQL Metrics Exporter** | 64Mi | 128Mi | 50m | 100m |
+| **Node Exporter** | 32Mi | 64Mi | 50m | 100m |
+| **Total (approximate)** | **~12Gi** | **~26Gi** | **~4.5 cores** | **~10 cores** |
+
+### Minimum Hardware Requirements
+
+| Tier | RAM | CPU Cores | Notes |
+|---|---|---|---|
+| **Minimum** | 32GB | 8 | Services may hit memory limits under heavy load |
+| **Recommended** | 64GB | 8+ | Comfortable headroom for all services plus OS and Docker overhead |
+
+The k3d cluster itself, Docker daemon, and host OS require additional memory beyond what is allocated to Kubernetes pods. With 32GB, expect ~6GB for the host and Docker, leaving ~26GB for Kubernetes — enough to run all services at their configured limits. With 64GB, there is ample headroom for peak workloads, multiple training jobs, and Spark processing.
 
 ---
 
