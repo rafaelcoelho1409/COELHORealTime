@@ -33,6 +33,6 @@ ENV PATH="/app/.venv/bin:$PATH"
 # Create logs directory
 RUN mkdir -p /app/logs
 
-EXPOSE 8001
+EXPOSE 8000
 
 ENTRYPOINT ["/bin/bash", "/app/entrypoint.sh"]

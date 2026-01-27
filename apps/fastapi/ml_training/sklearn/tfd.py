@@ -39,7 +39,7 @@ from utils.batch import (
 
 
 MLFLOW_HOST = os.environ["MLFLOW_HOST"]
-FASTAPI_STATUS_URL = "http://localhost:8001/api/v1/batch/training-status"
+FASTAPI_STATUS_URL = "http://localhost:8000/api/v1/batch/training-status"
 
 # =============================================================================
 # GRACEFUL SHUTDOWN (Signal Handling - matches River pattern)

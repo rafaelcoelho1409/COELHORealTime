@@ -29,6 +29,46 @@ groups:
         annotations:
           summary: "FastAPI has high error rate"
           description: "FastAPI error rate is {{ $value | printf \"%.1f\" }}% (threshold: 5%)."
+      - alert: FastAPITrainingFailed
+        expr: increase(fastapi_training_errors_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "FastAPI ML training failed"
+          description: "Training errors detected for project {{ $labels.project }} ({{ $labels.model_type }}). {{ $value }} errors in last 5 minutes."
+      - alert: FastAPIHighPredictionLatency
+        expr: histogram_quantile(0.95, rate(fastapi_prediction_duration_seconds_bucket[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "FastAPI prediction latency is high"
+          description: "Prediction p95 latency is {{ $value | printf \"%.2f\" }}s (threshold: 1s)."
+      - alert: FastAPIMLflowErrors
+        expr: increase(fastapi_mlflow_errors_total[5m]) > 3
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "FastAPI MLflow errors detected"
+          description: "{{ $value }} MLflow {{ $labels.operation }} errors in the last 5 minutes."
+      - alert: FastAPISQLErrors
+        expr: increase(fastapi_sql_errors_total[5m]) > 5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "FastAPI SQL errors detected"
+          description: "{{ $value }} SQL errors ({{ $labels.error_type }}) in the last 5 minutes."
+      - alert: FastAPILowCacheHitRate
+        expr: sum(rate(fastapi_model_cache_hits_total[15m])) / (sum(rate(fastapi_model_cache_hits_total[15m])) + sum(rate(fastapi_model_cache_misses_total[15m]))) < 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "FastAPI cache hit rate is low"
+          description: "Cache hit rate is {{ $value | printf \"%.1f\" }}% (threshold: 50%)."
   # Kafka Data Pipeline Alerts (JMX Exporter metrics)
   - name: kafka.rules
     interval: 30s
@@ -117,6 +157,38 @@ groups:
         annotations:
           summary: "Kafka producers memory usage is high"
           description: "Kafka producers memory usage is {{ $value | printf \"%.1f\" }}%."
+      - alert: KafkaProducersNotSending
+        expr: rate(kafka_producer_messages_sent_total[5m]) == 0 and kafka_producer_connected == 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kafka producer is connected but not sending messages"
+          description: "Producer {{ $labels.producer }} has not sent any messages in the last 5 minutes."
+      - alert: KafkaProducersHighSendLatency
+        expr: histogram_quantile(0.95, rate(kafka_producer_send_duration_seconds_bucket[5m])) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka producer send latency is high"
+          description: "Producer send p95 latency is {{ $value | printf \"%.3f\" }}s (threshold: 0.5s)."
+      - alert: KafkaProducersHighErrorRate
+        expr: rate(kafka_producer_errors_total[5m]) / rate(kafka_producer_messages_sent_total[5m]) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka producer error rate is high"
+          description: "Producer {{ $labels.producer }} error rate is {{ $value | printf \"%.2f\" }}% (threshold: 1%)."
+      - alert: KafkaProducerDisconnected
+        expr: kafka_producer_connected == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kafka producer is disconnected"
+          description: "Producer {{ $labels.producer }} has been disconnected for more than 2 minutes."
   # MLflow Tracking Server Alerts
   - name: mlflow.rules
     interval: 30s

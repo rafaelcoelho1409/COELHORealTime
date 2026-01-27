@@ -9,6 +9,17 @@ import click
 from pprint import pprint
 import os
 
+from metrics import (
+    MESSAGES_SENT_TOTAL,
+    ERRORS_TOTAL,
+    SEND_DURATION_SECONDS,
+    MESSAGE_SIZE_BYTES,
+    CONNECTED,
+    CONNECTION_RETRIES_TOTAL,
+    LAST_MESSAGE_TIMESTAMP,
+    FRAUD_RATIO,
+)
+
 
 KAFKA_HOST = os.environ["KAFKA_HOST"]
 KAFKA_TOPIC = 'transaction_fraud_detection'
@@ -47,12 +58,15 @@ def create_producer():
             print("Checking Kafka metadata availability...")
             producer.partitions_for(KAFKA_TOPIC)  # This will block until metadata is available or timeout
             print("Kafka Producer connected and ready!")
+            CONNECTED.labels(producer="tfd").set(1)
             return producer
         except Exception as e:
             retry_count += 1
+            CONNECTION_RETRIES_TOTAL.labels(producer="tfd").inc()
             print(f"Error connecting to Kafka (attempt {retry_count}/{max_retries}): {e}")
             print("Retrying in 10 seconds...")
             time.sleep(10)
+    CONNECTED.labels(producer="tfd").set(0)
     raise Exception(f"Failed to connect to Kafka after {max_retries} attempts")
 
 
@@ -205,6 +219,7 @@ def run_producer(
     print("Starting to send transaction events...")
     last_print_time = time.time()
     message_count = 0
+    fraud_count = 0
     try:
         while True:
             transaction = generate_transaction(
@@ -215,8 +230,22 @@ def run_producer(
                 billing_address_match_missing_probability,
                 high_value_fraud_probability
             )
-            producer.send(KAFKA_TOPIC, value = transaction)
+            send_start = time.time()
+            msg_bytes = orjson.dumps(transaction)
+            try:
+                producer.send(KAFKA_TOPIC, value=transaction)
+                SEND_DURATION_SECONDS.labels(topic=KAFKA_TOPIC).observe(time.time() - send_start)
+                MESSAGE_SIZE_BYTES.labels(topic=KAFKA_TOPIC).observe(len(msg_bytes))
+                MESSAGES_SENT_TOTAL.labels(topic=KAFKA_TOPIC, producer="tfd").inc()
+                LAST_MESSAGE_TIMESTAMP.labels(producer="tfd").set(time.time())
+            except Exception as e:
+                ERRORS_TOTAL.labels(topic=KAFKA_TOPIC, producer="tfd", error_type="send").inc()
+                print(f"Error sending message: {e}")
             message_count += 1
+            if transaction.get("is_fraud"):
+                fraud_count += 1
+            if message_count % 100 == 0:
+                FRAUD_RATIO.set(fraud_count / message_count if message_count > 0 else 0)
             # Print sample every 60 seconds
             current_time = time.time()
             if current_time - last_print_time >= 60:
@@ -228,6 +257,7 @@ def run_producer(
     except KeyboardInterrupt:
         print("Stopping producer.")
     finally:
+        CONNECTED.labels(producer="tfd").set(0)
         if producer:
             producer.flush() # Ensure all messages are sent
             producer.close()

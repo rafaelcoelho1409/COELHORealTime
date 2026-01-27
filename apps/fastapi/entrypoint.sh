@@ -13,4 +13,4 @@ mkdir -p /app/logs
 #   /api/v1/incremental - River (streaming ML)
 #   /api/v1/batch       - Scikit-Learn/CatBoost (batch ML)
 #   /api/v1/sql         - SQL queries against Delta Lake
-exec uvicorn app:app --host 0.0.0.0 --port 8001 --reload
+exec uvicorn app:app --host 0.0.0.0 --port 8000 --reload

@@ -30,4 +30,7 @@ COPY . /app
 # Use the venv's Python directly
 ENV PATH="/app/.venv/bin:$PATH"
 
+# Expose Prometheus metrics port
+EXPOSE 8000
+
 ENTRYPOINT ["/bin/bash", "/app/entrypoint.sh"]

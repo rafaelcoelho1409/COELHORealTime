@@ -70,7 +70,7 @@
 	const services = [
 		{
 			name: 'FastAPI',
-			href: 'http://localhost:8001/docs',
+			href: 'http://localhost:8000/docs',
 			icon: 'https://cdn.jsdelivr.net/gh/devicons/devicon/icons/fastapi/fastapi-original.svg',
 			description: 'API Documentation'
 		},
@@ -100,7 +100,7 @@
 		},
 		{
 			name: 'Grafana',
-			href: 'http://localhost:3001',
+			href: 'http://localhost:3000',
 			icon: 'https://cdn.jsdelivr.net/gh/devicons/devicon/icons/grafana/grafana-original.svg',
 			description: 'Dashboards'
 		},

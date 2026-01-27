@@ -14,6 +14,20 @@ import asyncio
 import time
 import mlflow
 
+from metrics import (
+    TRAINING_ACTIVE,
+    TRAINING_STARTED_TOTAL,
+    TRAINING_ERRORS_TOTAL,
+    TRAINING_DURATION_SECONDS,
+    PREDICTIONS_TOTAL,
+    PREDICTION_DURATION_SECONDS,
+    PREDICTION_ERRORS_TOTAL,
+    MODEL_CACHE_HITS_TOTAL,
+    MODEL_CACHE_MISSES_TOTAL,
+    MODEL_LOAD_DURATION_SECONDS,
+    MLFLOW_OPERATION_DURATION_SECONDS,
+    MLFLOW_ERRORS_TOTAL,
+)
 from models import (
     SwitchModelRequest,
     PageInitRequest,
@@ -109,9 +123,13 @@ def get_cached_experiment(project_name: str):
     if cache_entry:
         timestamp, experiment = cache_entry
         if time.time() - timestamp < _EXPERIMENT_CACHE_TTL:
+            MODEL_CACHE_HITS_TOTAL.labels(cache_type="experiment").inc()
             return experiment
 
+    MODEL_CACHE_MISSES_TOTAL.labels(cache_type="experiment").inc()
+    start = time.time()
     experiment = mlflow.get_experiment_by_name(project_name)
+    MLFLOW_OPERATION_DURATION_SECONDS.labels(operation="get_experiment").observe(time.time() - start)
     if experiment:
         _experiment_cache[project_name] = (time.time(), experiment)
     return experiment
@@ -193,6 +211,9 @@ def stop_current_model() -> bool:
         print(f"Error stopping model: {e}")
         state.status = f"Error stopping model: {e}"
     finally:
+        # Reset training active gauge for all incremental projects
+        for pname in PROJECT_NAMES:
+            TRAINING_ACTIVE.labels(project=pname, model_type="incremental").set(0)
         state.current_process = None
         state.current_model_name = None
 
@@ -266,6 +287,9 @@ async def switch_model(request: SwitchModelRequest):
     # Start training subprocess
     command = ["/app/.venv/bin/python3", "-u", model_key]
 
+    # Resolve project name for metrics labels
+    project_name = model_scripts.get(model_key, model_key)
+
     try:
         import os
 
@@ -293,6 +317,9 @@ async def switch_model(request: SwitchModelRequest):
         state.current_model_name = model_key
         state.status = f"Running {model_key}"
 
+        TRAINING_STARTED_TOTAL.labels(project=project_name, model_type="incremental").inc()
+        TRAINING_ACTIVE.labels(project=project_name, model_type="incremental").set(1)
+
         print(f"Model {model_key} started with PID: {process.pid}")
         return {"message": f"Started model: {model_key}", "pid": process.pid}
 
@@ -301,6 +328,7 @@ async def switch_model(request: SwitchModelRequest):
         state.current_process = None
         state.current_model_name = None
         state.status = f"Failed to start: {e}"
+        TRAINING_ERRORS_TOTAL.labels(project=project_name, model_type="incremental").inc()
         raise HTTPException(
             status_code=500,
             detail=f"Failed to start model {model_key}: {str(e)}",
@@ -348,22 +376,29 @@ async def predict(request: PredictRequest):
     model_source = "mlflow"  # default
     encoders = None
     model = None
+    predict_start = time.time()
 
     # First, check if training is active and try to load live model from Redis
     if is_training_active(project_name, model_name):
+        load_start = time.time()
         redis_result = load_live_model_from_redis(project_name, model_name)
         if redis_result is not None:
             model, encoders = redis_result
             model_source = "live"
+            MODEL_LOAD_DURATION_SECONDS.labels(project=project_name, source="redis").observe(time.time() - load_start)
+            MODEL_CACHE_HITS_TOTAL.labels(cache_type="model").inc()
             print(f"Using LIVE model from Redis for {project_name}/{model_name}")
 
     # If no live model, load from MLflow (best historical model)
     if model is None:
         try:
+            load_start = time.time()
             model = load_or_create_model(project_name, model_name)
+            MODEL_LOAD_DURATION_SECONDS.labels(project=project_name, source="mlflow").observe(time.time() - load_start)
             model_source = "mlflow"
         except Exception as e:
             print(f"Error loading model from MLflow: {e}")
+            PREDICTION_ERRORS_TOTAL.labels(project=project_name).inc()
             raise HTTPException(
                 status_code=503,
                 detail=f"Model '{model_name}' for project '{project_name}' not available. Train a model first.",
@@ -393,6 +428,8 @@ async def predict(request: PredictRequest):
                 y_pred_proba = model.predict_proba_one(processed_x)
                 fraud_probability = y_pred_proba.get(1, 0.0) if y_pred_proba else 0.0
                 binary_prediction = 1 if fraud_probability >= 0.5 else 0
+                PREDICTIONS_TOTAL.labels(project=project_name, source=model_source).inc()
+                PREDICTION_DURATION_SECONDS.labels(project=project_name).observe(time.time() - predict_start)
                 return {
                     "fraud_probability": fraud_probability,
                     "prediction": binary_prediction,
@@ -401,6 +438,8 @@ async def predict(request: PredictRequest):
 
             elif project_name == "Estimated Time of Arrival":
                 y_pred = model.predict_one(processed_x)
+                PREDICTIONS_TOTAL.labels(project=project_name, source=model_source).inc()
+                PREDICTION_DURATION_SECONDS.labels(project=project_name).observe(time.time() - predict_start)
                 return {
                     "Estimated Time of Arrival": y_pred,
                     "model_source": model_source,
@@ -408,6 +447,8 @@ async def predict(request: PredictRequest):
 
             elif project_name == "E-Commerce Customer Interactions":
                 y_pred = model.predict_one(processed_x)
+                PREDICTIONS_TOTAL.labels(project=project_name, source=model_source).inc()
+                PREDICTION_DURATION_SECONDS.labels(project=project_name).observe(time.time() - predict_start)
                 return {
                     "cluster": y_pred,
                     "model_source": model_source,
@@ -415,6 +456,7 @@ async def predict(request: PredictRequest):
 
         except Exception as e:
             print(f"Error during prediction: {e}")
+            PREDICTION_ERRORS_TOTAL.labels(project=project_name).inc()
             raise HTTPException(
                 status_code=500,
                 detail=f"Prediction failed: {str(e)}",
@@ -482,7 +524,10 @@ async def get_mlflow_metrics(request: MLflowMetricsRequest):
     if not request.force_refresh:
         cached_result = mlflow_cache.get(cache_key)
         if cached_result is not None:
+            MODEL_CACHE_HITS_TOTAL.labels(cache_type="metrics").inc()
             return cached_result
+
+    MODEL_CACHE_MISSES_TOTAL.labels(cache_type="metrics").inc()
 
     try:
         experiment = get_cached_experiment(request.project_name)
@@ -493,12 +538,15 @@ async def get_mlflow_metrics(request: MLflowMetricsRequest):
             )
 
         # First check for RUNNING experiments (real-time training)
+        start_mlflow = time.time()
         runs_df = mlflow.search_runs(
             experiment_ids=[experiment.experiment_id],
             filter_string="attributes.status = 'RUNNING'",
             max_results=10,
             order_by=["start_time DESC"],
         )
+
+        MLFLOW_OPERATION_DURATION_SECONDS.labels(operation="search_runs").observe(time.time() - start_mlflow)
 
         if not runs_df.empty:
             running_runs = runs_df[runs_df["tags.mlflow.runName"] == request.model_name]
@@ -542,6 +590,7 @@ async def get_mlflow_metrics(request: MLflowMetricsRequest):
         raise
     except Exception as e:
         print(f"Error fetching MLflow metrics: {e}")
+        MLFLOW_ERRORS_TOTAL.labels(operation="get_metrics").inc()
         raise HTTPException(
             status_code=500,
             detail=f"Failed to fetch MLflow metrics: {str(e)}",

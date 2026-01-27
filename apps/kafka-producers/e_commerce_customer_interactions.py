@@ -9,6 +9,17 @@ import click
 import os
 from pprint import pprint
 
+from metrics import (
+    MESSAGES_SENT_TOTAL,
+    ERRORS_TOTAL,
+    SEND_DURATION_SECONDS,
+    MESSAGE_SIZE_BYTES,
+    CONNECTED,
+    CONNECTION_RETRIES_TOTAL,
+    LAST_MESSAGE_TIMESTAMP,
+    ACTIVE_SESSIONS,
+)
+
 
 KAFKA_HOST = os.environ["KAFKA_HOST"]
 KAFKA_TOPIC = 'e_commerce_customer_interactions' # Topic name remains the same
@@ -76,12 +87,15 @@ def create_producer():
             print("Checking Kafka metadata availability...")
             producer.partitions_for(KAFKA_TOPIC)
             print("Kafka Producer connected and ready!")
+            CONNECTED.labels(producer="ecci").set(1)
             return producer
         except Exception as e:
             retry_count += 1
+            CONNECTION_RETRIES_TOTAL.labels(producer="ecci").inc()
             print(f"Error connecting to Kafka (attempt {retry_count}/{max_retries}): {e}")
             print("Retrying in 10 seconds...")
             time.sleep(10)
+    CONNECTED.labels(producer="ecci").set(0)
     raise Exception(f"Failed to connect to Kafka after {max_retries} attempts")
 
 def generate_customer_event(event_rate_per_minute):
@@ -249,8 +263,21 @@ def run_producer(event_rate_per_minute):
             # Generate event
             interaction_event = generate_customer_event(event_rate_per_minute)
             if interaction_event:
-                producer.send(KAFKA_TOPIC, value = interaction_event)
+                send_start = time.time()
+                msg_bytes = orjson.dumps(interaction_event)
+                try:
+                    producer.send(KAFKA_TOPIC, value=interaction_event)
+                    SEND_DURATION_SECONDS.labels(topic=KAFKA_TOPIC).observe(time.time() - send_start)
+                    MESSAGE_SIZE_BYTES.labels(topic=KAFKA_TOPIC).observe(len(msg_bytes))
+                    MESSAGES_SENT_TOTAL.labels(topic=KAFKA_TOPIC, producer="ecci").inc()
+                    LAST_MESSAGE_TIMESTAMP.labels(producer="ecci").set(time.time())
+                except Exception as e:
+                    ERRORS_TOTAL.labels(topic=KAFKA_TOPIC, producer="ecci", error_type="send").inc()
+                    print(f"Error sending message: {e}")
                 message_count += 1
+                # Update active sessions gauge periodically
+                if message_count % 50 == 0:
+                    ACTIVE_SESSIONS.set(len(active_sessions))
                 # Print sample every 60 seconds
                 current_time = time.time()
                 if current_time - last_print_time >= 60:
@@ -263,6 +290,7 @@ def run_producer(event_rate_per_minute):
     except KeyboardInterrupt:
         print("Stopping producer.")
     finally:
+        CONNECTED.labels(producer="ecci").set(0)
         if producer:
             producer.flush() # Ensure all messages are sent
             producer.close()

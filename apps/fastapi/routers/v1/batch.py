@@ -19,6 +19,22 @@ import mlflow
 # Disable EC2 metadata lookup to prevent timeouts when running locally
 os.environ["AWS_EC2_METADATA_DISABLED"] = "true"
 
+from metrics import (
+    TRAINING_ACTIVE,
+    TRAINING_STARTED_TOTAL,
+    TRAINING_ERRORS_TOTAL,
+    TRAINING_DURATION_SECONDS,
+    PREDICTIONS_TOTAL,
+    PREDICTION_DURATION_SECONDS,
+    PREDICTION_ERRORS_TOTAL,
+    MODEL_CACHE_HITS_TOTAL,
+    MODEL_CACHE_MISSES_TOTAL,
+    MODEL_LOAD_DURATION_SECONDS,
+    MLFLOW_OPERATION_DURATION_SECONDS,
+    MLFLOW_ERRORS_TOTAL,
+    VISUALIZATION_DURATION_SECONDS,
+    VISUALIZATION_CACHE_HITS_TOTAL,
+)
 from models import (
     BatchSwitchModelRequest,
     BatchInitRequest,
@@ -354,6 +370,9 @@ def stop_current_training() -> bool:
             pass
     finally:
         batch_state.close_log_file()
+        # Reset training active gauge for all batch projects
+        for pname in PROJECT_NAMES:
+            TRAINING_ACTIVE.labels(project=pname, model_type="batch").set(0)
         batch_state.current_process = None
         batch_state.current_model_name = None
         batch_state.completed_at = datetime.utcnow().isoformat() + "Z"
@@ -511,6 +530,10 @@ async def switch_batch_model(request: BatchSwitchModelRequest):
         batch_state.reset_status()
         batch_state.update_status("Starting training...", progress=0, stage="initializing")
 
+        project_name = model_scripts.get(model_key, model_key)
+        TRAINING_STARTED_TOTAL.labels(project=project_name, model_type="batch").inc()
+        TRAINING_ACTIVE.labels(project=project_name, model_type="batch").set(1)
+
         print(f"Batch training {model_key} started with PID: {process.pid}")
         return {"message": f"Started training: {model_key}", "pid": process.pid}
 
@@ -520,6 +543,8 @@ async def switch_batch_model(request: BatchSwitchModelRequest):
         batch_state.current_process = None
         batch_state.current_model_name = None
         batch_state.status = f"Failed to start: {e}"
+        project_name = model_scripts.get(model_key, model_key)
+        TRAINING_ERRORS_TOTAL.labels(project=project_name, model_type="batch").inc()
         raise HTTPException(
             status_code=500,
             detail=f"Failed to start training {model_key}: {str(e)}",
@@ -574,10 +599,13 @@ async def predict(request: PredictRequest):
     model_name = request.model_name
     run_id = request.run_id
 
+    predict_start = time.time()
+
     # Get run_id if not specified
     if not run_id:
         run_id = get_best_mlflow_run(project_name, model_name)
         if not run_id:
+            PREDICTION_ERRORS_TOTAL.labels(project=project_name).inc()
             raise HTTPException(status_code=404, detail="No trained model found")
 
     task_type = PROJECT_TASK_TYPES.get(project_name, "classification")
@@ -632,6 +660,8 @@ async def predict(request: PredictRequest):
             prediction = int(model.predict(df)[0])
             proba = model.predict_proba(df)[0]
             fraud_probability = float(proba[1]) if len(proba) > 1 else float(proba[0])
+            PREDICTIONS_TOTAL.labels(project=project_name, source="mlflow").inc()
+            PREDICTION_DURATION_SECONDS.labels(project=project_name).observe(time.time() - predict_start)
             return {
                 "prediction": prediction,
                 "fraud_probability": fraud_probability,
@@ -670,6 +700,8 @@ async def predict(request: PredictRequest):
             df = pd.DataFrame([features])
             # Predict
             prediction = float(model.predict(df)[0])
+            PREDICTIONS_TOTAL.labels(project=project_name, source="mlflow").inc()
+            PREDICTION_DURATION_SECONDS.labels(project=project_name).observe(time.time() - predict_start)
             return {
                 "estimated_travel_time_seconds": prediction,
                 "model_source": "mlflow",
@@ -744,6 +776,8 @@ async def predict(request: PredictRequest):
 
             # For clustering, predict returns cluster assignment
             cluster_id = int(model.predict(X_scaled)[0])
+            PREDICTIONS_TOTAL.labels(project=project_name, source="mlflow").inc()
+            PREDICTION_DURATION_SECONDS.labels(project=project_name).observe(time.time() - predict_start)
             return {
                 "cluster_id": cluster_id,
                 "model_source": "mlflow",
@@ -759,6 +793,7 @@ async def predict(request: PredictRequest):
         print(f"Error making prediction: {e}")
         import traceback
         traceback.print_exc()
+        PREDICTION_ERRORS_TOTAL.labels(project=project_name).inc()
         raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
 
 
@@ -1367,9 +1402,11 @@ def _sync_generate_yellowbrick_plot(
     cached_image = _check_visualization_artifact(run_id, artifact_path)
     if cached_image is not None:
         print(f"MLflow artifact cache HIT: {artifact_path} (run_id={run_id[:8]}...)")
+        VISUALIZATION_CACHE_HITS_TOTAL.labels(viz_type="yellowbrick").inc()
         return cached_image, run_id, True
 
     print(f"MLflow artifact cache MISS: {artifact_path} (run_id={run_id[:8]}...) - generating...")
+    viz_start = time.time()
 
     # Load training data from MLflow artifacts (from selected or best run)
     result = load_training_data_from_mlflow(project_name, run_id=run_id)
@@ -1475,6 +1512,7 @@ def _sync_generate_yellowbrick_plot(
             image_bytes = fig_buf.getvalue()
             # Save to MLflow artifacts for future requests
             _save_artifact(run_id, artifact_path, image_bytes)
+            VISUALIZATION_DURATION_SECONDS.labels(viz_type="yellowbrick").observe(time.time() - viz_start)
             return image_bytes, run_id, False
 
         raise ValueError("Failed to generate visualization")
@@ -1520,9 +1558,11 @@ def _sync_generate_sklearn_plot(
     cached_image = _check_visualization_artifact(run_id, artifact_path)
     if cached_image is not None:
         print(f"MLflow artifact cache HIT: {artifact_path} (run_id={run_id[:8]}...)")
+        VISUALIZATION_CACHE_HITS_TOTAL.labels(viz_type="sklearn").inc()
         return cached_image, run_id, True
 
     print(f"MLflow artifact cache MISS: {artifact_path} (run_id={run_id[:8]}...) - generating...")
+    viz_start = time.time()
 
     result = load_training_data_from_mlflow(project_name, run_id=run_id)
     if result is None:
@@ -1591,6 +1631,7 @@ def _sync_generate_sklearn_plot(
         fig_buf.seek(0)
         image_bytes = fig_buf.getvalue()
         _save_artifact(run_id, artifact_path, image_bytes)
+        VISUALIZATION_DURATION_SECONDS.labels(viz_type="sklearn").observe(time.time() - viz_start)
         return image_bytes, run_id, False
     finally:
         plt.clf()
@@ -1627,9 +1668,11 @@ def _sync_generate_scikitplot_plot(
     cached_image = _check_visualization_artifact(run_id, artifact_path)
     if cached_image is not None:
         print(f"MLflow artifact cache HIT: {artifact_path} (run_id={run_id[:8]}...)")
+        VISUALIZATION_CACHE_HITS_TOTAL.labels(viz_type="scikitplot").inc()
         return cached_image, run_id, True
 
     print(f"MLflow artifact cache MISS: {artifact_path} (run_id={run_id[:8]}...) - generating...")
+    viz_start = time.time()
 
     result = load_training_data_from_mlflow(project_name, run_id=run_id)
     if result is None:
@@ -1660,6 +1703,7 @@ def _sync_generate_scikitplot_plot(
         fig_buf.seek(0)
         image_bytes = fig_buf.getvalue()
         _save_artifact(run_id, artifact_path, image_bytes)
+        VISUALIZATION_DURATION_SECONDS.labels(viz_type="scikitplot").observe(time.time() - viz_start)
         return image_bytes, run_id, False
     finally:
         plt.clf()

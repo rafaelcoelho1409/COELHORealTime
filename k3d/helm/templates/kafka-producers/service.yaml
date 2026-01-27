@@ -1,0 +1,12 @@
+{{- $appName := "kafka-producers" -}}
+{{- $appConfig := index $.Values $appName }}
+{{- if $appConfig.enabled }}
+apiVersion: v1
+{{- include "coelho-realtime.ServiceSettings" (dict "appName" $appName "root" .) | nindent 0 }}
+  ports:
+    - name: metrics
+      port: {{ $appConfig.metricsPort }}
+      targetPort: {{ $appConfig.metricsPort }}
+      protocol: TCP
+  type: ClusterIP
+{{- end }}

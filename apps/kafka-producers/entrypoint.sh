@@ -4,6 +4,10 @@
 
 set -e
 
+# Set up Prometheus multiprocess directory
+export PROMETHEUS_MULTIPROC_DIR=$(mktemp -d)
+echo "Prometheus multiprocess dir: ${PROMETHEUS_MULTIPROC_DIR}"
+
 # Get Kafka host from environment variable (set by Helm ConfigMap)
 KAFKA_BOOTSTRAP="${KAFKA_HOST:-coelho-realtime-kafka}:9092"
 
@@ -13,7 +17,10 @@ while ! nc -z ${KAFKA_HOST:-coelho-realtime-kafka} 9092; do
   sleep 5
 done
 
-echo "Kafka is ready. Starting Python producers..."
+echo "Kafka is ready. Starting metrics server and Python producers..."
+
+# Start Prometheus metrics server (multiprocess collector on port 8000)
+PYTHONUNBUFFERED=1 python3 metrics_server.py 2>&1 &
 
 # Start Python producers with unbuffered output
 # Using PYTHONUNBUFFERED=1 ensures print statements appear immediately

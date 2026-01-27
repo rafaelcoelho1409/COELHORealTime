@@ -11,6 +11,11 @@ import os
 import math
 import pandas as pd
 
+from metrics import (
+    SQL_QUERY_DURATION_SECONDS,
+    SQL_ROWS_RETURNED,
+    SQL_ERRORS_TOTAL,
+)
 from models import SQLQueryRequest, TableSchemaRequest
 from config import (
     DELTA_PATHS,
@@ -83,6 +88,7 @@ def _validate_query(query: str) -> None:
     ]
     for keyword in blocked_keywords:
         if query_upper.startswith(keyword) or f" {keyword} " in query_upper:
+            SQL_ERRORS_TOTAL.labels(error_type="validation").inc()
             raise ValueError(f"Operation '{keyword}' is not allowed. Only SELECT queries are permitted.")
 
 
@@ -130,6 +136,9 @@ def execute_delta_sql_duckdb(project_name: str, query: str, limit: int = SQL_DEF
             for _, row in result.iterrows():
                 records.append({col: clean_value(row[col]) for col in result.columns})
 
+            SQL_QUERY_DURATION_SECONDS.observe(time.time() - start_time)
+            SQL_ROWS_RETURNED.observe(len(result))
+
             return {
                 "columns": result.columns.tolist(),
                 "data": records,
@@ -142,7 +151,9 @@ def execute_delta_sql_duckdb(project_name: str, query: str, limit: int = SQL_DEF
             # Retry on connection-related errors
             if attempt == 0 and ("connection" in error_str or "closed" in error_str or "invalid" in error_str):
                 print(f"[SQL] Connection error, retrying with fresh connection: {e}")
+                SQL_ERRORS_TOTAL.labels(error_type="connection").inc()
                 continue
+            SQL_ERRORS_TOTAL.labels(error_type="execution").inc()
             return {"error": str(e)}
 
     return {"error": "Failed after retry"}

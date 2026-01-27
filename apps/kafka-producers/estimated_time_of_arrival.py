@@ -10,6 +10,16 @@ import math # Needed for Haversine distance
 import os
 from pprint import pprint
 
+from metrics import (
+    MESSAGES_SENT_TOTAL,
+    ERRORS_TOTAL,
+    SEND_DURATION_SECONDS,
+    MESSAGE_SIZE_BYTES,
+    CONNECTED,
+    CONNECTION_RETRIES_TOTAL,
+    LAST_MESSAGE_TIMESTAMP,
+)
+
 
 KAFKA_HOST = os.environ["KAFKA_HOST"]
 KAFKA_TOPIC = 'estimated_time_of_arrival' # Changed topic name
@@ -60,12 +70,15 @@ def create_producer():
             print("Checking Kafka metadata availability...")
             producer.partitions_for(KAFKA_TOPIC)
             print("Kafka Producer connected and ready!")
+            CONNECTED.labels(producer="eta").set(1)
             return producer
         except Exception as e:
             retry_count += 1
+            CONNECTION_RETRIES_TOTAL.labels(producer="eta").inc()
             print(f"Error connecting to Kafka (attempt {retry_count}/{max_retries}): {e}")
             print("Retrying in 10 seconds...")
             time.sleep(10)
+    CONNECTED.labels(producer="eta").set(0)
     raise Exception(f"Failed to connect to Kafka after {max_retries} attempts")
 
 def generate_eta_event(
@@ -203,7 +216,17 @@ def run_producer(
                 bad_weather_probability,
                 incident_probability
             )
-            producer.send(KAFKA_TOPIC, value = eta_event)
+            send_start = time.time()
+            msg_bytes = orjson.dumps(eta_event)
+            try:
+                producer.send(KAFKA_TOPIC, value=eta_event)
+                SEND_DURATION_SECONDS.labels(topic=KAFKA_TOPIC).observe(time.time() - send_start)
+                MESSAGE_SIZE_BYTES.labels(topic=KAFKA_TOPIC).observe(len(msg_bytes))
+                MESSAGES_SENT_TOTAL.labels(topic=KAFKA_TOPIC, producer="eta").inc()
+                LAST_MESSAGE_TIMESTAMP.labels(producer="eta").set(time.time())
+            except Exception as e:
+                ERRORS_TOTAL.labels(topic=KAFKA_TOPIC, producer="eta", error_type="send").inc()
+                print(f"Error sending message: {e}")
             message_count += 1
             # Print sample every 60 seconds
             current_time = time.time()
@@ -216,6 +239,7 @@ def run_producer(
     except KeyboardInterrupt:
         print("Stopping producer.")
     finally:
+        CONNECTED.labels(producer="eta").set(0)
         if producer:
             producer.flush() # Ensure all messages are sent
             producer.close()

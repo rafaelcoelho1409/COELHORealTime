@@ -6,5 +6,12 @@ apiVersion: apps/v1
 spec:
   replicas: {{ $appConfig.replicas }}
 {{- include "coelho-realtime.DeploymentSpecSettings" (dict "appName" $appName "root" .) | nindent 2 }}
+          ports:
+            - name: metrics
+              containerPort: {{ $appConfig.metricsPort }}
+              protocol: TCP
+          env:
+            - name: PROMETHEUS_MULTIPROC_DIR
+              value: /tmp/prometheus_multiproc
 {{- include "coelho-realtime.DeploymentResources" (dict "appName" $appName "root" .) | nindent 10 }}
 {{- end }}

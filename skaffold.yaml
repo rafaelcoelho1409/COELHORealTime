@@ -95,8 +95,8 @@ portForward:
   - resourceType: service
     resourceName: coelho-realtime-fastapi
     namespace: coelho-realtime
-    port: 8001
-    localPort: 8001
+    port: 8000
+    localPort: 8000
     address: 0.0.0.0
   # SvelteKit (primary frontend)
   - resourceType: service
@@ -112,12 +112,12 @@ portForward:
     port: 9090
     localPort: 9090
     address: 0.0.0.0
-  # Grafana (port 3001 to avoid conflict on port 3000)
+  # Grafana
   - resourceType: service
     resourceName: coelho-realtime-grafana
     namespace: coelho-realtime
-    port: 3001
-    localPort: 3001
+    port: 3000
+    localPort: 3000
     address: 0.0.0.0
   # Alertmanager (port 9094 to avoid conflict with Kafka controller, name truncated)
   - resourceType: service
@@ -197,4 +197,4 @@ profiles:
 # Install it via your package manager (e.g., `sudo pacman -S docker-buildx` on Arch Linux).
 
 # DON'T USE MULTI-STAGE DOCKER BUILD - Skaffold won't work fine, will always rebuild images every code change
-# sh mirror_localhost_tailscale.sh 7443 5001 5173 9000 9001 8001 9090 3001 9094 9092 4040
+# sh mirror_localhost_tailscale.sh 7443 5001 5173 9000 9001 8000 9090 3000 9094 9092 4040

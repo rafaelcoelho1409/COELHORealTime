@@ -8,6 +8,7 @@ dependencies = [
     "Faker",
     "click",
     "orjson",
+    "prometheus-client",
 ]
 
 [build-system]

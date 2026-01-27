@@ -130,7 +130,7 @@
 			icon: Server,
 			color: 'text-slate-300',
 			bgColor: 'bg-slate-500/10',
-			href: 'http://localhost:8001/docs'
+			href: 'http://localhost:8000/docs'
 		},
 		{
 			name: 'MinIO Object Storage',
@@ -154,7 +154,7 @@
 			icon: PanelTop,
 			color: 'text-amber-300',
 			bgColor: 'bg-amber-300/10',
-			href: 'http://localhost:3001'
+			href: 'http://localhost:3000'
 		},
 		{
 			name: 'Alertmanager',

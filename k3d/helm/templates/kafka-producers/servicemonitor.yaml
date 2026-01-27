@@ -1,0 +1,20 @@
+{{- $appName := "kafka-producers" -}}
+{{- $appConfig := index $.Values $appName }}
+{{- if $appConfig.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: coelho-realtime-{{ $appName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: coelho-realtime-{{ $appName }}
+    release: {{ .Release.Name }}
+spec:
+  selector:
+    matchLabels:
+      app: coelho-realtime-{{ $appName }}
+  endpoints:
+    - port: metrics
+      interval: 15s
+      path: /metrics
+{{- end }}

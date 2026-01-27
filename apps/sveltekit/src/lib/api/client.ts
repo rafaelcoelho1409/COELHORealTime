@@ -2,8 +2,8 @@ import type { ApiResponse } from '$types';
 
 // Base URL for FastAPI backend
 const BASE_URL = typeof window !== 'undefined'
-	? (import.meta.env.PUBLIC_FASTAPI_URL || 'http://localhost:8001')
-	: 'http://localhost:8001';
+	? (import.meta.env.PUBLIC_FASTAPI_URL || 'http://localhost:8000')
+	: 'http://localhost:8000';
 
 // API Router prefixes
 export const API = {

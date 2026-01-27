@@ -113,5 +113,33 @@ metadata:
 data:
   spark-streaming.json: |
 {{ .Files.Get "files/grafana/dashboards/spark-streaming.json" | indent 4 }}
+---
+# ConfigMap for FastAPI Detailed Application Dashboard
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-grafana-dashboard-fastapi-detailed
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: grafana
+    release: {{ .Release.Name }}
+    grafana_dashboard: "1"
+data:
+  fastapi-detailed.json: |
+{{ .Files.Get "files/grafana/dashboards/fastapi-detailed.json" | indent 4 }}
+---
+# ConfigMap for Kafka Producers Dashboard
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-grafana-dashboard-kafka-producers
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: grafana
+    release: {{ .Release.Name }}
+    grafana_dashboard: "1"
+data:
+  kafka-producers.json: |
+{{ .Files.Get "files/grafana/dashboards/kafka-producers.json" | indent 4 }}
 {{- end }}
 {{- end }}

@@ -135,6 +135,44 @@
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Total CPU usage across all pods in the coelho-realtime namespace",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 2 }, { "color": "red", "value": 4 }] },
+          "unit": "short",
+          "decimals": 2
+        }
+      },
+      "gridPos": { "h": 4, "w": 12, "x": 0, "y": 5 },
+      "id": 14,
+      "options": { "colorMode": "background_solid", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
+      "title": "Total CPU Usage (cores)",
+      "type": "stat",
+      "targets": [{ "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"coelho-realtime\", container!=\"\", container!=\"POD\"}[5m]))", "legendFormat": "All Services", "refId": "A" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Total memory usage across all pods in the coelho-realtime namespace",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 4294967296 }, { "color": "red", "value": 8589934592 }] },
+          "unit": "bytes",
+          "decimals": 1
+        }
+      },
+      "gridPos": { "h": 4, "w": 12, "x": 12, "y": 5 },
+      "id": 15,
+      "options": { "colorMode": "background_solid", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
+      "title": "Total Memory Usage",
+      "type": "stat",
+      "targets": [{ "expr": "sum(container_memory_working_set_bytes{namespace=\"coelho-realtime\", container!=\"\", container!=\"POD\"})", "legendFormat": "All Services", "refId": "A" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
@@ -144,7 +182,7 @@
           "unit": "percentunit"
         }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
       "id": 7,
       "options": { "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "title": "CPU Usage by Pod",
@@ -162,7 +200,7 @@
           "unit": "bytes"
         }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
       "id": 8,
       "options": { "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "title": "Memory Usage by Pod",
@@ -170,7 +208,7 @@
       "targets": [{ "expr": "sum(container_memory_working_set_bytes{namespace=\"coelho-realtime\", container!=\"\", container!=\"POD\"}) by (pod)", "legendFormat": "{{ pod }}", "refId": "A" }]
     },
     {
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 13 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 },
       "id": 102,
       "title": "Network & Storage",
       "type": "row"
@@ -186,7 +224,7 @@
           "unit": "Bps"
         }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
       "id": 9,
       "options": { "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "title": "Network I/O by Pod",
@@ -208,7 +246,7 @@
           "unit": "percentunit"
         }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
       "id": 10,
       "options": { "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showThresholdLabels": false, "showThresholdMarkers": true },
       "title": "PVC Usage",
@@ -216,7 +254,7 @@
       "targets": [{ "expr": "kubelet_volume_stats_used_bytes{namespace=\"coelho-realtime\"} / kubelet_volume_stats_capacity_bytes{namespace=\"coelho-realtime\"}", "legendFormat": "{{ persistentvolumeclaim }}", "refId": "A" }]
     },
     {
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 },
       "id": 103,
       "title": "Pod Status",
       "type": "row"
@@ -230,7 +268,7 @@
           "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 3 }] }
         }
       },
-      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 23 },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 27 },
       "id": 11,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
       "title": "Pod Restarts (Last 24h)",
@@ -246,7 +284,7 @@
           "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
         }
       },
-      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 23 },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 27 },
       "id": 12,
       "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
       "title": "Running Pods",
@@ -262,7 +300,7 @@
           "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
         }
       },
-      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 23 },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 27 },
       "id": 13,
       "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
       "title": "Failed Pods",
