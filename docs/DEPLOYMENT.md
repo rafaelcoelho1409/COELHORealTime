@@ -1,6 +1,6 @@
 # COELHO RealTime - Deployment Guide
 
-Complete guide for deploying the COELHO RealTime application using GitLab CI/CD and ArgoCD.
+Complete guide for deploying the COELHO RealTime MLOps platform using GitLab CI/CD and ArgoCD.
 
 ## Architecture Overview
 
@@ -19,7 +19,16 @@ Developer → GitLab → GitLab CI → GitLab Registry → ArgoCD → Kubernetes
 
 ## Prerequisites
 
-### Required
+### System Requirements
+
+| Component | Requirement |
+|-----------|-------------|
+| **OS** | Ubuntu 24.04 LTS (or similar Linux) |
+| **RAM** | 32 GB minimum |
+| **CPU** | 8+ cores recommended |
+| **Storage** | 100+ GB free space |
+
+### Required Services
 - [x] Kubernetes cluster (k3d/k3s/k8s)
 - [x] GitLab installed in `gitlab` namespace
 - [x] ArgoCD installed in `argocd` namespace
@@ -36,6 +45,36 @@ kubectl get pods -n gitlab
 # Check ArgoCD
 kubectl get pods -n argocd
 ```
+
+---
+
+## Project Structure
+
+```
+COELHORealTime/
+├── apps/
+│   ├── fastapi/           # FastAPI backend (39 endpoints, 3 routers)
+│   ├── kafka_producers/   # Kafka data producers
+│   └── sveltekit/         # SvelteKit frontend
+├── k3d/
+│   ├── helm/              # Helm umbrella chart
+│   │   ├── Chart.yaml     # 7 dependencies
+│   │   ├── values.yaml
+│   │   └── templates/
+│   └── argocd/
+│       └── application.yaml
+├── scripts/
+│   └── setup/
+└── skaffold.yaml
+```
+
+### Docker Images Built
+
+| Image | Description |
+|-------|-------------|
+| `coelho-realtime-fastapi` | FastAPI backend with 39 endpoints |
+| `coelho-realtime-kafka-producers` | Kafka data generators for 3 ML use cases |
+| `coelho-realtime-sveltekit` | SvelteKit frontend dashboard |
 
 ---
 
@@ -57,7 +96,7 @@ This creates the necessary namespace and registry credentials:
 ### Step 2: Deploy ArgoCD Application
 
 ```bash
-kubectl apply -f argocd_k3d/application.yaml
+kubectl apply -f k3d/argocd/application.yaml
 ```
 
 This tells ArgoCD to watch your Git repository and auto-deploy changes.
@@ -82,8 +121,11 @@ skaffold dev
 
 **Access:**
 - FastAPI: http://localhost:8000
+- FastAPI Docs: http://localhost:8000/docs
 - MLflow: http://localhost:5000
-- Streamlit: http://localhost:8501
+- SvelteKit: http://localhost:3000
+- Grafana: http://localhost:3001
+- Prometheus: http://localhost:9090
 
 ### Production Deployment (GitLab CI + ArgoCD)
 
@@ -96,10 +138,42 @@ git push origin master
 ```
 
 **Automated Pipeline:**
-1. **Build Stage**: Builds 4 Docker images (FastAPI, Kafka, MLflow, Streamlit)
-2. **Update Manifest**: Updates `helm_k3d/values.yaml` with new image tags
+1. **Build Stage**: Builds 3 Docker images (FastAPI, Kafka Producers, SvelteKit)
+2. **Update Manifest**: Updates `k3d/helm/values.yaml` with new image tags
 3. **Git Push**: Commits changes with `[skip ci]` (prevents infinite loop)
 4. **ArgoCD Sync**: Detects Git change and deploys automatically
+
+---
+
+## Helm Dependencies
+
+The umbrella chart includes these dependencies:
+
+| Dependency | Version | Description |
+|------------|---------|-------------|
+| kafka | 31.0.0 | Apache Kafka (KRaft mode) |
+| spark | 9.2.11 | Apache Spark for streaming |
+| minio | 14.8.2 | S3-compatible storage for MLflow |
+| mlflow | 2.2.0 | ML experiment tracking |
+| redis | 20.2.1 | Caching for sub-ms inference |
+| postgresql | 16.2.5 | Metadata storage |
+| kube-prometheus-stack | 65.2.0 | Prometheus + Grafana |
+
+---
+
+## ML Use Cases
+
+The platform runs 3 concurrent ML pipelines:
+
+| Use Case | Type | Model | Key Metric |
+|----------|------|-------|------------|
+| **TFD** | Classification | River ML + CatBoost | F-Beta (β=2.0) |
+| **ETA** | Regression | River ML + CatBoost | RMSE |
+| **ECCI** | Clustering | River ML + KMeans | Silhouette Score |
+
+**Learning Paradigm:**
+- **Real-time**: River ML incremental learning from Kafka streams
+- **Batch**: CatBoost/Scikit-Learn on Delta Lake data
 
 ---
 
@@ -143,13 +217,51 @@ kubectl get pods -n coelho-realtime
 
 ---
 
-## Environment Configuration
+## Observability Stack
 
-The application uses environment-based configuration:
+### Prometheus Metrics
+
+The platform exposes **50+ custom Prometheus metrics**:
+
+| Category | Examples |
+|----------|----------|
+| API | `fastapi_requests_total`, `fastapi_request_duration_seconds` |
+| ML Models | `ml_predictions_total`, `ml_inference_latency_seconds` |
+| Kafka | `kafka_messages_produced_total`, `kafka_consumer_lag` |
+| Business | `fraud_detected_total`, `delivery_prediction_accuracy` |
+
+### Grafana Dashboards
+
+**11 pre-configured dashboards:**
+
+1. FastAPI Overview
+2. ML Models Performance
+3. Kafka Streaming
+4. TFD Pipeline (Fraud Detection)
+5. ETA Pipeline (Delivery Prediction)
+6. ECCI Pipeline (Customer Segmentation)
+7. Redis Cache Performance
+8. MLflow Experiments
+9. System Resources
+10. Alerting Overview
+11. Business Metrics
+
+### Alerting Rules
+
+**30+ alerting rules** covering:
+- High API latency (>500ms)
+- Model prediction errors
+- Kafka consumer lag
+- Resource exhaustion
+- Service downtime
+
+---
+
+## Environment Configuration
 
 ### Local (Skaffold)
 ```yaml
-# helm_k3d/values.yaml
+# k3d/helm/values.yaml
 environment: local
 ```
 - Images: `coelho-realtime-fastapi` (no registry)
@@ -158,7 +270,7 @@ environment: local
 
 ### Production (ArgoCD)
 ```yaml
-# argocd_k3d/application.yaml
+# k3d/argocd/application.yaml
 helm:
   parameters:
     - name: environment
@@ -226,16 +338,8 @@ kubectl get application coelho-realtime -n argocd
 kubectl patch application coelho-realtime -n argocd --type merge -p '{"operation":{"initiatedBy":{"username":"admin"},"sync":{"syncStrategy":{"hook":{}}}}}'
 
 # Or use ArgoCD UI
-open http://localhost:8080 # (adjust port for your setup)
+open http://localhost:8080
 ```
-
-### Git Push Creates Infinite Loop
-
-**Should not happen** - the pipeline uses `[skip ci]` to prevent this.
-
-**If it happens:**
-- Check commit messages contain `[skip ci]`
-- Verify `.gitlab-ci.yml` line 73: `git commit -m "... [skip ci]"`
 
 ---
 
@@ -250,15 +354,14 @@ kubectl port-forward -n coelho-realtime svc/coelho-realtime-fastapi-service 8000
 # MLflow
 kubectl port-forward -n coelho-realtime svc/coelho-realtime-mlflow-service 5000:5000
 
-# Streamlit
-kubectl port-forward -n coelho-realtime svc/coelho-realtime-streamlit-service 8501:8501
-```
+# SvelteKit
+kubectl port-forward -n coelho-realtime svc/coelho-realtime-sveltekit-service 3000:3000
 
-### Via LoadBalancer (Production)
+# Grafana
+kubectl port-forward -n coelho-realtime svc/coelho-realtime-grafana 3001:80
 
-Check service external IPs:
-```bash
-kubectl get svc -n coelho-realtime
+# Prometheus
+kubectl port-forward -n coelho-realtime svc/coelho-realtime-prometheus 9090:9090
 ```
 
 ---
@@ -271,7 +374,7 @@ kubectl get svc -n coelho-realtime
 # Get history
 kubectl get application coelho-realtime -n argocd -o yaml
 
-# Rollback to previous version via UI or CLI
+# Rollback via ArgoCD UI or CLI
 # ArgoCD maintains full deployment history
 ```
 
@@ -299,13 +402,6 @@ kubectl delete application coelho-realtime -n argocd
 kubectl delete namespace coelho-realtime
 ```
 
-### Remove Setup
-
-```bash
-# Just remove secrets (keep namespace)
-kubectl delete secret gitlab-registry-secret -n coelho-realtime
-```
-
 ---
 
 ## CI/CD Pipeline Details
@@ -315,13 +411,13 @@ kubectl delete secret gitlab-registry-secret -n coelho-realtime
 1. **build**
    - Image: `docker:24-cli`
    - Service: `docker:24-dind`
-   - Builds 4 images
+   - Builds 3 images (FastAPI, Kafka Producers, SvelteKit)
    - Pushes to GitLab Registry
    - Only runs on `master` branch
 
 2. **update-manifest**
    - Image: `alpine:latest`
-   - Updates `helm_k3d/values.yaml`
+   - Updates `k3d/helm/values.yaml`
    - Commits with `[skip ci]`
    - Triggers ArgoCD sync
 
@@ -334,19 +430,15 @@ kubectl delete secret gitlab-registry-secret -n coelho-realtime
 
 ---
 
-## Security Notes
+## References
 
-- Registry credentials stored as Kubernetes secret
-- Secrets are namespace-scoped
-- CI uses temporary tokens (not permanent passwords)
-- For production: Consider using deploy tokens instead of root password
+- **Setup Scripts**: `scripts/setup/`
+- **Helm Chart**: `k3d/helm/`
+- **ArgoCD App**: `k3d/argocd/application.yaml`
+- **CI Pipeline**: `.gitlab-ci.yml`
+- **Skaffold Config**: `skaffold.yaml`
+- **Portfolio Page**: https://rafaelcoelho1409.github.io/projects/COELHORealTime
 
 ---
 
-## References
-
-- **Setup Scripts**: `scripts/setup/README.md`
-- **Helm Chart**: `helm_k3d/`
-- **ArgoCD App**: `argocd_k3d/application.yaml`
-- **CI Pipeline**: `.gitlab-ci.yml`
-- **Skaffold Config**: `skaffold.yaml`
+*Last updated: 2026-01-28*
