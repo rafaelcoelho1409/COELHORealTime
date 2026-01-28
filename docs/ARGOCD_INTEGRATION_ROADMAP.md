@@ -1,58 +1,72 @@
-# ArgoCD Integration Roadmap
+# ArgoCD Integration - Implementation Guide
 
-## 1. Global ArgoCD vs Per-Project ArgoCD
+## Status: IMPLEMENTED
 
-### Recommendation: Global ArgoCD Instance
-
-**Pros of global ArgoCD:**
-- Single control plane for all your projects (COELHORealTime and future ones)
-- Centralized RBAC, policies, and monitoring
-- Lower resource overhead (one ArgoCD instance vs many)
-- Better for learning and experimentation with multi-project/multi-cluster patterns
-- Easier to implement cross-project dependencies if needed
-- Your local GitLab can serve multiple projects to one ArgoCD
-
-**When per-project ArgoCD makes sense:**
-- Large enterprise with strict project isolation requirements
-- Different teams with completely separate infrastructure
-- Projects on completely different clusters with no shared management
-
-**Implementation:** Deploy ArgoCD in a dedicated management namespace (like `argocd` or `platform`) and use ArgoCD's Application and AppProject resources to manage different projects.
+This document describes the ArgoCD GitOps integration for COELHO RealTime, which is now fully operational.
 
 ---
 
-## 2. ArgoCD Integration Strategy
+## Architecture Decision: Global ArgoCD Instance
 
-### Project Structure
+**Chosen Approach**: Global ArgoCD instance managing multiple projects
+
+**Benefits:**
+- Single control plane for all projects
+- Centralized RBAC, policies, and monitoring
+- Lower resource overhead
+- Better for multi-project patterns
+- GitLab serves multiple projects to one ArgoCD
+
+---
+
+## Project Structure (Current)
 
 ```
 COELHORealTime/
-├── helm_k3d/              # Your existing Helm chart
-├── argocd/                # NEW: ArgoCD manifests
-│   └── application.yaml   # ArgoCD Application definition
-└── skaffold.yaml          # Keep for dev workflow
+├── apps/
+│   ├── fastapi/           # 39 endpoints, 3 routers
+│   ├── kafka_producers/   # Data generators for TFD, ETA, ECCI
+│   └── sveltekit/         # Frontend dashboard
+├── k3d/
+│   ├── helm/              # Helm umbrella chart
+│   │   ├── Chart.yaml     # 7 dependencies
+│   │   ├── values.yaml    # Image tags updated by CI
+│   │   └── templates/     # Custom K8s resources
+│   └── argocd/
+│       └── application.yaml  # ArgoCD Application definition
+├── scripts/
+│   └── setup/
+├── skaffold.yaml          # Local development
+└── .gitlab-ci.yml         # CI/CD pipeline
 ```
 
-### ArgoCD Application Manifest
+---
+
+## ArgoCD Application Manifest
+
+**Location**: `k3d/argocd/application.yaml`
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: coelho-realtime
-  namespace: argocd  # Where ArgoCD is installed
+  namespace: argocd
 spec:
   project: default
   source:
-    repoURL: http://your-gitlab-url/your-repo.git
-    targetRevision: HEAD  # or specific branch like 'main'
-    path: helm_k3d
+    repoURL: http://gitlab-webservice-default.gitlab.svc.cluster.local/public-projects/COELHORealTime.git
+    targetRevision: HEAD
+    path: k3d/helm
     helm:
       valueFiles:
         - values.yaml
+      parameters:
+        - name: environment
+          value: production
   destination:
     server: https://kubernetes.default.svc
-    namespace: coelho
+    namespace: coelho-realtime
   syncPolicy:
     automated:
       prune: true
@@ -61,149 +75,244 @@ spec:
       - CreateNamespace=true
 ```
 
-### Commands to Use
-
-```bash
-# Development (no ArgoCD, fast iteration)
-skaffold dev
-
-# Production-like (with ArgoCD)
-kubectl apply -f argocd/application.yaml
-
-# Check status
-kubectl get applications -n argocd
-argocd app get coelho-realtime
-```
-
-**Visibility:** You'll see it in both Rancher (as regular k8s resources in `coelho` namespace) and ArgoCD UI (application health/sync status).
-
 ---
 
-## 3. GitLab CI + ArgoCD + Skaffold Integration
+## GitLab CI + ArgoCD Workflow
 
-### Recommended Workflow
+### Complete Pipeline Flow
 
-**Development (local):** `skaffold dev` - Direct deployment, fast feedback
+```
+┌─────────────────┐
+│  Developer      │  → Code changes pushed to GitLab
+└─────────────────┘
+        ↓
+┌─────────────────┐
+│  GitLab CI      │  → Builds 3 Docker images:
+│  (build stage)  │     - coelho-realtime-fastapi
+│                 │     - coelho-realtime-kafka-producers
+│                 │     - coelho-realtime-sveltekit
+└─────────────────┘
+        ↓
+┌─────────────────┐
+│  GitLab CI      │  → Updates k3d/helm/values.yaml
+│  (update-       │     with new image tags (commit SHA)
+│   manifest)     │  → Commits with [skip ci]
+└─────────────────┘
+        ↓
+┌─────────────────┐
+│  ArgoCD         │  → Detects Git change
+│                 │  → Syncs Helm chart to cluster
+│                 │  → Reports status in UI
+└─────────────────┘
+        ↓
+┌─────────────────┐
+│  Kubernetes     │  → New pods deployed
+│                 │  → Old pods terminated
+│                 │  → Zero-downtime rollout
+└─────────────────┘
+```
 
-**Production:** GitLab CI builds → pushes images → ArgoCD syncs → deploys
+### GitLab CI Pipeline Stages
 
-### GitLab CI Structure
-
-Create `.gitlab-ci.yml`:
-
+**Stage 1: Build**
 ```yaml
-stages:
-  - build
-  - deploy
-
-variables:
-  REGISTRY: registry.gitlab.com/your-namespace/coelho-realtime
-### 4. Terraform in Depth
-
-- [ ] Terraform vs. CloudFormation vs. Helm
-- [ ] Terraform modules and reuse
-- [ ] Terraform state and locking
-- [ ] Terraform best practices and gotchas
-
 build:
   stage: build
+  image: docker:24-cli
+  services:
+    - docker:24-dind
   script:
-    # Build and push images to GitLab registry
-    - docker build -t $REGISTRY/fastapi:$CI_COMMIT_SHA ./apps/fastapi -f ./apps/fastapi/Dockerfile.fastapi
-    - docker push $REGISTRY/fastapi:$CI_COMMIT_SHA
-
-    - docker build -t $REGISTRY/kafka:$CI_COMMIT_SHA ./apps/kafka -f ./apps/kafka/Dockerfile.kafka
-    - docker push $REGISTRY/kafka:$CI_COMMIT_SHA
-
-    - docker build -t $REGISTRY/mlflow:$CI_COMMIT_SHA ./apps/mlflow -f ./apps/mlflow/Dockerfile.mlflow
-    - docker push $REGISTRY/mlflow:$CI_COMMIT_SHA
-
-    - docker build -t $REGISTRY/streamlit:$CI_COMMIT_SHA ./apps/streamlit -f ./apps/streamlit/Dockerfile.streamlit
-    - docker push $REGISTRY/streamlit:$CI_COMMIT_SHA
+    - docker build -t $REGISTRY/fastapi:$CI_COMMIT_SHA ./apps/fastapi
+    - docker build -t $REGISTRY/kafka-producers:$CI_COMMIT_SHA ./apps/kafka_producers
+    - docker build -t $REGISTRY/sveltekit:$CI_COMMIT_SHA ./apps/sveltekit
+    - docker push ...
   only:
-    - main
-    - develop
-
-deploy:
-  stage: deploy
-  script:
-    # Update Helm values or use kustomize to update image tags
-    - |
-      kubectl patch application coelho-realtime -n argocd \
-        --type merge \
-        -p '{"spec":{"source":{"helm":{"parameters":[
-          {"name":"fastapi.image","value":"'$REGISTRY/fastapi:$CI_COMMIT_SHA'"},
-          {"name":"kafka.image","value":"'$REGISTRY/kafka:$CI_COMMIT_SHA'"},
-          {"name":"mlflow.image","value":"'$REGISTRY/mlflow:$CI_COMMIT_SHA'"},
-          {"name":"streamlit.image","value":"'$REGISTRY/streamlit:$CI_COMMIT_SHA'"}
-        ]}}}}'
-    # Or use ArgoCD CLI
-    - argocd app sync coelho-realtime
-  only:
-    - main
+    - master
 ```
 
-### ArgoCD + Skaffold Integration
-
-**Can you integrate ArgoCD with Skaffold?**
-
-Yes, but it's typically not recommended because they serve different purposes:
-- **Skaffold**: Dev-time tool for rapid iteration (build, deploy, tail logs, sync files)
-- **ArgoCD**: GitOps tool for production declarative deployment
-
-However, you can use Skaffold to render manifests that ArgoCD deploys:
+**Stage 2: Update Manifest**
 ```yaml
-# skaffold.yaml can have a 'render' profile
-profiles:
-  - name: render
-    build:
-      artifacts: [...]
-    deploy:
-      kubectl: {}
+update-manifest:
+  stage: update-manifest
+  image: alpine:latest
+  script:
+    - sed -i "s/tag:.*/tag: $CI_COMMIT_SHA/" k3d/helm/values.yaml
+    - git commit -m "Update image tags to $CI_COMMIT_SHA [skip ci]"
+    - git push
+  only:
+    - master
 ```
-
-Then: `skaffold render > rendered.yaml` and commit to Git for ArgoCD.
-
-### Complete Workflow Diagram
-
-```
-┌─────────────────┐
-│  Development    │  → skaffold dev (direct to k3d)
-└─────────────────┘
-
-┌─────────────────┐
-│  Git Push       │  → GitLab CI builds images
-└─────────────────┘
-        ↓
-┌─────────────────┐
-│  GitLab CI      │  → Pushes to registry, updates Git
-└─────────────────┘
-        ↓
-┌─────────────────┐
-│  ArgoCD         │  → Detects Git change, syncs to cluster
-└─────────────────┘
-        ↓
-┌─────────────────┐
-│  Production     │  → Running in cluster (k3d/prod)
-└─────────────────┘
-```
-
-**Summary:** Use Skaffold for development, GitLab CI + ArgoCD for production simulation.
 
 ---
 
-## Next Steps
+## Development vs Production Workflow
 
-1. Install ArgoCD in your k3d cluster
-2. Create `argocd/` directory with Application manifest
-3. Create `.gitlab-ci.yml` for CI/CD pipeline
-4. Configure GitLab registry access
-5. Test the complete workflow
+### Local Development (Skaffold)
+
+```bash
+skaffold dev
+```
+
+- Direct deployment to k3d cluster
+- Fast iteration (hot-reload)
+- No GitLab CI involved
+- No ArgoCD involved
+- Images built locally
+
+### Production (GitLab CI + ArgoCD)
+
+```bash
+git add .
+git commit -m "Feature: add new endpoint"
+git push origin master
+```
+
+- GitLab CI builds images
+- Pushes to GitLab Registry
+- Updates values.yaml
+- ArgoCD syncs automatically
+- Zero-downtime deployment
+
+---
+
+## Commands Reference
+
+### ArgoCD Status
+
+```bash
+# Check application status
+kubectl get application coelho-realtime -n argocd
+
+# Watch sync progress
+kubectl get application coelho-realtime -n argocd -w
+
+# Detailed info
+kubectl describe application coelho-realtime -n argocd
+
+# Force sync
+argocd app sync coelho-realtime
+```
+
+### ArgoCD UI Access
+
+```bash
+# Port forward to ArgoCD UI
+kubectl port-forward svc/argocd-server -n argocd 8080:443
+
+# Get admin password
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+```
+
+### Application Deployment
+
+```bash
+# Initial deployment
+kubectl apply -f k3d/argocd/application.yaml
+
+# Check application in ArgoCD
+argocd app get coelho-realtime
+
+# Manual sync (if auto-sync disabled)
+argocd app sync coelho-realtime
+```
+
+---
+
+## Helm Dependencies Managed by ArgoCD
+
+When ArgoCD syncs, it deploys these Helm dependencies:
+
+| Dependency | Version | Namespace |
+|------------|---------|-----------|
+| kafka | 31.0.0 | coelho-realtime |
+| spark | 9.2.11 | coelho-realtime |
+| minio | 14.8.2 | coelho-realtime |
+| mlflow | 2.2.0 | coelho-realtime |
+| redis | 20.2.1 | coelho-realtime |
+| postgresql | 16.2.5 | coelho-realtime |
+| kube-prometheus-stack | 65.2.0 | coelho-realtime |
+
+Plus custom templates for:
+- FastAPI Deployment + Service
+- Kafka Producers Deployment
+- SvelteKit Deployment + Service
+- Spark Streaming Job
+- ConfigMaps and Secrets
+
+---
+
+## Sync Policies
+
+### Automated Sync
+```yaml
+syncPolicy:
+  automated:
+    prune: true      # Delete resources removed from Git
+    selfHeal: true   # Revert manual changes in cluster
+```
+
+### Sync Options
+```yaml
+syncOptions:
+  - CreateNamespace=true  # Create namespace if not exists
+```
+
+---
+
+## Troubleshooting
+
+### Application OutOfSync
+
+```bash
+# Check sync status
+argocd app get coelho-realtime
+
+# Check sync diff
+argocd app diff coelho-realtime
+
+# Force sync
+argocd app sync coelho-realtime --force
+```
+
+### Helm Rendering Issues
+
+```bash
+# Test Helm locally
+helm template coelho-realtime k3d/helm/ --debug
+
+# Check ArgoCD logs
+kubectl logs -n argocd -l app.kubernetes.io/name=argocd-repo-server
+```
+
+### GitLab Connection Issues
+
+```bash
+# Test GitLab access from ArgoCD
+kubectl exec -n argocd -it <argocd-repo-server-pod> -- \
+  git ls-remote http://gitlab-webservice-default.gitlab.svc.cluster.local/public-projects/COELHORealTime.git
+```
+
+---
+
+## Security Considerations
+
+- ArgoCD uses cluster-internal GitLab URL
+- Registry credentials stored as Kubernetes Secret
+- Secrets are namespace-scoped
+- CI uses temporary tokens (not permanent passwords)
+- RBAC configured for application namespaces
 
 ---
 
 ## References
 
-- ArgoCD Documentation: https://argo-cd.readthedocs.io/
-- Skaffold Documentation: https://skaffold.dev/
-- GitLab CI/CD: https://docs.gitlab.com/ee/ci/
+- **ArgoCD Docs**: https://argo-cd.readthedocs.io/
+- **Helm Chart**: `k3d/helm/`
+- **ArgoCD Manifest**: `k3d/argocd/application.yaml`
+- **GitLab CI**: `.gitlab-ci.yml`
+- **Deployment Guide**: `docs/DEPLOYMENT.md`
+
+---
+
+*Implementation Complete: January 2026*
+*Last Updated: 2026-01-28*
