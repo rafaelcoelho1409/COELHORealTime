@@ -637,11 +637,3 @@ COELHORealTime/
 This project builds upon the infrastructure patterns established in [**K3D**](https://github.com/rafaelcoelho1409/K3D) — a Terraform-based local Kubernetes cluster with integrated DevOps tooling (ArgoCD, GitLab, Rancher, LocalStack). COELHO RealTime extends that foundation with a full MLOps application layer, adding real-time machine learning, data streaming, experiment tracking, and production-grade observability.
 
 ---
-
-<div align="center">
-
-**[SvelteKit Frontend](http://localhost:5173)** | **[FastAPI Docs](http://localhost:8000/docs)** | **[MLflow UI](http://localhost:5001)** | **[Grafana](http://localhost:3000)** | **[Prometheus](http://localhost:9090)**
-
-Built with Python 3.13 | Node 22+ | Kubernetes | Helm 3
-
-</div>
